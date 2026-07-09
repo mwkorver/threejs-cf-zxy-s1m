@@ -31,6 +31,10 @@ tiles end-to-end.
 cd tiler && pip install -e ".[dev]" && pytest
 uvicorn tiler.app:app --reload   # local dev server
 
+# inspect real tiles for any CONUS location (needs AWS creds):
+# writes a self-contained swipe-comparison page (imagery vs S1M hillshade)
+python scripts/preview.py 40.48 -74.66 15 --layer naip --year 2023
+
 # client
 cd client && npm install && npm test
 npm run dev

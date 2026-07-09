@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tile inspector</title>
+<style>
+  :root{
+    --paper:#e9edf1; --surface:#ffffff; --ink:#141b23; --ink-soft:#4a5763;
+    --line:#c9d2db; --line-soft:#dde3ea;
+    --terrain:#0f7d68; --imagery:#b0602a;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --paper:#0d131a; --surface:#161f29; --ink:#e7edf3; --ink-soft:#9aa8b6;
+      --line:#2a3742; --line-soft:#212d38; --terrain:#3bb89c; --imagery:#e0925a; }
+  }
+  :root[data-theme="dark"]{ --paper:#0d131a; --surface:#161f29; --ink:#e7edf3; --ink-soft:#9aa8b6;
+    --line:#2a3742; --line-soft:#212d38; --terrain:#3bb89c; --imagery:#e0925a; }
+  :root[data-theme="light"]{ --paper:#e9edf1; --surface:#ffffff; --ink:#141b23; --ink-soft:#4a5763;
+    --line:#c9d2db; --line-soft:#dde3ea; --terrain:#0f7d68; --imagery:#b0602a; }
+
+  html,body{margin:0; background:var(--paper);}
+  *{box-sizing:border-box}
+  .wrap{font-family:var(--ui); color:var(--ink); max-width:860px; margin:0 auto; padding:28px 22px 40px;}
+  .eyebrow{font-family:var(--mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--ink-soft); display:flex; gap:10px; align-items:center;}
+  .eyebrow::before{content:""; width:22px; height:1px; background:var(--line);}
+  h1{font-size:26px; font-weight:600; line-height:1.2; margin:12px 0 6px; text-wrap:balance;}
+  .sub{color:var(--ink-soft); font-size:15px; line-height:1.6; margin:0 0 22px; max-width:60ch;}
+  code{font-family:var(--mono);}
+
+  .legend{display:flex; gap:18px; flex-wrap:wrap; font-family:var(--mono); font-size:12.5px; margin-bottom:14px;}
+  .legend span{display:inline-flex; align-items:center; gap:7px; color:var(--ink-soft);}
+  .dot{width:10px; height:10px; border-radius:2px;}
+
+  .stage{position:relative; width:100%; aspect-ratio:1/1; border:1px solid var(--line);
+    border-radius:10px; overflow:hidden; user-select:none; touch-action:none; background:var(--surface);}
+  .stage img{position:absolute; inset:0; width:100%; height:100%; display:block; -webkit-user-drag:none;}
+  .layerA{z-index:1}
+  .layerB{z-index:2; clip-path:inset(0 0 0 50%);}
+  .divider{position:absolute; top:0; bottom:0; left:50%; z-index:4; width:2px; background:var(--surface);
+    box-shadow:0 0 0 1px rgba(0,0,0,.25); transform:translateX(-1px); cursor:ew-resize;}
+  .handle{position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:34px; height:34px;
+    border-radius:50%; background:var(--surface); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; color:var(--ink-soft); font-size:15px;}
+  .tag{position:absolute; top:12px; z-index:5; font-family:var(--mono); font-size:11.5px; letter-spacing:.03em;
+    padding:5px 9px; border-radius:5px; color:#fff; font-weight:500;}
+  .tagA{left:12px; background:var(--imagery);}
+  .tagB{right:12px; background:var(--terrain);}
+  .grid{position:absolute; inset:0; z-index:3; pointer-events:none; opacity:0; transition:opacity .15s;}
+  .grid.on{opacity:1;}
+  .grid i{position:absolute; background:rgba(255,255,255,.55); mix-blend-mode:difference;}
+  .grid .v{top:0; bottom:0; width:1px;} .grid .h{left:0; right:0; height:1px;}
+
+  .controls{display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin:14px 0 26px;
+    font-family:var(--mono); font-size:13px; color:var(--ink-soft);}
+  .toggle{display:inline-flex; align-items:center; gap:8px; cursor:pointer;}
+  .toggle input{appearance:none; width:34px; height:19px; border-radius:10px; background:var(--line);
+    position:relative; cursor:pointer; transition:background .15s; flex:none;}
+  .toggle input:checked{background:var(--terrain);}
+  .toggle input::after{content:""; position:absolute; top:2px; left:2px; width:15px; height:15px; border-radius:50%;
+    background:#fff; transition:transform .15s;}
+  .toggle input:checked::after{transform:translateX(15px);}
+  .toggle input:focus-visible{outline:2px solid var(--terrain); outline-offset:2px;}
+
+  .meta{border-top:1px solid var(--line); display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));}
+  .cell{padding:16px 18px 16px 0; border-right:1px solid var(--line-soft);}
+  .cell:last-child{border-right:none;}
+  .k{font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px;}
+  .val{font-family:var(--mono); font-size:14px; line-height:1.5; color:var(--ink); font-variant-numeric:tabular-nums;}
+  .val em{font-style:normal; color:var(--ink-soft);}
+  .foot{margin-top:22px; font-size:13px; line-height:1.65; color:var(--ink-soft);}
+  .foot code{font-size:12px; background:var(--surface); border:1px solid var(--line-soft);
+    padding:1px 5px; border-radius:4px; color:var(--ink);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">tile inspector</div>
+  <h1>Same quadtree, two layers</h1>
+  <p class="sub">A __GRID__&times;__GRID__ block of adjacent server tiles at zoom __Z__, generated by the tiler from
+  real sources. Drag the divider: left is aerial imagery, right is the S1M elevation tile hillshaded. Both ride the
+  identical <code>z/x/y</code> grid, so they register pixel-for-pixel and adjacent tiles show no seam.</p>
+
+  <div class="legend">
+    <span><i class="dot" style="background:var(--imagery)"></i>Imagery &mdash; __LAYER__ __YEAR__</span>
+    <span><i class="dot" style="background:var(--terrain)"></i>Terrain &mdash; S1M 1&nbsp;m DEM, hillshaded</span>
+  </div>
+
+  <div class="stage" id="stage">
+    <span class="tag tagA">__LAYER__ imagery</span>
+    <span class="tag tagB">S1M terrain</span>
+    <img class="layerA" src="__IMG__" alt="aerial imagery mosaic">
+    <img class="layerB" id="top" src="__HS__" alt="S1M terrain hillshade mosaic">
+    <div class="grid" id="grid"></div>
+    <div class="divider" id="divider"><div class="handle">&#8596;</div></div>
+  </div>
+
+  <div class="controls">
+    <label class="toggle"><input type="checkbox" id="gridToggle"> tile boundaries (__GRID__&times;__GRID__)</label>
+    <span>drag anywhere on the image to compare</span>
+  </div>
+
+  <div class="meta">
+    <div class="cell"><div class="k">Location</div><div class="val">__LAT__&deg; __LON__&deg;</div></div>
+    <div class="cell"><div class="k">Tiles</div><div class="val">z__Z__ &middot; __NTILE__/layer<br><em>x __XR__</em><br><em>y __YR__</em></div></div>
+    <div class="cell"><div class="k">Imagery</div><div class="val">__LAYER__ __YEAR__<br><em>WebP q75</em></div></div>
+    <div class="cell"><div class="k">Terrain</div><div class="val">Terrarium RGB<br><em>lossless WebP</em><br><em>__ELEV__</em></div></div>
+  </div>
+
+  <p class="foot">The hillshade is computed from the tile's <em>decoded</em> Terrarium elevation (sun from the NW,
+  45&deg;) &mdash; proof the round-trip <code>S1M COG &rarr; warp &rarr; Terrarium encode &rarr; decode</code>
+  preserves real 1&nbsp;m relief. Both layers are 512&nbsp;px, vanilla registration &mdash; no overlap ring; the
+  client hides tile edges with skirts.</p>
+</div>
+
+<script>
+(function(){
+  var stage=document.getElementById('stage'), top=document.getElementById('top'),
+      div=document.getElementById('divider'), grid=document.getElementById('grid'),
+      toggle=document.getElementById('gridToggle'), n=__GRID__, dragging=false;
+  for(var i=1;i<n;i++){
+    var p=(100*i/n)+'%';
+    var v=document.createElement('i'); v.className='v'; v.style.left=p; grid.appendChild(v);
+    var h=document.createElement('i'); h.className='h'; h.style.top=p; grid.appendChild(h);
+  }
+  function setPct(p){ p=Math.max(0,Math.min(100,p)); top.style.clipPath='inset(0 0 0 '+p+'%)'; div.style.left=p+'%'; }
+  function fromEvent(e){ var r=stage.getBoundingClientRect(), x=(e.touches?e.touches[0].clientX:e.clientX);
+    setPct(((x-r.left)/r.width)*100); }
+  stage.addEventListener('pointerdown',function(e){ dragging=true; stage.setPointerCapture(e.pointerId); fromEvent(e); });
+  stage.addEventListener('pointermove',function(e){ if(dragging) fromEvent(e); });
+  stage.addEventListener('pointerup',function(){ dragging=false; });
+  toggle.addEventListener('change',function(){ grid.classList.toggle('on',toggle.checked); });
+  setPct(50);
+})();
+</script>
+</body>
+</html>
