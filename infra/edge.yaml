@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  flight-sim edge: one CloudFront distribution, path-routed behaviors
+  (plan §3). Phase 0 step 2 scope: /imagery/* and /terrain/* -> tiler
+  Function URL via OAC. Static behaviors (/buildings/*, pre-genned pyramid)
+  come with Phase 1/2.
+
+Parameters:
+  TilerFunctionUrlDomain:
+    Type: String
+    Description: Host of the tiler Function URL (xxxx.lambda-url.us-west-2.on.aws, no scheme)
+  TilerFunctionArn:
+    Type: String
+    Description: Tiler Lambda ARN (for the invoke permission)
+
+Resources:
+  # Path-only cache keys: no query strings, no cookies, no headers
+  # (plan §4.1 — this is why year/layer live in the path).
+  TileCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: flight-sim-tiles-path-only
+        # Origin sends Cache-Control: immutable; these are just guardrails.
+        DefaultTTL: 86400
+        MinTTL: 60
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: false # tiles are already compressed
+          EnableAcceptEncodingGzip: false
+          CookiesConfig: { CookieBehavior: none }
+          HeadersConfig: { HeaderBehavior: none }
+          QueryStringsConfig: { QueryStringBehavior: none }
+
+  TilerOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: flight-sim-tiler-oac
+        OriginAccessControlOriginType: lambda
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Lets CloudFront (and only this distribution) invoke the IAM-auth
+  # Function URL.
+  TilerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TilerFunctionArn
+      Action: lambda:InvokeFunctionUrl
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: flight-sim tiles (plan §3)
+        HttpVersion: http2and3 # multiplexing matters for tile storms (§5.3)
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: tiler
+            DomainName: !Ref TilerFunctionUrlDomain
+            OriginAccessControlId: !GetAtt TilerOAC.Id
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+            # TODO(Phase 2): OriginShield here is the second cold-latency
+            # mitigation after the pre-genned pyramid (plan §8).
+        DefaultCacheBehavior: # /imagery/* and /terrain/* are the only paths
+          TargetOriginId: tiler
+          ViewerProtocolPolicy: https-only
+          CachePolicyId: !Ref TileCachePolicy
+          AllowedMethods: [GET, HEAD]
+          Compress: false
+
+Outputs:
+  DistributionDomain:
+    Value: !GetAtt Distribution.DomainName

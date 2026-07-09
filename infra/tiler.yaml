@@ -24,8 +24,8 @@ Resources:
         AuthType: AWS_IAM # CloudFront OAC signs origin requests
       Environment:
         Variables:
-          TILER_LAKE_PATH: "s3://REPLACE-ME/lake/"
-          TILER_S1M_INDEX_PATH: "s3://REPLACE-ME/S1M_Products.parquet"
+          TILER_LAKE_PATH: !Sub "s3://deckgl-s3-cog-s1m-${AWS::AccountId}-us-west2/lake"
+          TILER_S1M_INDEX_PATH: !Sub "s3://deckgl-s3-cog-s1m-${AWS::AccountId}-us-west2/lake/s1m/S1M_Products.parquet"
       Policies:
         - Statement:
             # Requester-pays + public source reads (plan §2 row 10, §7):
@@ -36,7 +36,13 @@ Resources:
                 - "arn:aws:s3:::naip-analytic/*"
                 - "arn:aws:s3:::prd-tnm/*"
                 - "arn:aws:s3:::elevation-tiles-prod/*"
-                - "arn:aws:s3:::REPLACE-ME/*"
+                - !Sub "arn:aws:s3:::deckgl-s3-cog-s1m-${AWS::AccountId}-us-west2/*"
+                # State imagery buckets (public, but explicit beats implicit)
+                - "arn:aws:s3:::njogis-imagery/*"
+            - Effect: Allow
+              Action: ["s3:ListBucket"]
+              Resource:
+                - !Sub "arn:aws:s3:::deckgl-s3-cog-s1m-${AWS::AccountId}-us-west2"
 
 Outputs:
   FunctionUrl:
