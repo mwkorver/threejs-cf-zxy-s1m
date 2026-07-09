@@ -18,6 +18,9 @@ from . import duck
 
 TMS = morecantile.tms.get("WebMercatorQuad")
 
+S1M_BUCKET = "prd-tnm"  # public USGS TNM bucket, anonymous reads
+S1M_EPSG = 6350  # NAD83(2011) Conus Albers
+
 # Mirrors descriptors.REQUESTER_PAYS_BUCKETS in the source repo.
 REQUESTER_PAYS_BUCKETS = {"naip-analytic", "naip-visualization", "naip-stac-catalog"}
 
@@ -81,3 +84,54 @@ class MosaicResolver:
             # No partition for this collection/year -> empty glob -> 404 upstream
             return []
         return [CogAsset(href=r[0], source_bucket=r[1], gsd=r[2]) for r in rows]
+
+
+class S1MResolver:
+    """S1M DEM tile lookup for terrain tiles (plan §4.2).
+
+    Ported from deckgl-s3-cog-s1m's s1m.py. Unlike the imagery lake, the S1M
+    index stores geometry/bbox in EPSG:6350 Albers, so we transform the tile's
+    geographic bounds to an Albers envelope, do the cheap bbox-range prune in
+    DuckDB, then refine with shapely (the index has no ST_Intersects). COGs
+    live in the public prd-tnm bucket (anonymous reads).
+    """
+
+    def __init__(self, index_path: str, region: str = "us-west-2"):
+        self.index_path = index_path
+        self._con = duck.connect(region)
+        from pyproj import Transformer
+
+        self._to_albers = Transformer.from_crs(4326, S1M_EPSG, always_xy=True)
+
+    def resolve(self, z: int, x: int, y: int) -> list[str]:
+        """s3:// hrefs of S1M COGs intersecting tile z/x/y (empty if none)."""
+        b = TMS.bounds(morecantile.Tile(x, y, z))
+        # Transform all 4 corners; Albers isn't axis-aligned to lon/lat so the
+        # envelope over the corners slightly overestimates (admits edge tiles).
+        xs, ys = [], []
+        for lon, lat in [(b.left, b.bottom), (b.right, b.bottom), (b.right, b.top), (b.left, b.top)]:
+            ax, ay = self._to_albers.transform(lon, lat)
+            xs.append(ax)
+            ys.append(ay)
+        axmin, axmax, aymin, aymax = min(xs), max(xs), min(ys), max(ys)
+
+        escaped = self.index_path.replace("'", "''")
+        rows = self._con.execute(
+            f"""
+            SELECT dataset, geometry_wkb
+            FROM read_parquet('{escaped}')
+            WHERE bbox_xmin <= ? AND bbox_xmax >= ?
+              AND bbox_ymin <= ? AND bbox_ymax >= ?
+            """,
+            [axmax, axmin, aymax, aymin],
+        ).fetchall()
+
+        from shapely import from_wkb
+        from shapely.geometry import box
+
+        envelope = box(axmin, aymin, axmax, aymax)
+        hrefs = []
+        for dataset, wkb in rows:
+            if from_wkb(wkb).intersects(envelope):
+                hrefs.append(f"s3://{S1M_BUCKET}/StagedProducts/Elevation/{dataset}")
+        return hrefs

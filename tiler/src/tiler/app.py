@@ -10,8 +10,9 @@ from fastapi import FastAPI, HTTPException, Response
 
 from .imagery import render_imagery_tile
 from .registry import LAYERS
-from .resolver import MosaicResolver
+from .resolver import MosaicResolver, S1MResolver
 from .settings import settings
+from .terrain import render_farfield_tile, render_terrain_tile
 
 app = FastAPI(title="flight-sim tiler", version="0.0.1")
 
@@ -22,6 +23,12 @@ IMMUTABLE = "public, max-age=31536000, immutable"
 def get_resolver() -> MosaicResolver:
     """One resolver (one DuckDB connection) per Lambda container."""
     return MosaicResolver(settings.lake_path, settings.aws_region)
+
+
+@lru_cache(maxsize=1)
+def get_s1m_resolver() -> S1MResolver:
+    """One S1M resolver (DuckDB + Albers transformer) per container."""
+    return S1MResolver(settings.s1m_index_path, settings.aws_region)
 
 
 @app.get("/imagery/{layer}/{year}/{z}/{x}/{y}.webp")
@@ -51,17 +58,22 @@ def imagery_tile(layer: str, year: int, z: int, x: int, y: int) -> Response:
 
 @app.get("/terrain/{z}/{x}/{y}.webp")
 def terrain_tile(z: int, x: int, y: int) -> Response:
-    """512px Terrarium Terrain-RGB tile, lossless WebP (plan §4.2).
+    """512px Terrarium Terrain-RGB tile, lossless WebP (plan §4.2)."""
+    n = 2**z
+    if not (0 <= z and 0 <= x < n and 0 <= y < n):
+        raise HTTPException(404, "tile out of range")
 
-    TODO(Phase 0):
-      - z >= settings.s1m_min_zoom: S1MResolver -> rio_tiler read -> warp ->
-        encoding.encode_terrarium -> lossless WebP. Vanilla registration,
-        no overlap ring — seams are the client's job (skirts).
-      - z < s1m_min_zoom: far-field passthrough — mosaic four 256px
-        elevation-tiles-prod Terrarium PNGs into one 512 (pure pixel copy,
-        same encoding by design, plan §10.5) and recompress lossless WebP.
-    """
-    raise HTTPException(501, "terrain tiler not implemented — Phase 0 step 3")
+    if z >= settings.s1m_min_zoom:
+        hrefs = get_s1m_resolver().resolve(z, x, y)
+        body = render_terrain_tile(hrefs, z, x, y, tilesize=settings.tile_size)
+    else:
+        # Far-field: elevation-tiles-prod passthrough, one endpoint for the
+        # whole planet (plan §4.2, §10.5).
+        body = render_farfield_tile(z, x, y, tilesize=settings.tile_size)
+
+    if body is None:
+        raise HTTPException(404, "no terrain coverage")
+    return Response(body, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})
 
 
 @app.get("/healthz")
