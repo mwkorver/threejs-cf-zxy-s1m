@@ -11,6 +11,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Baked tiles (regenerate with tiler/scripts/bake.py)
+client/public/tiles/
+
 # AWS SAM
 .aws-sam/
 
