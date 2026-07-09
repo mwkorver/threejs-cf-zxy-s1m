@@ -6,12 +6,14 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     model_config = {"env_prefix": "TILER_"}
 
-    # GeoParquet lake = mosaic index (plan §2 row 5, §7). Reused from
-    # deckgl-s3-cog-s1m; point at the same S3 prefix or a local copy.
-    lake_path: str = "s3://REPLACE-ME/lake/"
+    # GeoParquet lake = mosaic index (plan §2 row 5, §7). The deployed lake
+    # from deckgl-s3-cog-s1m (Hive tree: collection=/region=/year=). Point at
+    # a local copy for offline dev.
+    lake_path: str = "s3://deckgl-s3-cog-s1m-495811053987-us-west2/lake"
 
-    # S1M DEM tile lookup (plan §4.2).
-    s1m_index_path: str = "s3://REPLACE-ME/S1M_Products.parquet"
+    # S1M DEM tile lookup (plan §4.2); built by the source repo's
+    # publish-s1m-index.sh. Geometry/bbox are EPSG:6350 Albers.
+    s1m_index_path: str = "s3://deckgl-s3-cog-s1m-495811053987-us-west2/lake/s1m/S1M_Products.parquet"
 
     # Far-field terrain source, Terrarium 256px (plan §2 row 7, §4.2).
     farfield_tiles: str = "s3://elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"

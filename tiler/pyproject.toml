@@ -17,6 +17,8 @@ dev = [
     "pytest>=8",
     "uvicorn>=0.32",
     "httpx>=0.28",           # FastAPI test client
+    "boto3>=1.35",           # duck.py static-secret fallback (local dev)
+    "botocore[crt]>=1.35",   # `aws login` credential provider
 ]
 
 [build-system]
