@@ -10,8 +10,14 @@ import { loadImagery, loadManifest, loadTerrain } from "../../core/tileLoader";
 import type { PathConfig } from "./flightPath";
 
 const BASE = "/tiles";
-export const GRID_STEP = 4; // 128x128 quads/tile — real load for the benchmark
 export const VERTICAL_EXAGGERATION = 4;
+
+// Load knobs, tunable via URL so the benchmark can be pushed past vsync without
+// rebuilds: ?step=2 densifies the mesh (quads/tile = 512/step squared),
+// ?rep=3 tiles the baked block into a rep x rep supergrid (draw-call/fill load).
+const params = new URLSearchParams(typeof location !== "undefined" ? location.search : "");
+export const GRID_STEP = Number(params.get("step") ?? 4);
+export const REPLICATE = Number(params.get("rep") ?? 1);
 
 export interface BlockTile {
   mesh: TerrainMesh;
@@ -57,12 +63,35 @@ export async function loadBlock(): Promise<Block> {
 
   const nx = m.x[1] - m.x[0] + 1;
   const ny = m.y[1] - m.y[0] + 1;
+
+  // Replicate the baked block into a REPLICATE x REPLICATE supergrid to raise
+  // draw-call and fill load. Meshes + imagery are shared by reference; each
+  // engine still creates its own GPU objects, which is the point of the stress.
+  if (REPLICATE > 1) {
+    const base = tiles.slice();
+    tiles.length = 0;
+    for (let i = 0; i < REPLICATE; i++) {
+      for (let j = 0; j < REPLICATE; j++) {
+        for (const t of base) {
+          tiles.push({
+            mesh: t.mesh,
+            imagery: t.imagery,
+            offset: [t.offset[0] + i * nx * tileW, t.offset[1] - j * ny * tileW],
+          });
+        }
+      }
+    }
+  }
+
+  const gx = nx * REPLICATE;
+  const gy = ny * REPLICATE;
   const path: PathConfig = {
-    centerX: (nx / 2) * tileW,
-    centerY: -(ny / 2) * tileW,
-    radius: Math.max(nx, ny) * tileW * 0.9,
+    centerX: (gx / 2) * tileW,
+    centerY: -(gy / 2) * tileW,
+    radius: Math.max(gx, gy) * tileW * 0.9,
     minH: tileW * 0.4,
     maxH: tileW * 2.0,
   };
-  return { tiles, worldAnchor, tileW, path, label: `${m.layer} ${m.year} z${m.z} · ${tiles.length} tiles` };
+  const label = `${m.layer} ${m.year} z${m.z} · ${tiles.length} tiles · step ${GRID_STEP}`;
+  return { tiles, worldAnchor, tileW, path, label };
 }
