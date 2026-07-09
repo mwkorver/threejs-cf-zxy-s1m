@@ -23,28 +23,41 @@ All three share `shared/`: `loadBlock` builds the CPU meshes once (identical
 geometry), `flightPath` is a deterministic camera path, `perf` times frames.
 Run each at `/spike-three.html`, `/spike-deck.html`, `/spike-luma.html`.
 
-## Results (16 baked z14 tiles, gridStep=4, ~13s timed run)
+## Results
 
-| engine | renders? | fps | frame p95 / max | cpu/frame | friction |
-|---|---|---|---|---|---|
-| three.js | yes, first try | 60 | 17.4 / 19.3 ms | 0.3 ms p50 | none — direct BufferGeometry, UV texture, free eye/target camera |
-| deck.gl | yes | 60 | 18.3 / 21.7 ms | not comparable¹ | SimpleMeshLayer mesh format finicky; OrbitView has no free eye/target (bad fit for free flight) |
-| luma.gl | **black²** | 43³ | 25.8 / 71.6 ms | 0.9 ms p50 | most code; duplicate `@luma.gl/core` copies (device≠Model instance); hand-rolled per-tile UBO |
+Tunable load via URL: `?step=N` (mesh density, quads/tile = (512/N)²),
+`?rep=R` (tile the baked block into an R×R supergrid).
 
-¹ deck's `metrics.cpuTime` isn't per-frame ms; can't compare to the timed
-render calls in three/luma. ² geometry didn't appear — dual-luma-core
-packaging bug leaves the draw a no-op. ³ therefore not a real luma perf
-number; it reflects an incomplete spike, not luma's ceiling.
+**Light load — 16 tiles, step 4 (~13s timed run). All three render correctly:**
 
-**Read so far:** 16 tiles is too light to separate the engines on FPS (all
-peg near refresh). The real differentiators are developer friction and camera
-fit. three.js rendered our exact contract (custom skirted mesh + per-tile
-texture on one quadtree + free-fly camera) with the least code and strong
-headroom. deck.gl works but its camera model fights free flight. luma.gl needs
-its packaging + UBO path sorted before it yields a fair number.
+| engine | fps | frame p95 / max | cpu/frame p50 | friction to get here |
+|---|---|---|---|---|
+| three.js | 60 | 17.4 / 19.3 ms | 0.3 ms | none — direct BufferGeometry, UV texture, free eye/target camera |
+| luma.gl | 60 | 17.6 / 28.3 ms | 0.6 ms | most fixes: Vite dedupe of `@luma.gl/core`, batched UBO, and a canvas-size footgun (auto-resized to 16384² → black + fill-bound) |
+| deck.gl | 60 | 18.3 / 21.7 ms | n/a¹ | SimpleMeshLayer mesh format (`{value,size}`); OrbitView has **no free eye/target** — a real mismatch for free flight |
 
-Not yet settled (plan §10.2): a definitive perf ranking needs luma rendering
-and a heavier load (denser mesh / replicated tiles) so FPS drops below refresh.
+¹ deck's `metrics.cpuTime` isn't per-frame ms, so it's not comparable to the
+timed render calls in three/luma.
 
-Add the chosen engine's npm dependency only inside its spike until the
-decision is made.
+**Heavy load (step 2, rep 3–4 = 144–256 tiles): not a clean ranking.** Every
+engine falls off a cliff to ~1 fps once VRAM is exhausted, because the stress
+harness gives each replicated tile its own texture (144–256 unshared textures
+from 16 bitmaps) and GPU memory isn't reclaimed between spike navigations. This
+measures naive resource management, not the engines' draw paths. The real
+lesson: **at scale the bottleneck is GPU resource sharing (texture atlasing /
+instancing), which the LOD manager owns — not the engine.**
+
+## Verdict (plan §10.2)
+
+All three render our exact contract (skirted mesh + per-tile texture on one
+quadtree) at 60 fps with low CPU. The clean differentiators are **friction and
+camera fit**, both favoring three.js:
+
+- **three.js** — least code, native free-fly eye/target camera, ample headroom,
+  tolerated the heaviest clean load best. Pragmatic winner.
+- **luma.gl** — perf-equal to three once its footguns are fixed, and the best
+  WebGPU path, but highest friction and needs disciplined resource management.
+- **deck.gl** — strong at data/layers, but OrbitView actively fights free
+  flight and its CPU cost isn't cleanly measurable; poorest fit for a sim.
+
+Add the chosen engine's npm dependency only inside its spike until settled.

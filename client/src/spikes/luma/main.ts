@@ -17,9 +17,9 @@ import { Bench, mountHud } from "../shared/perf";
 const vs = `#version 300 es
   in vec3 position;
   in vec2 uv;
-  uniform Transform { mat4 uMVP; };
+  uniform Transform { mat4 uMVP; } transform;
   out vec2 vUv;
-  void main() { vUv = uv; gl_Position = uMVP * vec4(position, 1.0); }
+  void main() { vUv = uv; gl_Position = transform.uMVP * vec4(position, 1.0); }
 `;
 
 const fs = `#version 300 es
@@ -32,8 +32,10 @@ const fs = `#version 300 es
 
 async function main() {
   const canvas = document.createElement("canvas");
-  canvas.width = innerWidth;
-  canvas.height = innerHeight;
+  // Must give the canvas a real CSS layout size: luma's CanvasContext sizes
+  // the drawing buffer from clientWidth*dpr, and with no CSS it falls back to
+  // the 16384 max -> a 268MP framebuffer (black + GPU-fill-bound).
+  canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block";
   document.body.appendChild(canvas);
 
   const device = await luma.createDevice({
@@ -43,13 +45,27 @@ async function main() {
   });
 
   const block = await loadBlock();
+  console.log("[spike] ", block.label);
+
+  // One shared uniform buffer for the per-frame MVP, written once per frame.
+  // Per-tile world placement is baked into the vertices on the CPU so every
+  // tile shares one model space (model = identity). This both matches how a
+  // real renderer batches and avoids a UBO write->draw stall on every tile.
+  const ubo = device.createBuffer({ usage: Buffer.UNIFORM | Buffer.COPY_DST, byteLength: 64 });
 
   const models = block.tiles.map((t) => {
+    const src = t.mesh.positions;
+    const world = new Float32Array(src.length);
+    for (let i = 0; i < src.length; i += 3) {
+      world[i] = src[i]! + t.offset[0];
+      world[i + 1] = src[i + 1]! + t.offset[1];
+      world[i + 2] = src[i + 2]! * VERTICAL_EXAGGERATION;
+    }
     const geometry = new Geometry({
       topology: "triangle-list",
       indices: t.mesh.indices,
       attributes: {
-        position: { value: t.mesh.positions, size: 3 },
+        position: { value: world, size: 3 },
         uv: { value: t.mesh.uvs, size: 2 },
       },
     });
@@ -61,16 +77,13 @@ async function main() {
           sampler: { minFilter: "linear", magFilter: "linear" },
         })
       : device.createTexture({ data: new Uint8Array([90, 100, 90, 255]), width: 1, height: 1 });
-    const ubo = device.createBuffer({ usage: Buffer.UNIFORM | Buffer.COPY_DST, byteLength: 64 });
-    const model = new Model(device, {
+    return new Model(device, {
       vs,
       fs,
       geometry,
       bindings: { uTex: texture, Transform: ubo },
       parameters: { depthWriteEnabled: true, depthCompare: "less-equal" },
     });
-    const model4 = new Matrix4().translate([t.offset[0], t.offset[1], 0]).scale([1, 1, VERTICAL_EXAGGERATION]);
-    return { model, model4, ubo };
   });
 
   const proj = new Matrix4();
@@ -91,14 +104,12 @@ async function main() {
     const pose = flightPose(t, block.path);
     proj.perspective({ fovy: (65 * Math.PI) / 180, aspect: canvas.width / canvas.height, near: 1, far: 60000 });
     view.lookAt({ eye: pose.eye, center: pose.target, up: [0, 0, 1] });
+    mvp.copy(proj).multiplyRight(view); // model baked into vertices
 
     const c0 = performance.now();
+    ubo.write(new Float32Array(mvp)); // once per frame
     const rp = device.beginRenderPass({ clearColor: [0.05, 0.075, 0.1, 1], clearDepth: 1 });
-    for (const { model, model4, ubo } of models) {
-      mvp.copy(proj).multiplyRight(view).multiplyRight(model4);
-      ubo.write(new Float32Array(mvp));
-      model.draw(rp);
-    }
+    for (const model of models) model.draw(rp);
     rp.end();
     const cpu = performance.now() - c0;
     bench.sample(cpu, interval, now);

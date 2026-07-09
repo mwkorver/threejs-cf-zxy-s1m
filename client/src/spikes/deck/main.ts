@@ -16,6 +16,7 @@ import { Bench, mountHud } from "../shared/perf";
 
 async function main() {
   const block = await loadBlock();
+  console.log("[spike] ", block.label);
 
   const layers = block.tiles.map(
     (t, i) =>

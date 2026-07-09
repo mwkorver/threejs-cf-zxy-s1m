@@ -29,6 +29,7 @@ addEventListener("resize", () => {
 
 async function main() {
   const block = await loadBlock();
+  console.log("[spike] ", block.label);
   for (const t of block.tiles) {
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.BufferAttribute(t.mesh.positions, 3));
