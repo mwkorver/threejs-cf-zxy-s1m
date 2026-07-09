@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  flight-sim tiler: Lambda container behind a Function URL (Phase 0 step 2).
+  CloudFront (edge.yaml) is the only intended caller; the Function URL is the
+  origin. Depends on foundation stack for the ECR repo.
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: ECR image URI for tiler/Dockerfile
+
+Resources:
+  TilerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      ImageUri: !Ref ImageUri
+      MemorySize: 2048 # warp + WebP encode are CPU-bound; tune in Phase 0 step 5
+      Timeout: 30
+      # Blunts fast-low-pass spikes (plan §8); tune against measured tiles/s.
+      ReservedConcurrentExecutions: 50
+      FunctionUrlConfig:
+        AuthType: AWS_IAM # CloudFront OAC signs origin requests
+      Environment:
+        Variables:
+          TILER_LAKE_PATH: "s3://REPLACE-ME/lake/"
+          TILER_S1M_INDEX_PATH: "s3://REPLACE-ME/S1M_Products.parquet"
+      Policies:
+        - Statement:
+            # Requester-pays + public source reads (plan §2 row 10, §7):
+            # naip-analytic, prd-tnm, elevation-tiles-prod + own lake bucket.
+            - Effect: Allow
+              Action: ["s3:GetObject"]
+              Resource:
+                - "arn:aws:s3:::naip-analytic/*"
+                - "arn:aws:s3:::prd-tnm/*"
+                - "arn:aws:s3:::elevation-tiles-prod/*"
+                - "arn:aws:s3:::REPLACE-ME/*"
+
+Outputs:
+  FunctionUrl:
+    Value: !GetAtt TilerFunctionUrl.FunctionUrl
