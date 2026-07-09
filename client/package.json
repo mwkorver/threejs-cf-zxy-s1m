@@ -10,6 +10,12 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@deck.gl/core": "^9.0.0",
+    "@deck.gl/mesh-layers": "^9.0.0",
+    "@luma.gl/core": "^9.0.0",
+    "@luma.gl/engine": "^9.0.0",
+    "@luma.gl/webgl": "^9.0.0",
+    "@math.gl/core": "^4.0.0",
     "@types/three": "^0.171.0",
     "three": "^0.171.0",
     "typescript": "^5.7.0",
