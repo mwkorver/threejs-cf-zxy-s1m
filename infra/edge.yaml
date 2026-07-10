@@ -74,8 +74,12 @@ Resources:
             OriginAccessControlId: !GetAtt TilerOAC.Id
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
-            # TODO(Phase 2): OriginShield here is the second cold-latency
-            # mitigation after the pre-genned pyramid (plan §8).
+            # All POPs funnel origin misses through one regional cache, so the
+            # tiler sees at most one cold render per tile instead of one per POP
+            # (plan §8). Place it in the origin's region (us-west-2).
+            OriginShield:
+              Enabled: true
+              OriginShieldRegion: us-west-2
         DefaultCacheBehavior: # /imagery/* and /terrain/* are the only paths
           TargetOriginId: tiler
           ViewerProtocolPolicy: https-only
