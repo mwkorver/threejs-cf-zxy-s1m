@@ -48,3 +48,8 @@ Resources:
 Outputs:
   FunctionUrl:
     Value: !GetAtt TilerFunctionUrl.FunctionUrl
+  # Consumed by edge.yaml (pass as TilerFunctionUrlDomain / TilerFunctionArn).
+  FunctionUrlDomain:
+    Value: !Select [2, !Split ["/", !GetAtt TilerFunctionUrl.FunctionUrl]]
+  FunctionArn:
+    Value: !GetAtt TilerFunction.Arn
