@@ -38,10 +38,12 @@ class Layer:
 
 
 LAYERS: dict[str, Layer] = {
-    # 4-band RGBIR, requester-pays. Plan §5.2 says 60 cm-1 m, but the lake
-    # shows 2022+ vintages at 30 cm (verified: nj/2023 gsd=0.3), so maxzoom
-    # keys off that. Older years just stop resolving new detail earlier.
-    "naip": Layer("naip", "naip", min_gsd=0.3, indexes=(1, 2, 3)),
+    # NAIP RGB visualization COGs (3-band uint8, JPEG, requester-pays), keyed to
+    # the manifest-index collection=naip-visualization. Plan §5.2 says 60 cm-1 m,
+    # but the lake shows 2022+ vintages at 30 cm (verified: nj/2023 gsd=0.3), so
+    # maxzoom keys off that; older years resolve less detail. indexes=(1,2,3) =
+    # the RGB bands.
+    "naip-visualization": Layer("naip-visualization", "naip-visualization", min_gsd=0.3, indexes=(1, 2, 3)),
     # NJ statewide, public, ~15 cm, 16-bit samples (registry display.domain).
     "nj-imagery": Layer("nj-imagery", "nj-imagery", min_gsd=0.15, rescale=(0, 65535)),
 }

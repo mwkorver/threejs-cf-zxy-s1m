@@ -66,7 +66,7 @@ def main() -> None:
     ap.add_argument("lat", type=float)
     ap.add_argument("lon", type=float)
     ap.add_argument("zoom", type=int)
-    ap.add_argument("--layer", default="naip", choices=sorted(LAYERS))
+    ap.add_argument("--layer", default="naip-visualization", choices=sorted(LAYERS))
     ap.add_argument("--year", type=int, default=2023)
     ap.add_argument("--grid", type=int, default=3, help="odd N for an NxN block centered on the point")
     ap.add_argument("--out", type=Path, default=Path("tile_preview.html"))

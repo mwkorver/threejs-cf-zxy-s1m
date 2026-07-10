@@ -25,29 +25,24 @@ Resources:
         AuthType: AWS_IAM # CloudFront OAC signs origin requests
       Environment:
         Variables:
-          TILER_LAKE_PATH: !Sub "s3://deckgl-s3-cog-s1m-${AWS::AccountId}-us-west2/lake"
-          TILER_S1M_INDEX_PATH: !Sub "s3://deckgl-s3-cog-s1m-${AWS::AccountId}-us-west2/lake/s1m/S1M_Products.parquet"
+          TILER_LAKE_PATH: "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index"
+          TILER_S1M_INDEX_PATH: "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index/s1m/S1M_Products.parquet"
       Policies:
         - Statement:
-            # Requester-pays + public source reads (plan §2 row 10, §7):
-            # naip-analytic, prd-tnm, elevation-tiles-prod + own lake bucket.
-            # TODO: when lake_path moves to s3://deckgl-cf-xyz-s1m-us-west-2
-            # (manifest-index/), add "arn:aws:s3:::deckgl-cf-xyz-s1m-us-west-2/*"
-            # to GetObject and the bare bucket ARN to ListBucket below — the
-            # tiler can't read the new lake without it.
+            # Signed source reads (plan §2 row 10, §7). Requester-pays is scoped
+            # per-asset in imagery.py to the buckets that need it.
             - Effect: Allow
               Action: ["s3:GetObject"]
               Resource:
-                - "arn:aws:s3:::naip-analytic/*"
-                - "arn:aws:s3:::prd-tnm/*"
-                - "arn:aws:s3:::elevation-tiles-prod/*"
-                - !Sub "arn:aws:s3:::deckgl-s3-cog-s1m-${AWS::AccountId}-us-west2/*"
-                # State imagery buckets (public, but explicit beats implicit)
-                - "arn:aws:s3:::njogis-imagery/*"
+                - "arn:aws:s3:::naip-visualization/*"    # NAIP RGB COGs (requester-pays)
+                - "arn:aws:s3:::prd-tnm/*"               # S1M terrain COGs
+                - "arn:aws:s3:::elevation-tiles-prod/*"  # far-field terrain
+                - "arn:aws:s3:::njogis-imagery/*"        # NJ state imagery
+                - "arn:aws:s3:::deckgl-cf-xyz-s1m-us-west-2/*"  # own lake (manifest-index)
             - Effect: Allow
               Action: ["s3:ListBucket"]
               Resource:
-                - !Sub "arn:aws:s3:::deckgl-s3-cog-s1m-${AWS::AccountId}-us-west2"
+                - "arn:aws:s3:::deckgl-cf-xyz-s1m-us-west-2"
 
 Outputs:
   FunctionUrl:
