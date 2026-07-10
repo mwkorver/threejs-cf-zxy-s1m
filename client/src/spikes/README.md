@@ -1,29 +1,24 @@
-# Engine spikes (plan §10.2 — the last open question)
+# Engine spike (plan §10.2 — **settled: three.js**, 2026-07-09)
 
-Throwaway prototypes to settle deck.gl custom layers vs bare luma.gl vs
-three.js. Same task for each candidate, against the same live tile endpoints
-(they're engine-agnostic by design):
+deck.gl, luma.gl, and three.js were each spiked against the same baked NJ
+tiles and a shared benchmark. **three.js won**; the deck.gl and luma.gl spikes
+have been removed. This directory keeps the winner (`three/`) as the reference
+for the real renderer, plus the shared harness and the results below.
 
-1. Fetch a real `/terrain/z/x/y.webp`, decode Terrarium, build a gridded mesh
-   with skirts (`core/terrainMesh.ts`).
-2. Drape the matching `/imagery/naip/{year}/z/x/y.webp` as a texture
-   (same key = same tile, zero runtime projection).
-3. Free-fly camera over a few dozen tiles; watch frame time and how much the
-   engine fights custom mesh generation and LOD traversal control.
+The task each spike ran:
+
+1. Load the baked block, build a gridded mesh with skirts (`core/terrainMesh`).
+2. Drape the matching imagery tile as a texture (same key = same tile, zero
+   runtime projection).
+3. Free-fly camera over the block; measure frame time and how much the engine
+   fights custom mesh generation and camera control.
 
 Everything in `src/core/` stays engine-agnostic — spikes import from core,
-never the reverse. Losers get deleted; the winner's knowledge moves into a
-real renderer module.
+never the reverse. `three/` runs at `/spike-three.html`. It shares `shared/`:
+`loadBlock` builds the CPU meshes once, `flightPath` is a deterministic camera
+path, `perf` times frames (all reusable for on-going three.js dev).
 
-- `three/` — three.js (biggest ecosystem, mature controls)
-- `deck/` — deck.gl SimpleMeshLayer + OrbitView (closest to existing repo)
-- `luma/` — bare luma.gl v9 (most control, WebGPU headroom)
-
-All three share `shared/`: `loadBlock` builds the CPU meshes once (identical
-geometry), `flightPath` is a deterministic camera path, `perf` times frames.
-Run each at `/spike-three.html`, `/spike-deck.html`, `/spike-luma.html`.
-
-## Results
+## Results (recorded for the decision)
 
 Tunable load via URL: `?step=N` (mesh density, quads/tile = (512/N)²),
 `?rep=R` (tile the baked block into an R×R supergrid).
@@ -60,4 +55,5 @@ camera fit**, both favoring three.js:
 - **deck.gl** — strong at data/layers, but OrbitView actively fights free
   flight and its CPU cost isn't cleanly measurable; poorest fit for a sim.
 
-Add the chosen engine's npm dependency only inside its spike until settled.
+Next: promote `three/main.ts` into a real renderer module (LOD manager, the
+GPU resource sharing the heavy-load test showed we'll need, velocity prefetch).

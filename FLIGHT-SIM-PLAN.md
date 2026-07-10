@@ -39,7 +39,7 @@ universal contract**:
 | 6 | Terrain payload | **Terrain-RGB (Terrarium-style) raster tiles from S1M**, quantized-mesh deferred | One pipeline with imagery (same tiler, same quadtree); client meshes regular grids (simpler than the current drape mesher). Revisit quantized-mesh only if client meshing shows up in profiles |
 | 7 | Far-field terrain | **AWS Open Data `s3://elevation-tiles-prod` (Mapzen Terrarium)** | Already tiled in exactly this scheme, global, free; S1M kicks in below a screen-space-error threshold |
 | 8 | Buildings | **Overture → tippecanoe → PMTiles on S3 + CloudFront** | Fully static, zero servers, range-read friendly, zoom-graded simplification for free |
-| 9 | Rendering engine | **Custom deck.gl/luma.gl (or three.js) — not CesiumJS** | See §6. Cesium = globe engine overhead for pre-aligned tiles; custom pipeline keeps the GPU raster/mesh control and velocity prefetch. Backend stays engine-agnostic so Cesium remains a fallback consumer |
+| 9 | Rendering engine | **three.js — not CesiumJS** (settled §10.2, 2026-07-09) | See §6. Cesium = globe engine overhead for pre-aligned tiles; custom pipeline keeps the GPU raster/mesh control and velocity prefetch. three won the Phase 0 spike (least friction, native free-fly camera); luma.gl kept as WebGPU fallback. Backend stays engine-agnostic so Cesium/luma remain fallback consumers |
 | 10 | Region | **us-west-2** | Same as sources (`naip-analytic` etc.); requester-pays reads become same-region GET pennies |
 
 ## 3. Architecture
@@ -184,9 +184,10 @@ global constant.
   the main reason for a custom LOD manager.
 - HTTP/2/3 multiplexing via CloudFront; no signing round-trips.
 
-## 6. Engine decision (deck.gl/custom vs CesiumJS)
+## 6. Engine decision (custom renderer vs CesiumJS)
 
-Chosen: **custom deck.gl/luma.gl (or three.js) renderer**. Reasons recorded:
+Chosen: **three.js** (settled §10.2 after the Phase 0 spike; luma.gl kept as
+the WebGPU fallback path). Reasons recorded for going custom over Cesium:
 
 - Cesium runs planet-scale machinery per frame (ellipsoid traversal,
   atmosphere, ECEF double-precision camera) that a pre-aligned flat world
@@ -242,8 +243,8 @@ with `nj-imagery` upgrade waiting in Phase 1 — with server tiles end-to-end.
 
 1. New repo skeleton: `tiler/` (Python, thin rio-tiler service on Lambda
    container — §10.4),
-   `client/` (TS, deck.gl custom layers), `infra/` (SAM/CFN, reuse foundation
-   pattern), `PLAN.md` (this file).
+   `client/` (TS, three.js renderer — §10.2), `infra/` (SAM/CFN, reuse
+   foundation pattern), `PLAN.md` (this file).
 2. Imagery tiler: lake-backed mosaic resolver → `/imagery/naip/{year}/z/x/y.webp`
    (NJ, latest vintage in the lake),
    Lambda Function URL origin behind CloudFront, path-immutable caching.
@@ -283,8 +284,19 @@ corridor with no visible tile starvation on a warm CDN.
 
 1. ~~Terrain tile grid~~ **Settled 2026-07-08**: vanilla 512×512, standard
    registration; client builds skirts at mesh time (see §4.2).
-2. deck.gl custom layers vs bare luma.gl vs three.js — spike both render paths
-   against the same tile endpoints early (they're engine-agnostic by design).
+2. ~~deck.gl vs luma.gl vs three.js~~ **Settled 2026-07-09**: **three.js**.
+   All three were spiked against the same baked NJ tiles + a shared benchmark
+   (`client/src/spikes/`, results in its README). All render the tile contract
+   at 60 fps with low CPU; the clean differentiators were friction and camera
+   fit. three.js: rendered first try, 81 LOC, native free-fly eye/target
+   camera, ships frustum culling / raycasting / materials we'll need next.
+   luma.gl: perf-equal but took ~5 fixes to render (Vite core-dedupe, UBO
+   binding, a 16384² canvas footgun) and hand-rolls everything — kept as the
+   WebGPU fallback path (Phase 3). deck.gl: `OrbitView` has no free eye/target
+   camera (a real mismatch for free flight). Heavy-load runs (144–256 tiles)
+   only hit a uniform VRAM cliff — a resource-management artifact (unshared
+   per-tile textures), owned by the LOD manager, not the engine. Losing spikes
+   removed.
 3. ~~Phase 0 corridor~~ **Settled 2026-07-08**: New Jersey on **NAIP** —
    the most representative source (requester-pays, CONUS-wide pattern) —
    with `nj-imagery` (~15 cm) as the Phase 1 second layer over the same
