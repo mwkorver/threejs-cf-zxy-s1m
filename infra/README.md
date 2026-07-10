@@ -8,7 +8,7 @@ etc., so requester-pays reads are same-region GET pennies — plan §2 row 10).
 |---|---|---|
 | `foundation.yaml` | ECR repo, tile/static S3 bucket, shared IAM | TODO — port foundation pattern from existing repo |
 | `tiler.yaml` | Lambda container (arm64) + IAM-auth Function URL | **deployed** (`flight-sim-tiler`, us-west-2); SAM builds + pushes the image to a managed ECR repo |
-| `edge.yaml` | One CloudFront distribution, path-routed behaviors (§3): `/imagery/*` + `/terrain/*` → Function URL origin, `/buildings/*` + static pyramid → S3 origin | TODO — Phase 0 step 2 |
+| `edge.yaml` | One CloudFront distribution: tiler Function URL origin via OAC, path-only immutable cache policy. `/buildings/*` + static pyramid → S3 origin come in Phase 1/2 | **deployed** (`flight-sim-edge`); tiles served unsigned over HTTPS, warm CDN hits ~0.1s |
 
 ## Deploying the tiler
 
@@ -31,6 +31,27 @@ Runtime gotchas baked into the code (all Lambda-specific, worked locally):
 - `terrain.py` reads far-field `elevation-tiles-prod` (us-east-1) via `/vsicurl/` over the global
   endpoint — the us-west-2 Lambda otherwise gets a 301 GDAL won't follow.
 - No `ReservedConcurrentExecutions`: this account's total concurrency limit is 10.
+
+## Deploying the edge (CloudFront)
+
+```sh
+# params come from the tiler stack outputs (FunctionUrlDomain, FunctionArn)
+DOMAIN=$(aws cloudformation describe-stacks --stack-name flight-sim-tiler --region us-west-2 \
+  --query "Stacks[0].Outputs[?OutputKey=='FunctionUrlDomain'].OutputValue" --output text)
+ARN=$(aws cloudformation describe-stacks --stack-name flight-sim-tiler --region us-west-2 \
+  --query "Stacks[0].Outputs[?OutputKey=='FunctionArn'].OutputValue" --output text)
+aws cloudformation deploy --template-file infra/edge.yaml --stack-name flight-sim-edge \
+  --region us-west-2 --capabilities CAPABILITY_IAM \
+  --parameter-overrides "TilerFunctionUrlDomain=$DOMAIN" "TilerFunctionArn=$ARN"
+```
+
+Then tiles are public over unsigned HTTPS at
+`https://<DistributionDomain>/terrain/{z}/{x}/{y}.webp` etc.
+
+OAC gotcha (cost an afternoon): CloudFront OAC → an `AWS_IAM` Function URL needs
+the role granted **both** `lambda:InvokeFunctionUrl` **and** `lambda:InvokeFunction`
+for `cloudfront.amazonaws.com`. With only the former, every request 403s
+`{"Message":"Forbidden"}` at the Function URL — edge.yaml grants both.
 
 Cache policy notes (plan §4.1, §8):
 - Path-only cache keys — **no query strings anywhere**.

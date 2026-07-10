@@ -41,13 +41,22 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
-  # Lets CloudFront (and only this distribution) invoke the IAM-auth
-  # Function URL.
-  TilerInvokePermission:
+  # Lets CloudFront (and only this distribution) invoke the IAM-auth Function
+  # URL. AWS requires BOTH InvokeFunctionUrl and InvokeFunction for OAC —
+  # granting only the former returns 403 Forbidden at the Function URL.
+  TilerInvokeUrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref TilerFunctionArn
       Action: lambda:InvokeFunctionUrl
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  TilerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TilerFunctionArn
+      Action: lambda:InvokeFunction
       Principal: cloudfront.amazonaws.com
       SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
 
