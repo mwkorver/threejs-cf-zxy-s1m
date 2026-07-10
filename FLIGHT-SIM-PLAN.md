@@ -35,12 +35,13 @@ universal contract**:
 | 2 | Tile grid | **EPSG:3857 (Web Mercator) XYZ** | Every tool speaks it (TiTiler, tippecanoe, PMTiles, deck.gl); path-based CDN keys; distortion handled as scale factor, not reprojection |
 | 3 | World model | **Flat Mercator-meter world, Z-up** | No ellipsoid, no ENU rotations, trivial physics. Ground-truth via `sec(lat)` scale (see §5.1) |
 | 4 | Imagery tiles | **WebP, 512 px, dynamic TiTiler + pre-genned low/mid zooms (z0–z12)** | Full pre-gen of CONUS to z17+ is tens of TB for sparse access; dynamic-behind-CDN fills organically; small pre-genned pyramid guarantees instant cold start |
-| 5 | Mosaic resolver | **GeoParquet lake as the mosaic index** | Biggest reuse from the existing repo: "which COGs intersect tile z/x/y" *is* `/search`. Year-pinned mosaics = path parameter |
+| 5 | Mosaic resolver | **GeoParquet lake as the mosaic index** | Biggest reuse from the existing repo: "which COGs intersect tile z/x/y" *is* `/search`. Year-pinned mosaics = path parameter. Consolidated into this project's own bucket `s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index` (2026-07-10) |
+| 5a | NAIP source | **`naip-visualization` RGB COGs** (not `naip-analytic` RGBIR) | 3-band uint8 JPEG COGs, display-ready — the tiler dropped the IR band anyway; smaller reads. Lake collection = `naip-visualization`, served at `/imagery/naip-visualization/...` |
 | 6 | Terrain payload | **Terrain-RGB (Terrarium-style) raster tiles from S1M**, quantized-mesh deferred | One pipeline with imagery (same tiler, same quadtree); client meshes regular grids (simpler than the current drape mesher). Revisit quantized-mesh only if client meshing shows up in profiles |
 | 7 | Far-field terrain | **AWS Open Data `s3://elevation-tiles-prod` (Mapzen Terrarium)** | Already tiled in exactly this scheme, global, free; S1M kicks in below a screen-space-error threshold |
 | 8 | Buildings | **Overture → tippecanoe → PMTiles on S3 + CloudFront** | Fully static, zero servers, range-read friendly, zoom-graded simplification for free |
 | 9 | Rendering engine | **three.js — not CesiumJS** (settled §10.2, 2026-07-09) | See §6. Cesium = globe engine overhead for pre-aligned tiles; custom pipeline keeps the GPU raster/mesh control and velocity prefetch. three won the Phase 0 spike (least friction, native free-fly camera); luma.gl kept as WebGPU fallback. Backend stays engine-agnostic so Cesium/luma remain fallback consumers |
-| 10 | Region | **us-west-2** | Same as sources (`naip-analytic` etc.); requester-pays reads become same-region GET pennies |
+| 10 | Region | **us-west-2** | Same as sources (`naip-visualization`, `prd-tnm` etc., per RODA); requester-pays reads become same-region GET pennies. All reads signed via the execution role; requester-pays scoped per-bucket |
 
 ## 3. Architecture
 
@@ -65,7 +66,7 @@ graph TD
     end
 
     subgraph Sources ["Source COGs (unchanged, stay where they are)"]
-        NAIP["naip-analytic (requester-pays)"]
+        NAIP["naip-visualization RGB (requester-pays)"]
         STATES["kyfromabove / njogis / gisimageryingov"]
         PRDTNM["prd-tnm S1M DEM COGs"]
         OVERTURE["Overture GeoParquet"]
@@ -93,13 +94,14 @@ signing.
 ### 4.1 Imagery
 
 - `GET /imagery/{layer}/{year}/{z}/{x}/{y}.webp`
-  - `layer` = collection id from the registry (`naip`, `kyfromabove`,
+  - `layer` = collection id from the registry (`naip-visualization`, `kyfromabove`,
     `nj-imagery`, `in-imagery`, …); `year` pinned in the path (never query
     strings — CloudFront cache keys stay path-only, and mosaics stay
     single-vintage to avoid color seams).
   - 512×512 WebP, quality ~75 (≈30–80 KB/tile target).
   - Resolver: lake query `collection + year + tile bbox` → COG list → rio-tiler
-    mosaic read → warp to 3857 → encode. Requester-pays header on NAIP reads.
+    mosaic read → warp to 3857 → encode. All reads signed via the role;
+    requester-pays scoped per-asset to the buckets that need it (§2 row 5a).
   - Per-layer `maxzoom` from registry `gsd` (see table §5.2); requests beyond
     it 404 (client clamps; CDN never caches upsampled junk).
 - Pre-generated static pyramid z0–z12 written to S3 once per layer/year
@@ -245,7 +247,7 @@ with `nj-imagery` upgrade waiting in Phase 1 — with server tiles end-to-end.
    container — §10.4),
    `client/` (TS, three.js renderer — §10.2), `infra/` (SAM/CFN, reuse
    foundation pattern), `PLAN.md` (this file).
-2. Imagery tiler: lake-backed mosaic resolver → `/imagery/naip/{year}/z/x/y.webp`
+2. Imagery tiler: lake-backed mosaic resolver → `/imagery/naip-visualization/{year}/z/x/y.webp`
    (NJ, latest vintage in the lake),
    Lambda Function URL origin behind CloudFront, path-immutable caching.
 3. Terrain tiler: S1M → Terrain-RGB for the corridor bbox; far-field passthrough
