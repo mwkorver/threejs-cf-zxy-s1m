@@ -16,7 +16,7 @@ def test_512_tiles_shift_maxzoom_down_one():
 
 
 def test_phase0_layers_present():
-    assert LAYERS["naip"].maxzoom == 18  # 30 cm vintages (512-px basis)
-    assert LAYERS["naip"].indexes == (1, 2, 3)  # RGBIR -> RGB
+    assert LAYERS["naip-visualization"].maxzoom == 18  # 30 cm vintages (512-px basis)
+    assert LAYERS["naip-visualization"].indexes == (1, 2, 3)  # RGB bands
     assert LAYERS["nj-imagery"].maxzoom == 19
     assert LAYERS["nj-imagery"].rescale == (0, 65535)  # 16-bit source

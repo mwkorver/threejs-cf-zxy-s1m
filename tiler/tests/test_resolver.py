@@ -3,8 +3,8 @@ from tiler.resolver import REQUESTER_PAYS_BUCKETS, CogAsset, build_tile_query, l
 
 def test_read_path_narrows_to_partition_subtree():
     # Path scoping shrinks the S3 LIST (ported from _lake_read_path)
-    p = lake_read_path("s3://bucket/lake/", "naip", 2021)
-    assert p == "s3://bucket/lake/collection=naip/region=*/year=2021/*.parquet"
+    p = lake_read_path("s3://bucket/lake/", "naip-visualization", 2021)
+    assert p == "s3://bucket/lake/collection=naip-visualization/region=*/year=2021/*.parquet"
 
 
 def test_query_has_prune_and_refine():

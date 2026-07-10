@@ -29,7 +29,7 @@ def main() -> None:
     ap.add_argument("lat", type=float)
     ap.add_argument("lon", type=float)
     ap.add_argument("zoom", type=int)
-    ap.add_argument("--layer", default="naip", choices=sorted(LAYERS))
+    ap.add_argument("--layer", default="naip-visualization", choices=sorted(LAYERS))
     ap.add_argument("--year", type=int, default=2023)
     ap.add_argument("--grid", type=int, default=4, help="NxN block centered on the point")
     ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parents[2] / "client/public/tiles")
