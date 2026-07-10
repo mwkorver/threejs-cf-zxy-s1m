@@ -2,6 +2,10 @@
 # Container image (not zip) because rasterio/GDAL wheels are large.
 FROM public.ecr.aws/lambda/python:3.12
 
+# GDAL/PROJ (via rasterio, pyproj) dynamically link libexpat, which the minimal
+# Lambda base image doesn't ship — install it or import fails at runtime.
+RUN dnf install -y expat && dnf clean all
+
 COPY pyproject.toml ${LAMBDA_TASK_ROOT}/
 COPY src/ ${LAMBDA_TASK_ROOT}/src/
 RUN pip install --no-cache-dir ${LAMBDA_TASK_ROOT}/

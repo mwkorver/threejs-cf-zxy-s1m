@@ -8,11 +8,18 @@ parser) — here boto3 resolves them and we hand DuckDB a static secret.
 Requires botocore[crt] locally for the login provider.
 """
 
+import os
+
 import duckdb
 
 
 def connect(region: str) -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
+    # On Lambda HOME is empty and the filesystem is read-only except /tmp, so
+    # DuckDB can't find a home for its extension cache and INSTALL fails with
+    # "Can't find the home directory". Point it at the only writable path.
+    if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        con.execute("SET home_directory='/tmp';")
     con.execute("INSTALL spatial; LOAD spatial;")
     con.execute("INSTALL httpfs; LOAD httpfs;")
     con.execute("INSTALL aws; LOAD aws;")  # credential_chain provider
