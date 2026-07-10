@@ -21,7 +21,11 @@ from rio_tiler.utils import render
 
 from .encoding import encode_terrarium
 
-FARFIELD_TEMPLATE = "s3://elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+# Public + in us-east-1. Read via /vsicurl/ over the global s3.amazonaws.com
+# endpoint: a plain HTTP GET with no S3 region/signing logic, which is what
+# sent the us-west-2 Lambda to the wrong regional endpoint (301 redirect that
+# GDAL won't follow). Path-style so no per-bucket virtual host either.
+FARFIELD_TEMPLATE = "/vsicurl/https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 
 
 def _s1m_tile(href: str, x: int, y: int, z: int, tilesize: int) -> "object":
@@ -65,19 +69,17 @@ def render_farfield_tile(z: int, x: int, y: int, tilesize: int) -> bytes | None:
     canvas = np.zeros((tilesize, tilesize, 3), dtype=np.uint8)
     canvas[..., 0] = 128  # sea-level default so gaps decode to 0 m
     got_any = False
-    env = {"AWS_NO_SIGN_REQUEST": "YES"}  # elevation-tiles-prod is public
-    with rasterio.Env(**env):
-        for dj, cy in enumerate((2 * y, 2 * y + 1)):
-            for di, cx in enumerate((2 * x, 2 * x + 1)):
-                url = FARFIELD_TEMPLATE.format(z=z + 1, x=cx, y=cy)
-                try:
-                    with rasterio.open(url) as ds:
-                        arr = ds.read(indexes=[1, 2, 3])  # (3, 256, 256) RGB
-                except RasterioIOError:
-                    continue
-                got_any = True
-                r0, c0 = dj * src, di * src
-                canvas[r0:r0 + src, c0:c0 + src, :] = np.transpose(arr, (1, 2, 0))
+    for dj, cy in enumerate((2 * y, 2 * y + 1)):
+        for di, cx in enumerate((2 * x, 2 * x + 1)):
+            url = FARFIELD_TEMPLATE.format(z=z + 1, x=cx, y=cy)
+            try:
+                with rasterio.open(url) as ds:
+                    arr = ds.read(indexes=[1, 2, 3])  # (3, 256, 256) RGB
+            except RasterioIOError:
+                continue  # missing child (edge of coverage) -> sea-level fill
+            got_any = True
+            r0, c0 = dj * src, di * src
+            canvas[r0:r0 + src, c0:c0 + src, :] = np.transpose(arr, (1, 2, 0))
     if not got_any:
         return None
     return render(np.transpose(canvas, (2, 0, 1)), img_format="WEBP", lossless=True)
