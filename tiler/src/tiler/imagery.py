@@ -7,8 +7,9 @@ the tile is fully covered. The resolver sorts finest-gsd first, so the
 sharpest source wins where footprints overlap.
 """
 
-import os
+from contextlib import nullcontext
 
+import rasterio
 from rio_tiler.errors import EmptyMosaicError, TileOutsideBounds
 from rio_tiler.io import Reader
 from rio_tiler.models import ImageData
@@ -21,7 +22,12 @@ from .resolver import CogAsset
 def _tile_from_asset(
     asset: CogAsset, x: int, y: int, z: int, tilesize: int, indexes: tuple[int, ...] | None
 ) -> ImageData:
-    with Reader(asset.href) as src:
+    # All reads are signed (Lambda role). Requester-pays is scoped to the assets
+    # whose bucket requires it, set here in the worker thread mosaic_reader runs
+    # this in — GDAL config from rasterio.Env is thread-local, so a main-thread
+    # Env wouldn't reach these pool threads.
+    env = rasterio.Env(AWS_REQUEST_PAYER="requester") if asset.requester_pays else nullcontext()
+    with env, Reader(asset.href) as src:
         return src.tile(x, y, z, tilesize=tilesize, indexes=indexes)
 
 
@@ -38,12 +44,6 @@ def render_imagery_tile(
     (footprint intersected but pixels didn't — caller 404s)."""
     if not assets:
         return None
-
-    if any(a.requester_pays for a in assets):
-        # Process-level, not rasterio.Env: mosaic_reader reads assets in its
-        # own thread pool and GDAL config from rasterio.Env is thread-local.
-        # Harmless on public buckets; the Dockerfile sets it for Lambda too.
-        os.environ.setdefault("AWS_REQUEST_PAYER", "requester")
 
     try:
         img, _assets_used = mosaic_reader(

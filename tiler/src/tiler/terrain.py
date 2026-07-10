@@ -21,20 +21,13 @@ from rio_tiler.utils import render
 
 from .encoding import encode_terrarium
 
+# elevation-tiles-prod is public and in us-east-1. Read it signed (Lambda role),
+# like every other bucket. A signed request still needs the endpoint AND signing
+# region pinned to us-east-1: the us-west-2 Lambda otherwise gets a virtual-
+# hosted 301 that GDAL won't auto-recover (that recovery only fires for the
+# path-style AuthorizationHeaderMalformed 400). No request-payer — public bucket.
 FARFIELD_TEMPLATE = "s3://elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
-
-# elevation-tiles-prod is public and in us-east-1. Direct /vsis3/ reads from the
-# us-west-2 Lambda otherwise hit s3.us-west-2 and get a 301 GDAL won't follow.
-# Neither AWS_REGION config nor an AWSSession(region_name=...) fixes it — GDAL's
-# endpoint builder ignores them for anonymous reads and relies on a region
-# auto-redirect that can't work unsigned. Pin the endpoint directly instead.
-_FARFIELD_ENV = {
-    "AWS_NO_SIGN_REQUEST": "YES",
-    "AWS_S3_ENDPOINT": "s3.us-east-1.amazonaws.com",
-    # Clear the global AWS_REQUEST_PAYER (Dockerfile, for NAIP): a request-payer
-    # header on an anonymous read of this non-requester-pays bucket is invalid.
-    "AWS_REQUEST_PAYER": "",
-}
+_FARFIELD_ENV = {"AWS_S3_ENDPOINT": "s3.us-east-1.amazonaws.com", "AWS_REGION": "us-east-1"}
 
 
 def _s1m_tile(href: str, x: int, y: int, z: int, tilesize: int) -> "object":
