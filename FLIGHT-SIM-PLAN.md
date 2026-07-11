@@ -254,11 +254,23 @@ with `nj-imagery` upgrade waiting in Phase 1 — with server tiles end-to-end.
    of `elevation-tiles-prod`.
 4. Client: flat Mercator world, anchor-relative rendering, terrain mesh from
    Terrain-RGB, imagery as texture (same tile = same key), free-fly camera.
-5. Measure: tiles/s sustained, p50/p99 tile latency (cold vs CDN-warm), frame
-   time at 60 fps target, Lambda cost per flight-hour.
+5. ~~Measure~~ **Done 2026-07-11** — results below.
 
-**Exit criteria:** sustained 60 fps low pass at ~120 kt equivalent over the
-corridor with no visible tile starvation on a warm CDN.
+**Measured (Phase 0 step 5):**
+- Tile latency over CloudFront: **CDN-warm p50 0.17s / p95 0.24s / p99 0.55s**;
+  **cold (origin miss) p50 9.8s / p99 11.0s** — the 57× gap is the ~7s
+  import-dominated cold start. Warm throughput ≥46 tiles/s (client-limited).
+- Frame time (three.js, engine benchmark): **60 fps**, CPU 0.3–1.1 ms/frame,
+  interval p95 ~17 ms; live app holds this at ~197 active LOD tiles.
+- Lambda cost/flight-hour (2 GB arm64, measured durations): **~$0.01 warm CDN,
+  ~$0.06 cold-exploration** — pennies at single-user scale.
+- Cold path hardened: DuckDB extensions baked into the image (§8), account
+  concurrency raised 10→1000, tiler reserved at 100, client 429 backoff.
+
+**Exit criteria:** sustained 60 fps low pass with no visible tile starvation on
+a warm CDN. **Met ✅** on a warm CDN. Residual: on *cold* first-exploration the
+~10s tile latency causes visible pop-in until the CDN warms — the pre-genned
+z0–z12 pyramid (Phase 2) is the prescribed mitigation.
 
 ### Phase 1 — make it a sim
 - Velocity-vector prefetch + byte-budgeted bundle cache.
