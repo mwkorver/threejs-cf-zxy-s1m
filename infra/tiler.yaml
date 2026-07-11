@@ -18,9 +18,11 @@ Resources:
       Architectures: [arm64] # Graviton: cheaper, builds native on arm64 Macs
       MemorySize: 2048 # warp + WebP encode are CPU-bound; tune in Phase 0 step 5
       Timeout: 30
-      # Reserved concurrency (plan §8, blunts fast-low-pass spikes) omitted:
-      # this account's total concurrency limit is 10, so none can be reserved.
-      # Re-add once the limit is raised.
+      # Guarantees the tiler a floor of 100 concurrent slots (blunts fast-low-
+      # pass spikes, plan §8) and caps it at 100 — a cost ceiling against a
+      # runaway spawning expensive cold Lambdas. Free (reserved, not
+      # provisioned); needs account concurrency > 100+10, raised to 1000.
+      ReservedConcurrentExecutions: 100
       FunctionUrlConfig:
         AuthType: AWS_IAM # CloudFront OAC signs origin requests
       Environment:
