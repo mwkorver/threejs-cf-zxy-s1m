@@ -16,6 +16,26 @@ export interface TileManifest {
   center: { lat: number; lon: number };
 }
 
+/**
+ * Fetch a tile, absorbing transient throttling. Cold tiles 429 when the tiler
+ * hits its concurrency cap (each cold render holds a Lambda slot ~7s); the tile
+ * is there, just not rendered yet. Retry 429/503 with exponential backoff +
+ * jitter (honoring Retry-After if sent); 404 and other statuses are terminal.
+ */
+async function fetchTile(url: string, label: string, maxAttempts = 5): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url);
+    if (res.ok) return res;
+    const transient = res.status === 429 || res.status === 503;
+    if (!transient || attempt >= maxAttempts - 1) {
+      throw new Error(`${label}: ${res.status}`);
+    }
+    const retryAfter = Number(res.headers.get("retry-after")) * 1000;
+    const backoff = retryAfter > 0 ? retryAfter : 300 * 2 ** attempt * (0.5 + Math.random());
+    await new Promise((r) => setTimeout(r, Math.min(backoff, 8000)));
+  }
+}
+
 async function bitmapToRgba(bmp: ImageBitmap): Promise<{ rgba: Uint8ClampedArray; w: number; h: number }> {
   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
@@ -26,8 +46,7 @@ async function bitmapToRgba(bmp: ImageBitmap): Promise<{ rgba: Uint8ClampedArray
 
 /** Decoded terrain elevations (true meters), row-major, north-first. */
 export async function loadTerrain(baseUrl: string, t: TileId): Promise<Float32Array> {
-  const res = await fetch(`${baseUrl}/terrain/${t.z}/${t.x}/${t.y}.webp`);
-  if (!res.ok) throw new Error(`terrain ${t.z}/${t.x}/${t.y}: ${res.status}`);
+  const res = await fetchTile(`${baseUrl}/terrain/${t.z}/${t.x}/${t.y}.webp`, `terrain ${t.z}/${t.x}/${t.y}`);
   const bmp = await createImageBitmap(await res.blob());
   const { rgba, w, h } = await bitmapToRgba(bmp);
   bmp.close();
@@ -41,8 +60,10 @@ export async function loadImagery(
   year: number,
   t: TileId,
 ): Promise<ImageBitmap> {
-  const res = await fetch(`${baseUrl}/imagery/${layer}/${year}/${t.z}/${t.x}/${t.y}.webp`);
-  if (!res.ok) throw new Error(`imagery ${t.z}/${t.x}/${t.y}: ${res.status}`);
+  const res = await fetchTile(
+    `${baseUrl}/imagery/${layer}/${year}/${t.z}/${t.x}/${t.y}.webp`,
+    `imagery ${t.z}/${t.x}/${t.y}`,
+  );
   return createImageBitmap(await res.blob());
 }
 

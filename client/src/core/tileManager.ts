@@ -19,6 +19,8 @@ export interface TileNode {
   loading: boolean;
   loaded: boolean;
   visible: boolean;
+  /** performance.now() before which triggerLoad is skipped after a failure. */
+  retryAfter?: number;
 }
 
 export class TileManager {
@@ -203,6 +205,11 @@ export class TileManager {
     if (node.loaded || node.loading) {
       return;
     }
+    // Cooldown after a failure so a persistently-failing tile isn't re-fetched
+    // every frame (the loader already backed off + retried internally).
+    if (node.retryAfter !== undefined && performance.now() < node.retryAfter) {
+      return;
+    }
 
     node.loading = true;
     const key = node.key;
@@ -256,10 +263,14 @@ export class TileManager {
         this.createMeshFromBundle(node, geom, texture);
         node.loaded = true;
         node.loading = false;
+        node.retryAfter = undefined;
       })
       .catch((err) => {
-        console.error(`Error loading tile ${key}:`, err);
+        // Loader already retried transient throttling; hold off a few seconds
+        // before the manager tries this tile again.
+        console.warn(`tile ${key} deferred: ${err.message}`);
         node.loading = false;
+        node.retryAfter = performance.now() + 2000 + Math.random() * 2000;
       });
   }
 
