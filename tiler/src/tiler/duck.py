@@ -13,6 +13,9 @@ import os
 import duckdb
 
 
+_EXTENSIONS = ("spatial", "httpfs", "aws")  # aws = credential_chain provider
+
+
 def connect(region: str) -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
     # On Lambda HOME is empty and the filesystem is read-only except /tmp, so
@@ -20,9 +23,17 @@ def connect(region: str) -> duckdb.DuckDBPyConnection:
     # "Can't find the home directory". Point it at the only writable path.
     if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
         con.execute("SET home_directory='/tmp';")
-    con.execute("INSTALL spatial; LOAD spatial;")
-    con.execute("INSTALL httpfs; LOAD httpfs;")
-    con.execute("INSTALL aws; LOAD aws;")  # credential_chain provider
+    ext_dir = os.environ.get("DUCKDB_EXTENSION_DIR")
+    if ext_dir:
+        # Extensions baked into the image (Dockerfile) — LOAD from disk, no
+        # network install on the cold path.
+        con.execute(f"SET extension_directory='{ext_dir}';")
+        for e in _EXTENSIONS:
+            con.execute(f"LOAD {e};")
+    else:
+        # Local dev: download+cache on first use.
+        for e in _EXTENSIONS:
+            con.execute(f"INSTALL {e}; LOAD {e};")
     try:
         con.execute(
             f"CREATE OR REPLACE SECRET s3 (TYPE s3, PROVIDER credential_chain, REGION '{region}')"

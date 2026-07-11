@@ -10,6 +10,15 @@ COPY pyproject.toml ${LAMBDA_TASK_ROOT}/
 COPY src/ ${LAMBDA_TASK_ROOT}/src/
 RUN pip install --no-cache-dir ${LAMBDA_TASK_ROOT}/
 
+# Bake the DuckDB extensions into the image (built here for linux/arm64,
+# matching the Lambda runtime) so the first request LOADs them from disk
+# instead of downloading over the network (~2s off the cold start). duck.py
+# reads DUCKDB_EXTENSION_DIR and LOADs without INSTALL when it's set.
+ENV DUCKDB_EXTENSION_DIR=/opt/duckdb-extensions
+RUN python -c "import duckdb; c=duckdb.connect(); \
+    c.execute(\"SET extension_directory='/opt/duckdb-extensions'\"); \
+    [c.execute(f'INSTALL {e}') for e in ('spatial','httpfs','aws')]"
+
 # GDAL knobs that matter for COG range reads from Lambda. Requester-pays is NOT
 # global — it's scoped per-asset in imagery.py to the buckets that require it,
 # so S1M/far-field public reads stay clean signed requests.
