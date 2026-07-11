@@ -1,32 +1,86 @@
-/**
- * Byte-budgeted LRU cache of tile bundles (plan §5.3).
- *
- * A "bundle" is everything for one z/x/y key: imagery texture + terrain mesh
- * (+ buildings, Phase 1). Scaled up from the 96 MB budgeted-cache pattern in
- * deckgl-s3-cog-s1m.
- *
- * TODO(Phase 0): eviction on byte budget, pinning for on-screen tiles.
- * TODO(Phase 1): velocity-vector prefetch feeds this — fetch bundles the
- * camera will see in 3-5 s from position + heading + speed (the sim's
- * killer optimization); fetch scheduler with concurrency=16, bottom-first
- * ordering (proven in the existing repo).
- */
+import type * as THREE from "three";
 
 export interface Bundle {
-  key: string; // tileKey(z/x/y) + layer
+  key: string; // tileKey(z/x/y)
   bytes: number;
-  // imagery: GPUTexture | ImageBitmap; terrain: TerrainMesh — typed once the
-  // engine spike (plan §10.2) picks the render path.
+  geometry: THREE.BufferGeometry;
+  texture?: THREE.Texture;
 }
 
 export class BundleCache {
+  private map = new Map<string, Bundle>();
+  private currentBytes = 0;
+
   constructor(readonly byteBudget: number) {}
 
-  get(_key: string): Bundle | undefined {
-    throw new Error("not implemented — Phase 0 step 4");
+  get(key: string): Bundle | undefined {
+    const bundle = this.map.get(key);
+    if (bundle) {
+      // Refresh key order for LRU
+      this.map.delete(key);
+      this.map.set(key, bundle);
+    }
+    return bundle;
   }
 
-  put(_bundle: Bundle): void {
-    throw new Error("not implemented — Phase 0 step 4");
+  put(bundle: Bundle, pinnedKeys?: Set<string>): void {
+    const existing = this.map.get(bundle.key);
+    if (existing) {
+      this.map.delete(bundle.key);
+      this.currentBytes -= existing.bytes;
+      this.disposeBundle(existing);
+    }
+
+    this.map.set(bundle.key, bundle);
+    this.currentBytes += bundle.bytes;
+
+    this.evict(pinnedKeys);
+  }
+
+  private evict(pinnedKeys?: Set<string>): void {
+    const keysToEvict: string[] = [];
+    for (const key of this.map.keys()) {
+      if (this.currentBytes <= this.byteBudget) {
+        break;
+      }
+      if (pinnedKeys && pinnedKeys.has(key)) {
+        continue; // Do not evict active/visible tiles
+      }
+      keysToEvict.push(key);
+    }
+
+    for (const key of keysToEvict) {
+      const bundle = this.map.get(key)!;
+      this.map.delete(key);
+      this.currentBytes -= bundle.bytes;
+      this.disposeBundle(bundle);
+    }
+  }
+
+  private disposeBundle(bundle: Bundle): void {
+    // Dispose of GPU resources to prevent memory leaks
+    if (bundle.geometry) {
+      bundle.geometry.dispose();
+    }
+    if (bundle.texture) {
+      bundle.texture.dispose();
+    }
+  }
+
+  clear(): void {
+    for (const bundle of this.map.values()) {
+      this.disposeBundle(bundle);
+    }
+    this.map.clear();
+    this.currentBytes = 0;
+  }
+
+  size(): number {
+    return this.map.size;
+  }
+
+  bytesUsed(): number {
+    return this.currentBytes;
   }
 }
+

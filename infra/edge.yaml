@@ -32,6 +32,21 @@ Resources:
           HeadersConfig: { HeaderBehavior: none }
           QueryStringsConfig: { QueryStringBehavior: none }
 
+  # Tiles are a public read-only API consumed cross-origin by the client
+  # (dev server, any future host). CORS is applied at the edge so cached
+  # objects carry it too and the origin stays header-free.
+  TileCorsPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: flight-sim-tiles-cors
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders: { Items: ["*"] }
+          AccessControlAllowMethods: { Items: [GET, HEAD] }
+          AccessControlAllowOrigins: { Items: ["*"] }
+          OriginOverride: true
+
   TilerOAC:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -84,6 +99,7 @@ Resources:
           TargetOriginId: tiler
           ViewerProtocolPolicy: https-only
           CachePolicyId: !Ref TileCachePolicy
+          ResponseHeadersPolicyId: !Ref TileCorsPolicy
           AllowedMethods: [GET, HEAD]
           Compress: false
 
