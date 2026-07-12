@@ -3,20 +3,23 @@ from tiler.resolver import REQUESTER_PAYS_BUCKETS, CogAsset, build_tile_query, l
 
 def test_read_path_narrows_to_partition_subtree():
     # Path scoping shrinks the S3 LIST (ported from _lake_read_path)
-    p = lake_read_path("s3://bucket/lake/", "naip-visualization", 2021)
-    assert p == "s3://bucket/lake/collection=naip-visualization/region=*/year=2021/*.parquet"
+    p = lake_read_path("s3://bucket/lake/", "naip-visualization")
+    assert p == "s3://bucket/lake/collection=naip-visualization/region=*/year=*/*.parquet"
 
 
 def test_query_has_prune_and_refine():
-    sql = build_tile_query("s3://b/lake/collection=naip/region=*/year=2021/*.parquet",
-                           west=-74.5, south=40.4, east=-74.4, north=40.5)
+    sql = build_tile_query("s3://b/lake/collection=naip/region=*/year=*/*.parquet",
+                           west=-74.5, south=40.4, east=-74.4, north=40.5, requested_year=2021)
     # cheap bbox-column prune against row-group stats...
     assert "bbox_xmin <= -74.4" in sql and "bbox_xmax >= -74.5" in sql
     assert "bbox_ymin <= 40.5" in sql and "bbox_ymax >= 40.4" in sql
     # ...then exact footprint refine
     assert "ST_Intersects(geometry, ST_MakeEnvelope(-74.5, 40.4, -74.4, 40.5))" in sql
-    # finest source first so the mosaic lays sharpest pixels down first
-    assert "order by gsd asc" in sql
+    # latest year first, then finest source
+    assert "order by year desc, gsd asc" in sql
+    # year filter and group-by-region cross-year fallback subquery
+    assert "year <= 2021" in sql
+    assert "group by region" in sql
     assert "hive_partitioning=true" in sql
 
 
