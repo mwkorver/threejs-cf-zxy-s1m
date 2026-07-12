@@ -22,6 +22,7 @@ const LAYER = params.get("layer") ?? "naip-visualization";
 const YEAR = Number(params.get("year") ?? 2023);
 const MAX_ZOOM = Number(params.get("maxzoom") ?? 18);
 const LOD_FACTOR = Number(params.get("lod") ?? 2.2);
+const CULL_TILES = params.get("cull") !== "false";
 
 // NJ flight corridor center
 const startLon = -74.44;
@@ -75,7 +76,8 @@ const tileManager = new TileManager(
   worldAnchor,
   12, // Base zoom
   MAX_ZOOM,
-  LOD_FACTOR
+  LOD_FACTOR,
+  CULL_TILES
 );
 
 // 4. Create floating HUD overlay

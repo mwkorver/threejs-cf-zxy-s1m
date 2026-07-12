@@ -60,7 +60,8 @@ export class TileManager {
     readonly worldAnchor: [number, number],
     readonly baseZoom = 12,
     readonly maxZoom = 18,
-    readonly lodFactor = 2.2
+    readonly lodFactor = 2.2,
+    readonly cullTiles = true
   ) {}
 
   /**
@@ -121,7 +122,8 @@ export class TileManager {
 
     // 5. Build view frustum if camera is provided
     let frustum: THREE.Frustum | undefined;
-    if (camera) {
+    if (this.cullTiles && camera) {
+      camera.updateMatrixWorld(true);
       frustum = new THREE.Frustum();
       const projScreenMatrix = new THREE.Matrix4();
       projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
@@ -151,7 +153,7 @@ export class TileManager {
 
   private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): void {
     // 1. Perform frustum culling check first
-    if (frustum) {
+    if (this.cullTiles && frustum) {
       const tileMinZ = -1000 * this.verticalExaggeration;
       const tileMaxZ = 9000 * this.verticalExaggeration;
       const box = new THREE.Box3(

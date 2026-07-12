@@ -25,7 +25,8 @@ describe("TileManager", () => {
       worldAnchor,
       12, // baseZoom
       12, // maxZoom = baseZoom to prevent subdivision
-      2.0 // lodFactor
+      2.0, // lodFactor
+      false // cullTiles
     );
 
     // Camera placed exactly at the worldAnchor (local coordinate 0,0,1000)
@@ -47,7 +48,8 @@ describe("TileManager", () => {
       worldAnchor,
       12, // baseZoom
       18, // maxZoom
-      3.0 // high lodFactor to trigger easy splitting
+      3.0, // high lodFactor to trigger easy splitting
+      false // cullTiles
     );
 
     // Camera positioned very close to the center of root node z12/x1024/y1024 (center is near 0,0)
@@ -88,7 +90,8 @@ describe("TileManager", () => {
       worldAnchor,
       12, // baseZoom
       18, // maxZoom
-      1.0 // low lodFactor
+      1.0, // low lodFactor
+      false // cullTiles
     );
 
     // 1. Move camera close to trigger potential child creation (e.g. at 0,0)
