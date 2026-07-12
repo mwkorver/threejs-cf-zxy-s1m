@@ -36,8 +36,10 @@ appDiv.style.width = "100%";
 appDiv.style.height = "100%";
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0d131a);
-scene.fog = new THREE.FogExp2(0x0d131a, 0.0001);
+const skyColor = new THREE.Color(0xa3c2f0);
+const fogColor = new THREE.Color(0xdce8f7);
+scene.background = skyColor;
+scene.fog = new THREE.FogExp2(fogColor.getHex(), 0.00006);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 80000);
 camera.up.set(0, 0, 1); // Z-up world
@@ -53,9 +55,10 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = false; // Performance priority
 appDiv.appendChild(renderer.domElement);
 
-// Add hemispheric and directional lighting
-scene.add(new THREE.HemisphereLight(0xbfd4e6, 0x3a3326, 1.0));
-const sun = new THREE.DirectionalLight(0xfff2e0, 1.2);
+// Add hemispheric and directional lighting at lower intensity for any standard mesh assets
+const ambient = new THREE.HemisphereLight(0xffffff, 0x444444, 0.4);
+scene.add(ambient);
+const sun = new THREE.DirectionalLight(0xfff2e0, 0.6);
 sun.position.set(-1, -1, 1.4).normalize();
 scene.add(sun);
 
@@ -80,7 +83,7 @@ const hud = document.createElement("div");
 hud.style.position = "absolute";
 hud.style.top = "20px";
 hud.style.left = "20px";
-hud.style.background = "rgba(15, 23, 42, 0.8)";
+hud.style.background = "rgba(15, 23, 42, 0.85)";
 hud.style.backdropFilter = "blur(12px)";
 hud.style.border = "1px solid rgba(255, 255, 255, 0.1)";
 hud.style.padding = "20px";
@@ -88,9 +91,10 @@ hud.style.borderRadius = "12px";
 hud.style.fontFamily = "monospace";
 hud.style.fontSize = "13px";
 hud.style.color = "#f8fafc";
-hud.style.pointerEvents = "none";
+hud.style.pointerEvents = "auto"; // Allow interaction with controls
 hud.style.zIndex = "100";
 hud.style.boxShadow = "0 10px 25px rgba(0,0,0,0.5)";
+hud.style.width = "280px";
 hud.innerHTML = `
   <div style="font-weight: bold; font-size: 15px; margin-bottom: 10px; color: #38bdf8; letter-spacing: 1px;">✈️ FLIGHT SIM DEMO</div>
   <div style="margin-bottom: 4px;">LAT/LON: <span id="hud-pos">- / -</span></div>
@@ -98,13 +102,74 @@ hud.innerHTML = `
   <div style="margin-bottom: 4px;">SPEED: <span id="hud-speed">0</span> kt</div>
   <div style="margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; margin-bottom: 4px;">ACTIVE TILES: <span id="hud-tiles">0</span></div>
   <div>GPU CACHE: <span id="hud-cache">0.00</span> / 256 MB</div>
-  <div style="margin-top: 12px; font-size: 11px; color: #94a3b8; line-height: 1.4;">
+  
+  <div style="margin-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px;">
+    <div style="font-weight: bold; color: #38bdf8; margin-bottom: 8px;">🌅 ATMOSPHERE & LIGHTING</div>
+    
+    <div style="margin-bottom: 8px;">
+      <label style="display: block; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">PRESET MOOD</label>
+      <select id="ctrl-preset" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; padding: 4px; font-family: monospace; font-size: 12px; cursor: pointer; outline: none;">
+        <option value="midday">Bright Midday (Realism)</option>
+        <option value="golden">Golden Hour (Moody)</option>
+        <option value="overcast">Overcast (Soft)</option>
+        <option value="unlit">Unlit (Pure Photo)</option>
+        <option value="custom" disabled style="display: none;">Custom</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>HILLSHADE OPACITY</span>
+        <span id="val-hillshade">0.25</span>
+      </div>
+      <input type="range" id="ctrl-hillshade" min="0" max="1" step="0.05" value="0.25" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>SUN AZIMUTH</span>
+        <span id="val-azimuth">225°</span>
+      </div>
+      <input type="range" id="ctrl-azimuth" min="0" max="360" step="5" value="225" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>SUN ALTITUDE</span>
+        <span id="val-altitude">55°</span>
+      </div>
+      <input type="range" id="ctrl-altitude" min="5" max="90" step="5" value="55" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>FOG DENSITY</span>
+        <span id="val-fog">0.00006</span>
+      </div>
+      <input type="range" id="ctrl-fog" min="0" max="0.0003" step="0.00001" value="0.00006" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>VERTICAL EXAGGERATION</span>
+        <span id="val-exaggeration">4.0x</span>
+      </div>
+      <input type="range" id="ctrl-exaggeration" min="1" max="10" step="0.5" value="4.0" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+      <input type="checkbox" id="ctrl-footprints" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+      <label for="ctrl-footprints" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW S1M DEM FOOTPRINTS</label>
+    </div>
+  </div>
+
+  <div style="margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; font-size: 11px; color: #94a3b8; line-height: 1.4;">
     Controls:<br>
     • [W / S] Fly Forward / Backward<br>
     • [A / D] Strafe Left / Right<br>
     • [Q / E] Fly Down / Up<br>
     • [Shift] Boost Speed<br>
-    • Drag mouse to look around
+    • Drag mouse outside HUD to look
   </div>
 `;
 appDiv.appendChild(hud);
@@ -115,9 +180,152 @@ const hudSpeed = document.getElementById("hud-speed")!;
 const hudTiles = document.getElementById("hud-tiles")!;
 const hudCache = document.getElementById("hud-cache")!;
 
+const ctrlPreset = document.getElementById("ctrl-preset") as HTMLSelectElement;
+const ctrlHillshade = document.getElementById("ctrl-hillshade") as HTMLInputElement;
+const ctrlAzimuth = document.getElementById("ctrl-azimuth") as HTMLInputElement;
+const ctrlAltitude = document.getElementById("ctrl-altitude") as HTMLInputElement;
+const ctrlFog = document.getElementById("ctrl-fog") as HTMLInputElement;
+const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInputElement;
+const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
+
+const valHillshade = document.getElementById("val-hillshade")!;
+const valAzimuth = document.getElementById("val-azimuth")!;
+const valAltitude = document.getElementById("val-altitude")!;
+const valFog = document.getElementById("val-fog")!;
+const valExaggeration = document.getElementById("val-exaggeration")!;
+
+// Preset configurations
+interface MoodPreset {
+  hillshade: number;
+  azimuth: number;
+  altitude: number;
+  fogDensity: number;
+  skyColor: number;
+  fogColor: number;
+}
+
+const PRESETS = {
+  midday: {
+    hillshade: 0.25,
+    azimuth: 225,
+    altitude: 55,
+    fogDensity: 0.00006,
+    skyColor: 0xa3c2f0,
+    fogColor: 0xdce8f7
+  },
+  golden: {
+    hillshade: 0.50,
+    azimuth: 240,
+    altitude: 15,
+    fogDensity: 0.00010,
+    skyColor: 0xfca5a5,
+    fogColor: 0xfef3c7
+  },
+  overcast: {
+    hillshade: 0.05,
+    azimuth: 180,
+    altitude: 90,
+    fogDensity: 0.00014,
+    skyColor: 0xcbd5e1,
+    fogColor: 0xe2e8f0
+  },
+  unlit: {
+    hillshade: 0.00,
+    azimuth: 225,
+    altitude: 55,
+    fogDensity: 0.00004,
+    skyColor: 0xa5f3fc,
+    fogColor: 0xe0f2fe
+  }
+} satisfies Record<string, MoodPreset>;
+
+function updateSunDirection(azimuth: number, altitude: number) {
+  const azimuthRad = (azimuth * Math.PI) / 180;
+  const altitudeRad = (altitude * Math.PI) / 180;
+  
+  const z = Math.sin(altitudeRad);
+  const r = Math.cos(altitudeRad);
+  const x = r * Math.sin(azimuthRad);
+  const y = r * Math.cos(azimuthRad);
+  
+  tileManager.globalUniforms.sunDirection.value.set(x, y, z).normalize();
+}
+
+function applyPreset(mood: MoodPreset) {
+  ctrlHillshade.value = mood.hillshade.toString();
+  ctrlAzimuth.value = mood.azimuth.toString();
+  ctrlAltitude.value = mood.altitude.toString();
+  ctrlFog.value = mood.fogDensity.toString();
+  
+  valHillshade.textContent = mood.hillshade.toFixed(2);
+  valAzimuth.textContent = `${mood.azimuth}°`;
+  valAltitude.textContent = `${mood.altitude}°`;
+  valFog.textContent = mood.fogDensity.toFixed(5);
+  
+  tileManager.globalUniforms.hillshadeIntensity.value = mood.hillshade;
+  updateSunDirection(mood.azimuth, mood.altitude);
+  
+  scene.background = new THREE.Color(mood.skyColor);
+  if (scene.fog && scene.fog instanceof THREE.FogExp2) {
+    scene.fog.color = new THREE.Color(mood.fogColor);
+    scene.fog.density = mood.fogDensity;
+  }
+}
+
+// Hook up event listeners for inputs
+ctrlHillshade.addEventListener("input", () => {
+  const val = parseFloat(ctrlHillshade.value);
+  valHillshade.textContent = val.toFixed(2);
+  tileManager.globalUniforms.hillshadeIntensity.value = val;
+  ctrlPreset.value = "custom";
+});
+
+ctrlAzimuth.addEventListener("input", () => {
+  const az = parseInt(ctrlAzimuth.value);
+  valAzimuth.textContent = `${az}°`;
+  updateSunDirection(az, parseInt(ctrlAltitude.value));
+  ctrlPreset.value = "custom";
+});
+
+ctrlAltitude.addEventListener("input", () => {
+  const alt = parseInt(ctrlAltitude.value);
+  valAltitude.textContent = `${alt}°`;
+  updateSunDirection(parseInt(ctrlAzimuth.value), alt);
+  ctrlPreset.value = "custom";
+});
+
+ctrlFog.addEventListener("input", () => {
+  const fogD = parseFloat(ctrlFog.value);
+  valFog.textContent = fogD.toFixed(5);
+  if (scene.fog && scene.fog instanceof THREE.FogExp2) {
+    scene.fog.density = fogD;
+  }
+  ctrlPreset.value = "custom";
+});
+
+ctrlExaggeration.addEventListener("input", () => {
+  const val = parseFloat(ctrlExaggeration.value);
+  valExaggeration.textContent = `${val.toFixed(1)}x`;
+  tileManager.setVerticalExaggeration(val);
+});
+
+ctrlFootprints.addEventListener("change", () => {
+  tileManager.setShowFootprints(ctrlFootprints.checked);
+});
+
+ctrlPreset.addEventListener("change", () => {
+  const key = ctrlPreset.value;
+  if (key in PRESETS) {
+    applyPreset(PRESETS[key as keyof typeof PRESETS]);
+  }
+});
+
+// Initialize mood preset
+applyPreset(PRESETS.midday);
+
 // 5. Setup simple keyboard & mouse flight controls
 const activeKeys = new Set<string>();
-let isDragging = false;
+let isInteractingWithHud = false;
 let previousMousePosition = { x: 0, y: 0 };
 let speedKnots = 120; // Default airspeed simulation
 
@@ -125,38 +333,67 @@ let speedKnots = 120; // Default airspeed simulation
 window.addEventListener("keydown", (e) => activeKeys.add(e.code));
 window.addEventListener("keyup", (e) => activeKeys.delete(e.code));
 
-// Mouse rotation look-around controls
-window.addEventListener("mousedown", (e) => {
-  if (e.button === 0) { // Left click
-    isDragging = true;
-    previousMousePosition = { x: e.clientX, y: e.clientY };
+// Prevent standard context menu when clicking on the 3D scene (outside HUD)
+window.addEventListener("contextmenu", (e) => {
+  if (!hud.contains(e.target as Node)) {
+    e.preventDefault();
   }
 });
 
+// Mouse rotation and panning controls
+window.addEventListener("mousedown", (e) => {
+  if (hud.contains(e.target as Node)) {
+    isInteractingWithHud = true;
+    return; // Don't drag camera when interacting with HUD!
+  }
+  isInteractingWithHud = false;
+  previousMousePosition = { x: e.clientX, y: e.clientY };
+});
+
 window.addEventListener("mousemove", (e) => {
-  if (!isDragging) return;
+  if (isInteractingWithHud || e.buttons === 0) return;
 
   const deltaX = e.clientX - previousMousePosition.x;
   const deltaY = e.clientY - previousMousePosition.y;
 
-  // Rotate camera (yaw around global Z axis, pitch locally)
-  const euler = new THREE.Euler(0, 0, 0, "YXZ");
-  euler.setFromQuaternion(camera.quaternion);
+  if (e.ctrlKey || e.buttons === 3) {
+    // Ctrl key held OR both left and right buttons: change heading (yaw) only
+    const euler = new THREE.Euler(0, 0, 0, "ZXY");
+    euler.setFromQuaternion(camera.quaternion);
+    euler.z -= deltaX * 0.003; // yaw (heading)
+    euler.y = 0; // force roll to 0
+    camera.quaternion.setFromEuler(euler);
+  } else if (e.buttons === 1) {
+    // Left button: rotate yaw (heading) and pitch
+    const euler = new THREE.Euler(0, 0, 0, "ZXY");
+    euler.setFromQuaternion(camera.quaternion);
 
-  euler.y -= deltaX * 0.003; // yaw
-  euler.x -= deltaY * 0.003; // pitch
+    euler.z -= deltaX * 0.003; // yaw (heading)
+    euler.x -= deltaY * 0.003; // pitch
+    euler.y = 0; // force roll to 0
 
-  // Limit pitch to avoid flipping upside down (-85 to 85 degrees)
-  const maxPitch = Math.PI / 2 - 0.05;
-  euler.x = Math.max(-maxPitch, Math.min(maxPitch, euler.x));
+    // Limit pitch to avoid flipping upside down (-85 to 85 degrees)
+    const maxPitch = Math.PI / 2 - 0.05;
+    euler.x = Math.max(-maxPitch, Math.min(maxPitch, euler.x));
 
-  camera.quaternion.setFromEuler(euler);
+    camera.quaternion.setFromEuler(euler);
+  } else if (e.buttons === 2) {
+    // Right button: pan camera
+    const panScale = Math.max(10, camera.position.z) * 0.0015;
+
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+
+    // Translate position along camera local axes
+    camera.position.addScaledVector(right, -deltaX * panScale);
+    camera.position.addScaledVector(up, deltaY * panScale);
+  }
 
   previousMousePosition = { x: e.clientX, y: e.clientY };
 });
 
 window.addEventListener("mouseup", () => {
-  isDragging = false;
+  isInteractingWithHud = false;
 });
 
 window.addEventListener("resize", () => {

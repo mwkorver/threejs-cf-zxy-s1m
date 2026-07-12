@@ -5,6 +5,7 @@ export interface Bundle {
   bytes: number;
   geometry: THREE.BufferGeometry;
   texture?: THREE.Texture;
+  footprints?: THREE.LineSegments;
 }
 
 export class BundleCache {
@@ -64,6 +65,14 @@ export class BundleCache {
     }
     if (bundle.texture) {
       bundle.texture.dispose();
+    }
+    if (bundle.footprints) {
+      bundle.footprints.geometry.dispose();
+      if (Array.isArray(bundle.footprints.material)) {
+        bundle.footprints.material.forEach((m) => m.dispose());
+      } else {
+        bundle.footprints.material.dispose();
+      }
     }
   }
 

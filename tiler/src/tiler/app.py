@@ -76,6 +76,19 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
     return Response(body, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})
 
 
+@app.get("/terrain-footprints/{z}/{x}/{y}.json")
+def terrain_footprints(z: int, x: int, y: int) -> dict:
+    """Return S1M COG footprints intersecting tile z/x/y as GeoJSON."""
+    n = 2**z
+    if not (0 <= z and 0 <= x < n and 0 <= y < n):
+        raise HTTPException(404, "tile out of range")
+
+    if z >= settings.s1m_min_zoom:
+        return get_s1m_resolver().resolve_footprints(z, x, y)
+    else:
+        return {"type": "FeatureCollection", "features": []}
+
+
 @app.get("/healthz")
 def healthz() -> dict:
     return {"ok": True, "region": settings.aws_region}
