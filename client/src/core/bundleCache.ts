@@ -6,6 +6,7 @@ export interface Bundle {
   geometry: THREE.BufferGeometry;
   texture?: THREE.Texture;
   footprints?: THREE.LineSegments;
+  centerElevation?: number;
 }
 
 export class BundleCache {

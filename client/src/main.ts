@@ -187,6 +187,11 @@ hud.innerHTML = `
       <input type="checkbox" id="ctrl-outlines" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
       <label for="ctrl-outlines" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW TMS TILE OUTLINES</label>
     </div>
+
+    <div style="margin-top: 4px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+      <input type="checkbox" id="ctrl-labels" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+      <label for="ctrl-labels" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW TILE LABELS</label>
+    </div>
   </div>
 
   <div style="margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; font-size: 11px; color: #94a3b8; line-height: 1.4;">
@@ -215,6 +220,7 @@ const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInp
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
 const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
+const ctrlLabels = document.getElementById("ctrl-labels") as HTMLInputElement;
 
 const valHillshade = document.getElementById("val-hillshade")!;
 const valAzimuth = document.getElementById("val-azimuth")!;
@@ -349,6 +355,10 @@ ctrlSpeedCtrl.addEventListener("input", () => {
 
 ctrlOutlines.addEventListener("change", () => {
   tileManager.setShowOutlines(ctrlOutlines.checked);
+});
+
+ctrlLabels.addEventListener("change", () => {
+  tileManager.setShowLabels(ctrlLabels.checked);
 });
 
 ctrlPreset.addEventListener("change", () => {
