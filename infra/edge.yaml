@@ -45,6 +45,7 @@ Resources:
           AccessControlAllowHeaders: { Items: ["*"] }
           AccessControlAllowMethods: { Items: [GET, HEAD] }
           AccessControlAllowOrigins: { Items: ["*"] }
+          AccessControlExposeHeaders: { Items: ["X-DEM-Source"] }
           OriginOverride: true
 
   TilerOAC:
