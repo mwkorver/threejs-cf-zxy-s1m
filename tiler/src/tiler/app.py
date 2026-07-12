@@ -75,21 +75,22 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
 
     body = None
     dem_source = "farfield"
+    
+    # 1. Try high-resolution S1M terrain first if zoom is high enough
     if z >= settings.s1m_min_zoom:
-        # 1. Try high-resolution S1M terrain first
         s1m_hrefs = get_s1m_resolver().resolve(z, x, y)
         if s1m_hrefs:
             body = render_terrain_tile(s1m_hrefs, z, x, y, tilesize=settings.tile_size)
             if body is not None:
                 dem_source = "s1m"
 
-        # 2. If no S1M tile is available, check 10m USGS 1/3 arc-second DEM fallback index
-        if body is None:
-            usgs13_hrefs = get_usgs13_resolver().resolve(z, x, y)
-            if usgs13_hrefs:
-                body = render_terrain_tile(usgs13_hrefs, z, x, y, tilesize=settings.tile_size)
-                if body is not None:
-                    dem_source = "usgs13"
+    # 2. If no S1M tile is available, check 10m USGS 1/3 arc-second DEM fallback index if zoom is high enough
+    if body is None and z >= settings.usgs_min_zoom:
+        usgs13_hrefs = get_usgs13_resolver().resolve(z, x, y)
+        if usgs13_hrefs:
+            body = render_terrain_tile(usgs13_hrefs, z, x, y, tilesize=settings.tile_size)
+            if body is not None:
+                dem_source = "usgs13"
 
     # 3. Fall back to far-field planet-wide tiles if still no coverage
     if body is None:
@@ -117,21 +118,21 @@ def terrain_footprints(z: int, x: int, y: int) -> JSONResponse:
         raise HTTPException(404, "tile out of range")
 
     features = []
+    # 1. Try S1M (1m) footprints first if zoom is high enough
     if z >= settings.s1m_min_zoom:
-        # 1. Try S1M (1m) footprints first
         try:
             s1m_fc = get_s1m_resolver().resolve_footprints(z, x, y, dataset_type="s1m")
             features = s1m_fc.get("features", [])
         except Exception:
             pass
 
-        # 2. If no S1M footprints found, check and return USGS 1/3 Arc-Second footprints
-        if not features:
-            try:
-                usgs13_fc = get_usgs13_resolver().resolve_footprints(z, x, y, dataset_type="usgs13")
-                features = usgs13_fc.get("features", [])
-            except Exception:
-                pass
+    # 2. If no S1M footprints found, check and return USGS 1/3 Arc-Second footprints if zoom is high enough
+    if not features and z >= settings.usgs_min_zoom:
+        try:
+            usgs13_fc = get_usgs13_resolver().resolve_footprints(z, x, y, dataset_type="usgs13")
+            features = usgs13_fc.get("features", [])
+        except Exception:
+            pass
 
     fc = {
         "type": "FeatureCollection",
