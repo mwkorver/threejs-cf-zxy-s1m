@@ -107,7 +107,7 @@ export async function loadViewportFootprints(
   north: number
 ): Promise<FootprintCollection> {
   const res = await fetchTile(
-    `${baseUrl}/terrain-footprints/viewport?west=${west}&south=${south}&east=${east}&north=${north}`,
+    `${baseUrl}/terrain-footprints/viewport/${west}/${south}/${east}/${north}`,
     `viewport footprints`
   );
   return res.json();
