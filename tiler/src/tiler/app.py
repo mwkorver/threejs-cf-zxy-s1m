@@ -7,6 +7,7 @@ CloudFront cache keys stay path-only and every tile is immutable (plan §4.1).
 from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import JSONResponse
 
 from .imagery import render_imagery_tile
 from .registry import LAYERS
@@ -77,16 +78,18 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
 
 
 @app.get("/terrain-footprints/{z}/{x}/{y}.json")
-def terrain_footprints(z: int, x: int, y: int) -> dict:
-    """Return S1M COG footprints intersecting tile z/x/y as GeoJSON."""
+def terrain_footprints(z: int, x: int, y: int) -> JSONResponse:
+    """S1M COG footprints intersecting tile z/x/y as GeoJSON. Immutable like the
+    tiles — the S1M index is static, so CloudFront caches it path-only."""
     n = 2**z
     if not (0 <= z and 0 <= x < n and 0 <= y < n):
         raise HTTPException(404, "tile out of range")
 
     if z >= settings.s1m_min_zoom:
-        return get_s1m_resolver().resolve_footprints(z, x, y)
+        fc = get_s1m_resolver().resolve_footprints(z, x, y)
     else:
-        return {"type": "FeatureCollection", "features": []}
+        fc = {"type": "FeatureCollection", "features": []}
+    return JSONResponse(fc, headers={"Cache-Control": IMMUTABLE})
 
 
 @app.get("/healthz")

@@ -102,6 +102,7 @@ class S1MResolver:
         from pyproj import Transformer
 
         self._to_albers = Transformer.from_crs(4326, S1M_EPSG, always_xy=True)
+        self._to_latlon = Transformer.from_crs(S1M_EPSG, 4326, always_xy=True)
 
     def resolve(self, z: int, x: int, y: int) -> list[str]:
         """s3:// hrefs of S1M COGs intersecting tile z/x/y (empty if none)."""
@@ -157,20 +158,18 @@ class S1MResolver:
             [axmax, axmin, aymax, aymin],
         ).fetchall()
 
+        import shapely.ops
         from shapely import from_wkb
         from shapely.geometry import box, mapping
-        import shapely.ops
-        from pyproj import Transformer
 
         envelope = box(axmin, aymin, axmax, aymax)
-        to_latlon = Transformer.from_crs(S1M_EPSG, 4326, always_xy=True)
 
         features = []
         for dataset, wkb in rows:
             geom = from_wkb(wkb)
             if geom.intersects(envelope):
                 # Reproject geometry to WGS84 for GeoJSON
-                geom_wgs = shapely.ops.transform(to_latlon.transform, geom)
+                geom_wgs = shapely.ops.transform(self._to_latlon.transform, geom)
                 features.append({
                     "type": "Feature",
                     "properties": {

@@ -40,7 +40,8 @@ export class TileManager {
   public showFootprints = false;
 
   public globalUniforms = {
-    hillshadeIntensity: { value: 0.3 },
+    // matches the midday preset + HUD slider default (main.ts applyPreset)
+    hillshadeIntensity: { value: 0.25 },
     sunDirection: { value: new THREE.Vector3(-1, -1, 1.4).normalize() },
     fallbackColor: { value: new THREE.Color(0x556655) },
   };
