@@ -135,3 +135,52 @@ class S1MResolver:
             if from_wkb(wkb).intersects(envelope):
                 hrefs.append(f"s3://{S1M_BUCKET}/StagedProducts/Elevation/{dataset}")
         return hrefs
+
+    def resolve_footprints(self, z: int, x: int, y: int) -> dict:
+        """GeoJSON FeatureCollection of S1M COG footprints intersecting tile z/x/y."""
+        b = TMS.bounds(morecantile.Tile(x, y, z))
+        xs, ys = [], []
+        for lon, lat in [(b.left, b.bottom), (b.right, b.bottom), (b.right, b.top), (b.left, b.top)]:
+            ax, ay = self._to_albers.transform(lon, lat)
+            xs.append(ax)
+            ys.append(ay)
+        axmin, axmax, aymin, aymax = min(xs), max(xs), min(ys), max(ys)
+
+        escaped = self.index_path.replace("'", "''")
+        rows = self._con.execute(
+            f"""
+            SELECT dataset, geometry_wkb
+            FROM read_parquet('{escaped}')
+            WHERE bbox_xmin <= ? AND bbox_xmax >= ?
+              AND bbox_ymin <= ? AND bbox_ymax >= ?
+            """,
+            [axmax, axmin, aymax, aymin],
+        ).fetchall()
+
+        from shapely import from_wkb
+        from shapely.geometry import box, mapping
+        import shapely.ops
+        from pyproj import Transformer
+
+        envelope = box(axmin, aymin, axmax, aymax)
+        to_latlon = Transformer.from_crs(S1M_EPSG, 4326, always_xy=True)
+
+        features = []
+        for dataset, wkb in rows:
+            geom = from_wkb(wkb)
+            if geom.intersects(envelope):
+                # Reproject geometry to WGS84 for GeoJSON
+                geom_wgs = shapely.ops.transform(to_latlon.transform, geom)
+                features.append({
+                    "type": "Feature",
+                    "properties": {
+                        "dataset": dataset,
+                        "href": f"s3://{S1M_BUCKET}/StagedProducts/Elevation/{dataset}"
+                    },
+                    "geometry": mapping(geom_wgs)
+                })
+
+        return {
+            "type": "FeatureCollection",
+            "features": features
+        }

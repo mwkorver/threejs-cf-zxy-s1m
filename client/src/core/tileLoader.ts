@@ -72,3 +72,28 @@ export async function loadManifest(baseUrl: string): Promise<TileManifest> {
   if (!res.ok) throw new Error(`manifest: ${res.status}`);
   return res.json();
 }
+
+export interface FootprintFeature {
+  type: "Feature";
+  properties: {
+    dataset: string;
+    href: string;
+  };
+  geometry: {
+    type: "Polygon" | "MultiPolygon";
+    coordinates: any;
+  };
+}
+
+export interface FootprintCollection {
+  type: "FeatureCollection";
+  features: FootprintFeature[];
+}
+
+export async function loadFootprints(baseUrl: string, t: TileId): Promise<FootprintCollection> {
+  const res = await fetchTile(
+    `${baseUrl}/terrain-footprints/${t.z}/${t.x}/${t.y}.json`,
+    `footprints ${t.z}/${t.x}/${t.y}`
+  );
+  return res.json();
+}

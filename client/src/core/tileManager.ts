@@ -4,10 +4,14 @@ import {
   tileBoundsMercator,
   tileKey,
   mercatorToTile,
+  lonLatToMercator,
+  mercatorScale,
+  mercatorToLonLat
 } from "./mercator";
-import { loadTerrain, loadImagery } from "./tileLoader";
+import { loadTerrain, loadImagery, loadFootprints, type FootprintCollection } from "./tileLoader";
 import { buildTerrainMesh } from "./terrainMesh";
-import { BundleCache } from "./bundleCache";
+import { BundleCache, Bundle } from "./bundleCache";
+import { TerrainShader } from "./terrainShader";
 
 export interface TileNode {
   key: string;
@@ -15,6 +19,7 @@ export interface TileNode {
   bounds: { west: number; south: number; east: number; north: number };
   centerMercator: [number, number];
   mesh?: THREE.Mesh;
+  footprintsMesh?: THREE.LineSegments;
   children?: TileNode[];
   loading: boolean;
   loaded: boolean;
@@ -31,6 +36,14 @@ export class TileManager {
   public gridStep = 8;
   // Vertical exaggeration factor
   public verticalExaggeration = 4;
+  // Toggle for footprints visibility
+  public showFootprints = false;
+
+  public globalUniforms = {
+    hillshadeIntensity: { value: 0.3 },
+    sunDirection: { value: new THREE.Vector3(-1, -1, 1.4).normalize() },
+    fallbackColor: { value: new THREE.Color(0x556655) },
+  };
   
   constructor(
     readonly baseUrl: string,
@@ -217,18 +230,24 @@ export class TileManager {
     // Check if the bundle exists in the cache
     const cached = this.bundleCache.get(key);
     if (cached) {
-      this.createMeshFromBundle(node, cached.geometry, cached.texture);
+      this.createMeshFromBundle(node, cached.geometry, cached.texture, cached.footprints);
       node.loaded = true;
       node.loading = false;
       return;
     }
 
+    // Load S1M footprints only if near field (z >= 12)
+    const fetchFootprints = node.tile.z >= 12
+      ? loadFootprints(this.baseUrl, node.tile).catch(() => null)
+      : Promise.resolve(null);
+
     // Load from backend tiler
     Promise.all([
       loadTerrain(this.baseUrl, node.tile),
       loadImagery(this.baseUrl, this.layer, this.year, node.tile).catch(() => null),
+      fetchFootprints
     ])
-      .then(([heights, imageBitmap]) => {
+      .then(([heights, imageBitmap, footprintsData]) => {
         if (!node.loading) {
           // Node was pruned/cancelled during fetch
           if (imageBitmap) imageBitmap.close();
@@ -240,8 +259,8 @@ export class TileManager {
         const geom = new THREE.BufferGeometry();
         geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
         geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
+        geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
         geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
-        geom.computeVertexNormals();
 
         // Create texture if imagery loaded successfully
         let texture: THREE.Texture | undefined;
@@ -251,16 +270,34 @@ export class TileManager {
           texture.anisotropy = 4;
         }
 
-        // Calculate rough bytes: positions (float32=4 bytes) + indices (uint32=4) + texture (512x512 RGBA=1MB)
+        // Build S1M footprints lines if data is present
+        const bounds = tileBoundsMercator(node.tile);
+        const [, centerLat] = mercatorToLonLat((bounds.west + bounds.east) / 2, (bounds.north + bounds.south) / 2);
+        const zScale = mercatorScale(centerLat);
+
+        let footprintsMesh: THREE.LineSegments | undefined;
+        if (footprintsData) {
+          footprintsMesh = this.buildFootprintsMesh(footprintsData, bounds, heights, zScale);
+        }
+
+        // Calculate rough bytes: positions (float32=4 bytes) + normals (float32=4) + indices (uint32=4) + texture (512x512 RGBA=1MB) + footprints geometry
+        let footprintsBytes = 0;
+        if (footprintsMesh) {
+          const posAttr = footprintsMesh.geometry.getAttribute("position");
+          footprintsBytes = posAttr ? posAttr.count * 3 * 4 : 0;
+        }
+
         const bytes =
           meshData.positions.byteLength +
+          meshData.normals.byteLength +
           meshData.indices.byteLength +
-          (texture ? 512 * 512 * 4 : 0);
+          (texture ? 512 * 512 * 4 : 0) +
+          footprintsBytes;
 
-        const bundle = { key, bytes, geometry: geom, texture };
+        const bundle: Bundle = { key, bytes, geometry: geom, texture, footprints: footprintsMesh };
         this.bundleCache.put(bundle, this.activeKeys);
 
-        this.createMeshFromBundle(node, geom, texture);
+        this.createMeshFromBundle(node, geom, texture, footprintsMesh);
         node.loaded = true;
         node.loading = false;
         node.retryAfter = undefined;
@@ -274,18 +311,99 @@ export class TileManager {
       });
   }
 
+  private buildFootprintsMesh(
+    footprints: FootprintCollection,
+    bounds: { west: number; south: number; east: number; north: number },
+    heights: Float32Array,
+    zScale: number
+  ): THREE.LineSegments | undefined {
+    if (!footprints.features || footprints.features.length === 0) {
+      return undefined;
+    }
+
+    const tileW = bounds.east - bounds.west;
+    const tileH = bounds.north - bounds.south;
+    const vertices: number[] = [];
+
+    const addRingSegments = (ring: [number, number][]) => {
+      if (ring.length < 2) return;
+
+      const localCoords: [number, number, number][] = [];
+      for (const [lon, lat] of ring) {
+        const [mx, my] = lonLatToMercator(lon, lat);
+        const localX = mx - bounds.west;
+        const localY = my - bounds.north;
+
+        // Sample height
+        const u = (mx - bounds.west) / tileW;
+        const v = (bounds.north - my) / tileH;
+        const col = Math.max(0, Math.min(511, Math.round(u * 511)));
+        const row = Math.max(0, Math.min(511, Math.round(v * 511)));
+        const h = heights[row * 512 + col] ?? 0;
+
+        // Unexaggerated Z coordinate, with a tiny offset (3.0 meters) to avoid Z-fighting
+        const localZ = h * zScale + 3.0;
+
+        localCoords.push([localX, localY, localZ]);
+      }
+
+      for (let i = 0; i < localCoords.length - 1; i++) {
+        const p0 = localCoords[i]!;
+        const p1 = localCoords[i + 1]!;
+        vertices.push(...p0, ...p1);
+      }
+    };
+
+    for (const feat of footprints.features) {
+      const geom = feat.geometry;
+      if (geom.type === "Polygon") {
+        for (const ring of geom.coordinates) {
+          addRingSegments(ring);
+        }
+      } else if (geom.type === "MultiPolygon") {
+        for (const poly of geom.coordinates) {
+          for (const ring of poly) {
+            addRingSegments(ring);
+          }
+        }
+      }
+    }
+
+    if (vertices.length === 0) return undefined;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+
+    // A nice bright, glowing cyan material for footprint outlines
+    const mat = new THREE.LineBasicMaterial({
+      color: 0x00ffff,
+      transparent: true,
+      opacity: 0.8
+    });
+
+    const lines = new THREE.LineSegments(geom, mat);
+    return lines;
+  }
+
   private createMeshFromBundle(
     node: TileNode,
     geom: THREE.BufferGeometry,
-    texture?: THREE.Texture
+    texture?: THREE.Texture,
+    footprintsMesh?: THREE.LineSegments
   ): void {
-    let material: THREE.Material;
-    if (texture) {
-      material = new THREE.MeshStandardMaterial({ map: texture, roughness: 1.0 });
-    } else {
-      // Fallback fallback colored grid for missing imagery
-      material = new THREE.MeshStandardMaterial({ color: 0x556655, roughness: 1.0 });
-    }
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        map: { value: texture || null },
+        useTexture: { value: !!texture },
+        fallbackColor: this.globalUniforms.fallbackColor,
+        hillshadeIntensity: this.globalUniforms.hillshadeIntensity,
+        sunDirection: this.globalUniforms.sunDirection,
+        ...THREE.UniformsLib.fog
+      },
+      vertexShader: TerrainShader.vertexShader,
+      fragmentShader: TerrainShader.fragmentShader,
+      fog: true
+    });
 
     const mesh = new THREE.Mesh(geom, material);
     // Position NW anchor relative to worldAnchor to maintain float32 coordinate precision
@@ -298,6 +416,16 @@ export class TileManager {
     mesh.scale.z = this.verticalExaggeration;
 
     node.mesh = mesh;
+
+    if (footprintsMesh) {
+      footprintsMesh.position.set(
+        node.bounds.west - this.worldAnchor[0],
+        node.bounds.north - this.worldAnchor[1],
+        0
+      );
+      footprintsMesh.scale.z = this.verticalExaggeration;
+      node.footprintsMesh = footprintsMesh;
+    }
   }
 
   /**
@@ -308,8 +436,16 @@ export class TileManager {
       if (node.mesh.parent !== this.scene) {
         this.scene.add(node.mesh);
       }
-    } else if (node.mesh && node.mesh.parent === this.scene) {
-      this.scene.remove(node.mesh);
+      if (this.showFootprints && node.footprintsMesh && node.footprintsMesh.parent !== this.scene) {
+        this.scene.add(node.footprintsMesh);
+      }
+    } else {
+      if (node.mesh && node.mesh.parent === this.scene) {
+        this.scene.remove(node.mesh);
+      }
+      if (node.footprintsMesh && node.footprintsMesh.parent === this.scene) {
+        this.scene.remove(node.footprintsMesh);
+      }
     }
 
     if (node.children) {
@@ -332,6 +468,12 @@ export class TileManager {
       }
       node.mesh = undefined;
     }
+    if (node.footprintsMesh) {
+      if (node.footprintsMesh.parent === this.scene) {
+        this.scene.remove(node.footprintsMesh);
+      }
+      node.footprintsMesh = undefined;
+    }
 
     node.loaded = false;
 
@@ -340,6 +482,57 @@ export class TileManager {
         this.pruneNode(child);
       }
       delete node.children;
+    }
+  }
+
+  /**
+   * Dynamically update the vertical exaggeration of all existing meshes and future ones.
+   */
+  setVerticalExaggeration(val: number): void {
+    this.verticalExaggeration = val;
+    const updateScale = (node: TileNode) => {
+      if (node.mesh) {
+        node.mesh.scale.z = val;
+      }
+      if (node.footprintsMesh) {
+        node.footprintsMesh.scale.z = val;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          updateScale(child);
+        }
+      }
+    };
+    for (const node of this.rootNodes.values()) {
+      updateScale(node);
+    }
+  }
+
+  /**
+   * Dynamically toggle footprints visibility in the scene.
+   */
+  setShowFootprints(show: boolean): void {
+    this.showFootprints = show;
+    const updateVisibility = (node: TileNode) => {
+      if (node.footprintsMesh) {
+        if (show && node.visible && node.loaded) {
+          if (node.footprintsMesh.parent !== this.scene) {
+            this.scene.add(node.footprintsMesh);
+          }
+        } else {
+          if (node.footprintsMesh.parent === this.scene) {
+            this.scene.remove(node.footprintsMesh);
+          }
+        }
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          updateVisibility(child);
+        }
+      }
+    };
+    for (const node of this.rootNodes.values()) {
+      updateVisibility(node);
     }
   }
 

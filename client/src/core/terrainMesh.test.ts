@@ -17,6 +17,7 @@ describe("buildTerrainMesh", () => {
     expect(m.gridSize).toBe(g);
     expect(m.positions.length).toBe((g * g + edge) * 3);
     expect(m.uvs.length).toBe((g * g + edge) * 2);
+    expect(m.normals.length).toBe((g * g + edge) * 3);
     // quad tris + skirt tris
     expect(m.indices.length).toBe(n * n * 6 + edge * 6);
   });

@@ -27,6 +27,7 @@ export interface TerrainMesh {
   positions: Float32Array;
   /** Texture coords into the tile's imagery, [u, v, ...] in [0,1]. */
   uvs: Float32Array;
+  normals: Float32Array;
   indices: Uint32Array;
   /** Mercator-meter NW anchor (float64) positions are relative to. */
   anchor: [number, number];
@@ -81,6 +82,11 @@ export function buildTerrainMesh(
 
   const positions = new Float32Array(vertCount * 3);
   const uvs = new Float32Array(vertCount * 2);
+  const normals = new Float32Array(vertCount * 3);
+
+  // Step size in ground meters for normal calculations
+  const dx_ground = tileW / (n * zScale);
+  const dy_ground = tileH / (n * zScale);
 
   const setVert = (vi: number, col: number, row: number, dz: number) => {
     const u = col / n;
@@ -96,7 +102,32 @@ export function buildTerrainMesh(
   // Interior vertices, row-major.
   for (let row = 0; row <= n; row++) {
     for (let col = 0; col <= n; col++) {
-      setVert(row * g + col, col, row, 0);
+      const vi = row * g + col;
+      setVert(vi, col, row, 0);
+
+      // Compute true unexaggerated normal at this vertex using central differences
+      const colLeft = Math.max(0, col - 1);
+      const colRight = Math.min(n, col + 1);
+      const rowTop = Math.max(0, row - 1);
+      const rowBottom = Math.min(n, row + 1);
+
+      const hLeft = heights[sampleAt(row) * tileSize + sampleAt(colLeft)] ?? 0;
+      const hRight = heights[sampleAt(row) * tileSize + sampleAt(colRight)] ?? 0;
+      const hTop = heights[sampleAt(rowTop) * tileSize + sampleAt(col)] ?? 0;
+      const hBottom = heights[sampleAt(rowBottom) * tileSize + sampleAt(col)] ?? 0;
+
+      const distX = (colRight - colLeft) * dx_ground;
+      const distY = (rowBottom - rowTop) * dy_ground;
+
+      const slopeX = distX > 0 ? (hRight - hLeft) / distX : 0;
+      const slopeY = distY > 0 ? (hTop - hBottom) / distY : 0;
+
+      // Tangents: T_x = (1, 0, slopeX), T_y = (0, 1, slopeY)
+      // Normal: T_x x T_y = (-slopeX, -slopeY, 1)
+      const len = Math.sqrt(slopeX * slopeX + slopeY * slopeY + 1.0);
+      normals[vi * 3] = -slopeX / len;
+      normals[vi * 3 + 1] = -slopeY / len;
+      normals[vi * 3 + 2] = 1.0 / len;
     }
   }
 
@@ -135,6 +166,12 @@ export function buildTerrainMesh(
     positions[skirtBase * 3 + 2] = positions[top * 3 + 2]! - skirtDrop;
     uvs[skirtBase * 2] = uvs[top * 2]!;
     uvs[skirtBase * 2 + 1] = uvs[top * 2 + 1]!;
+
+    // Copy the true normal to the skirt vertex
+    normals[skirtBase * 3] = normals[top * 3]!;
+    normals[skirtBase * 3 + 1] = normals[top * 3 + 1]!;
+    normals[skirtBase * 3 + 2] = normals[top * 3 + 2]!;
+
     skirtBase++;
   }
 
@@ -149,5 +186,5 @@ export function buildTerrainMesh(
     indices[k++] = t1; indices[k++] = b0; indices[k++] = b1;
   }
 
-  return { positions, uvs, indices, anchor, tile, gridSize: g };
+  return { positions, uvs, normals, indices, anchor, tile, gridSize: g };
 }
