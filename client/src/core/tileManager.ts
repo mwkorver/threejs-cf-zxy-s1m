@@ -409,6 +409,9 @@ export class TileManager {
     geom.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
     geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
 
+    geom.computeBoundingSphere();
+    geom.computeBoundingBox();
+
     const mat = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
@@ -416,7 +419,9 @@ export class TileManager {
       depthTest: false // Render on top of everything!
     });
 
-    return new THREE.LineSegments(geom, mat);
+    const lines = new THREE.LineSegments(geom, mat);
+    lines.frustumCulled = false;
+    return lines;
   }
 
   private createMeshFromBundle(

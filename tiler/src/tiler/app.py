@@ -126,7 +126,7 @@ def terrain_footprints(z: int, x: int, y: int) -> JSONResponse:
     return JSONResponse(fc, headers={"Cache-Control": IMMUTABLE})
 
 
-@app.get("/terrain-footprints/viewport")
+@app.get("/terrain-footprints/viewport/{west}/{south}/{east}/{north}")
 def terrain_footprints_viewport(west: float, south: float, east: float, north: float) -> JSONResponse:
     """GeoJSON FeatureCollection of S1M and USGS 1/3 arc-second footprints intersecting a bounding box."""
     features = []
