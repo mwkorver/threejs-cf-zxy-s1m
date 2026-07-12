@@ -39,22 +39,22 @@ class CogAsset:
         return self.source_bucket in REQUESTER_PAYS_BUCKETS
 
 
-def lake_read_path(lake_root: str, collection: str, year: int) -> str:
-    """Narrow read_parquet to the collection/year partition subtree.
+def lake_read_path(lake_root: str, collection: str) -> str:
+    """Narrow read_parquet to the collection partition subtree.
 
     Lake layout (from the source repo's ingest): collection=<id>/region=<state>/
-    year=<yyyy>/*.parquet. Region is unknown at tile time, so it stays a glob.
+    year=<yyyy>/*.parquet. Both region and year stay a glob for cross-year fallback.
     """
-    return f"{lake_root.rstrip('/')}/collection={collection}/region=*/year={year}/*.parquet"
+    return f"{lake_root.rstrip('/')}/collection={collection}/region=*/year=*/*.parquet"
 
 
-def build_tile_query(read_path: str, west: float, south: float, east: float, north: float) -> str:
-    """The ported /search intersect query, scoped to one tile envelope.
+def build_tile_query(read_path: str, west: float, south: float, east: float, north: float, requested_year: int) -> str:
+    """The /search intersect query, scoped to one tile envelope.
 
     bbox columns prune cheaply against parquet row-group stats; ST_Intersects
-    refines against the exact footprint (irregular NAIP quarter-quads).
-    Sort finest-first so the mosaic reader lays sharpest pixels down first.
-    Bounds are computed floats (never user strings) — safe to interpolate.
+    refines against the exact footprint.
+    Finds the latest available year up to the requested year for each state/region,
+    and layers the more recent year on top.
     """
     return f"""
         select asset_href, source_bucket, gsd
@@ -62,7 +62,13 @@ def build_tile_query(read_path: str, west: float, south: float, east: float, nor
         where bbox_xmin <= {east} and bbox_xmax >= {west}
           and bbox_ymin <= {north} and bbox_ymax >= {south}
           and ST_Intersects(geometry, ST_MakeEnvelope({west}, {south}, {east}, {north}))
-        order by gsd asc nulls last, source_key asc
+          and (region, year) in (
+              select region, max(year)
+              from read_parquet('{read_path}', hive_partitioning=true)
+              where year <= {requested_year}
+              group by region
+          )
+        order by year desc, gsd asc nulls last, source_key asc
         limit {MAX_ASSETS_PER_TILE}
     """
 
@@ -76,12 +82,12 @@ class MosaicResolver:
 
     def resolve(self, collection: str, year: int, z: int, x: int, y: int) -> list[CogAsset]:
         bounds = TMS.bounds(morecantile.Tile(x, y, z))  # geographic (4326)
-        path = lake_read_path(self.lake_root, collection, year)
-        sql = build_tile_query(path, bounds.left, bounds.bottom, bounds.right, bounds.top)
+        path = lake_read_path(self.lake_root, collection)
+        sql = build_tile_query(path, bounds.left, bounds.bottom, bounds.right, bounds.top, year)
         try:
             rows = self._con.execute(sql).fetchall()
         except duckdb.IOException:
-            # No partition for this collection/year -> empty glob -> 404 upstream
+            # No partition for this collection -> empty glob -> 404 upstream
             return []
         return [CogAsset(href=r[0], source_bucket=r[1], gsd=r[2]) for r in rows]
 
