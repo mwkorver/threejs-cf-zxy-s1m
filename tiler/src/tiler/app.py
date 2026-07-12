@@ -97,16 +97,31 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
 
 @app.get("/terrain-footprints/{z}/{x}/{y}.json")
 def terrain_footprints(z: int, x: int, y: int) -> JSONResponse:
-    """S1M COG footprints intersecting tile z/x/y as GeoJSON. Immutable like the
-    tiles — the S1M index is static, so CloudFront caches it path-only."""
+    """COG footprints intersecting tile z/x/y as GeoJSON, combining S1M (1m) and USGS 1/3 arc-second (10m) boundaries."""
     n = 2**z
     if not (0 <= z and 0 <= x < n and 0 <= y < n):
         raise HTTPException(404, "tile out of range")
 
+    features = []
     if z >= settings.s1m_min_zoom:
-        fc = get_s1m_resolver().resolve_footprints(z, x, y)
-    else:
-        fc = {"type": "FeatureCollection", "features": []}
+        # Fetch S1M (1m) footprints
+        try:
+            s1m_fc = get_s1m_resolver().resolve_footprints(z, x, y, dataset_type="s1m")
+            features.extend(s1m_fc.get("features", []))
+        except Exception:
+            pass
+
+        # Fetch USGS 1/3 Arc-Second (10m) footprints
+        try:
+            usgs13_fc = get_usgs13_resolver().resolve_footprints(z, x, y, dataset_type="usgs13")
+            features.extend(usgs13_fc.get("features", []))
+        except Exception:
+            pass
+
+    fc = {
+        "type": "FeatureCollection",
+        "features": features
+    }
     return JSONResponse(fc, headers={"Cache-Control": IMMUTABLE})
 
 
