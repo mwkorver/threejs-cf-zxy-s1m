@@ -8,6 +8,7 @@ vi.mock("./tileLoader", () => ({
   loadTerrain: vi.fn(() => Promise.resolve(new Float32Array(512 * 512))),
   loadImagery: vi.fn(() => Promise.resolve(null)),
   loadFootprints: vi.fn(() => Promise.resolve({ type: "FeatureCollection", features: [] })),
+  loadViewportFootprints: vi.fn(() => Promise.resolve({ type: "FeatureCollection", features: [] })),
 }));
 
 describe("TileManager", () => {

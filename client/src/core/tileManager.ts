@@ -8,7 +8,7 @@ import {
   mercatorScale,
   mercatorToLonLat
 } from "./mercator";
-import { loadTerrain, loadImagery, loadFootprints, type FootprintCollection } from "./tileLoader";
+import { loadTerrain, loadImagery, loadViewportFootprints, type FootprintCollection } from "./tileLoader";
 import { buildTerrainMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import { TerrainShader } from "./terrainShader";
@@ -19,7 +19,6 @@ export interface TileNode {
   bounds: { west: number; south: number; east: number; north: number };
   centerMercator: [number, number];
   mesh?: THREE.Mesh;
-  footprintsMesh?: THREE.LineSegments;
   labelSprite?: THREE.Sprite;
   centerElevation?: number;
   children?: TileNode[];
@@ -42,6 +41,11 @@ export class TileManager {
   public showFootprints = false;
   // Toggle for Z/X/Y tile labels visibility
   public showLabels = false;
+
+  // Viewport footprint global mesh & cache box
+  private footprintsMesh?: THREE.LineSegments;
+  private loadedFootprintsBBox?: { west: number; south: number; east: number; north: number };
+  private isFetchingFootprints = false;
 
   public globalUniforms = {
     // matches the midday preset + HUD slider default (main.ts applyPreset)
@@ -142,6 +146,9 @@ export class TileManager {
     for (const node of this.rootNodes.values()) {
       this.syncScene(node);
     }
+
+    // 8. Update viewport-wide footprints
+    this.updateViewportFootprints();
   }
 
   /**
@@ -274,24 +281,18 @@ export class TileManager {
       if (!node.labelSprite) {
         node.labelSprite = this.buildLabelSprite(node.tile, tileBoundsMercator(node.tile), cached.centerElevation ?? 0);
       }
-      this.createMeshFromBundle(node, cached.geometry, cached.texture, cached.footprints);
+      this.createMeshFromBundle(node, cached.geometry, cached.texture);
       node.loaded = true;
       node.loading = false;
       return;
     }
 
-    // Load S1M footprints only if near field (z >= 12)
-    const fetchFootprints = node.tile.z >= 12
-      ? loadFootprints(this.baseUrl, node.tile).catch(() => null)
-      : Promise.resolve(null);
-
     // Load from backend tiler
     Promise.all([
       loadTerrain(this.baseUrl, node.tile),
-      loadImagery(this.baseUrl, this.layer, this.year, node.tile).catch(() => null),
-      fetchFootprints
+      loadImagery(this.baseUrl, this.layer, this.year, node.tile).catch(() => null)
     ])
-      .then(([heights, imageBitmap, footprintsData]) => {
+      .then(([heights, imageBitmap]) => {
         if (!node.loading) {
           // Node was pruned/cancelled during fetch
           if (imageBitmap) imageBitmap.close();
@@ -314,43 +315,26 @@ export class TileManager {
           texture.anisotropy = 4;
         }
 
-        // Build S1M footprints lines if data is present
-        const bounds = tileBoundsMercator(node.tile);
-        const [, centerLat] = mercatorToLonLat((bounds.west + bounds.east) / 2, (bounds.north + bounds.south) / 2);
-        const zScale = mercatorScale(centerLat);
-
-        let footprintsMesh: THREE.LineSegments | undefined;
-        if (footprintsData) {
-          footprintsMesh = this.buildFootprintsMesh(footprintsData, bounds, heights, zScale);
-        }
-
-        // Calculate rough bytes: positions (float32=4 bytes) + normals (float32=4) + indices (uint32=4) + texture (512x512 RGBA=1MB) + footprints geometry
-        let footprintsBytes = 0;
-        if (footprintsMesh) {
-          const posAttr = footprintsMesh.geometry.getAttribute("position");
-          footprintsBytes = posAttr ? posAttr.count * 3 * 4 : 0;
-        }
-
         const bytes =
           meshData.positions.byteLength +
           meshData.normals.byteLength +
           meshData.indices.byteLength +
-          (texture ? 512 * 512 * 4 : 0) +
-          footprintsBytes;
+          (texture ? 512 * 512 * 4 : 0);
 
         const centerCol = 256;
         const centerRow = 256;
         const centerH = heights[centerRow * 512 + centerCol] ?? 0;
         node.centerElevation = centerH;
 
+        const bounds = tileBoundsMercator(node.tile);
         if (!node.labelSprite) {
           node.labelSprite = this.buildLabelSprite(node.tile, bounds, centerH);
         }
 
-        const bundle: Bundle = { key, bytes, geometry: geom, texture, footprints: footprintsMesh, centerElevation: centerH };
+        const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation: centerH };
         this.bundleCache.put(bundle, this.activeKeys);
 
-        this.createMeshFromBundle(node, geom, texture, footprintsMesh);
+        this.createMeshFromBundle(node, geom, texture);
         node.loaded = true;
         node.loading = false;
         node.retryAfter = undefined;
@@ -364,18 +348,13 @@ export class TileManager {
       });
   }
 
-  private buildFootprintsMesh(
-    footprints: FootprintCollection,
-    bounds: { west: number; south: number; east: number; north: number },
-    heights: Float32Array,
-    zScale: number
+  private buildViewportFootprintsMesh(
+    footprints: FootprintCollection
   ): THREE.LineSegments | undefined {
     if (!footprints.features || footprints.features.length === 0) {
       return undefined;
     }
 
-    const tileW = bounds.east - bounds.west;
-    const tileH = bounds.north - bounds.south;
     const vertices: number[] = [];
     const colors: number[] = [];
 
@@ -388,18 +367,13 @@ export class TileManager {
       const localCoords: [number, number, number][] = [];
       for (const [lon, lat] of ring) {
         const [mx, my] = lonLatToMercator(lon, lat);
-        const localX = mx - bounds.west;
-        const localY = my - bounds.north;
+        const localX = mx - this.worldAnchor[0];
+        const localY = my - this.worldAnchor[1];
 
-        // Sample height
-        const u = (mx - bounds.west) / tileW;
-        const v = (bounds.north - my) / tileH;
-        const col = Math.max(0, Math.min(511, Math.round(u * 511)));
-        const row = Math.max(0, Math.min(511, Math.round(v * 511)));
-        const h = heights[row * 512 + col] ?? 0;
-
-        // Unexaggerated Z coordinate, with a tiny offset (3.0 meters) to avoid Z-fighting
-        const localZ = h * zScale + 3.0;
+        // Draw at flat sea level (Z = 20.0) to avoid terrain sampling complexity.
+        // We will disable depth testing on the material so the lines draw directly
+        // on top of the terrain like a clean wireframe overlay.
+        const localZ = 20.0; 
 
         localCoords.push([localX, localY, localZ]);
       }
@@ -414,7 +388,6 @@ export class TileManager {
 
     for (const feat of footprints.features) {
       const geom = feat.geometry;
-      // Default to S1M if properties/type is missing (e.g. backward compatibility)
       const isS1M = feat.properties?.type !== "usgs13";
       
       if (geom.type === "Polygon") {
@@ -436,22 +409,20 @@ export class TileManager {
     geom.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
     geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
 
-    // Enable vertexColors to apply per-segment S1M vs USGS 1/3 colors
     const mat = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.8
+      opacity: 0.8,
+      depthTest: false // Render on top of everything!
     });
 
-    const lines = new THREE.LineSegments(geom, mat);
-    return lines;
+    return new THREE.LineSegments(geom, mat);
   }
 
   private createMeshFromBundle(
     node: TileNode,
     geom: THREE.BufferGeometry,
-    texture?: THREE.Texture,
-    footprintsMesh?: THREE.LineSegments
+    texture?: THREE.Texture
   ): void {
     const material = new THREE.ShaderMaterial({
       uniforms: {
@@ -479,16 +450,6 @@ export class TileManager {
     mesh.scale.z = this.verticalExaggeration;
 
     node.mesh = mesh;
-
-    if (footprintsMesh) {
-      footprintsMesh.position.set(
-        node.bounds.west - this.worldAnchor[0],
-        node.bounds.north - this.worldAnchor[1],
-        0
-      );
-      footprintsMesh.scale.z = this.verticalExaggeration;
-      node.footprintsMesh = footprintsMesh;
-    }
   }
 
   /**
@@ -498,16 +459,6 @@ export class TileManager {
     if (node.visible && node.loaded && node.mesh) {
       if (node.mesh.parent !== this.scene) {
         this.scene.add(node.mesh);
-      }
-      // Add/remove footprints to track the toggle even while the tile stays
-      // visible (otherwise unchecking leaves them on screen until prune).
-      if (node.footprintsMesh) {
-        const inScene = node.footprintsMesh.parent === this.scene;
-        if (this.showFootprints && !inScene) {
-          this.scene.add(node.footprintsMesh);
-        } else if (!this.showFootprints && inScene) {
-          this.scene.remove(node.footprintsMesh);
-        }
       }
       if (node.labelSprite) {
         const inScene = node.labelSprite.parent === this.scene;
@@ -520,9 +471,6 @@ export class TileManager {
     } else {
       if (node.mesh && node.mesh.parent === this.scene) {
         this.scene.remove(node.mesh);
-      }
-      if (node.footprintsMesh && node.footprintsMesh.parent === this.scene) {
-        this.scene.remove(node.footprintsMesh);
       }
       if (node.labelSprite && node.labelSprite.parent === this.scene) {
         this.scene.remove(node.labelSprite);
@@ -547,20 +495,9 @@ export class TileManager {
       if (node.mesh.parent === this.scene) {
         this.scene.remove(node.mesh);
       }
-      // Dispose the per-mesh ShaderMaterial — it's created fresh per mesh in
-      // createMeshFromBundle and is NOT owned by the bundle cache (which owns
-      // geometry + texture + footprints). Not disposing it leaks a material +
-      // its uniforms on every tile eviction.
+      // Dispose the per-mesh ShaderMaterial
       (node.mesh.material as THREE.Material).dispose();
       node.mesh = undefined;
-    }
-    if (node.footprintsMesh) {
-      // Footprints geometry/material are owned by the bundle cache — just
-      // detach from the scene here.
-      if (node.footprintsMesh.parent === this.scene) {
-        this.scene.remove(node.footprintsMesh);
-      }
-      node.footprintsMesh = undefined;
     }
     if (node.labelSprite) {
       if (node.labelSprite.parent === this.scene) {
@@ -592,9 +529,6 @@ export class TileManager {
       if (node.mesh) {
         node.mesh.scale.z = val;
       }
-      if (node.footprintsMesh) {
-        node.footprintsMesh.scale.z = val;
-      }
       if (node.labelSprite && node.centerElevation !== undefined) {
         node.labelSprite.position.z = node.centerElevation * val + 150;
       }
@@ -614,26 +548,14 @@ export class TileManager {
    */
   setShowFootprints(show: boolean): void {
     this.showFootprints = show;
-    const updateVisibility = (node: TileNode) => {
-      if (node.footprintsMesh) {
-        if (show && node.visible && node.loaded) {
-          if (node.footprintsMesh.parent !== this.scene) {
-            this.scene.add(node.footprintsMesh);
-          }
-        } else {
-          if (node.footprintsMesh.parent === this.scene) {
-            this.scene.remove(node.footprintsMesh);
-          }
-        }
+    if (!show && this.footprintsMesh) {
+      if (this.footprintsMesh.parent === this.scene) {
+        this.scene.remove(this.footprintsMesh);
       }
-      if (node.children) {
-        for (const child of node.children) {
-          updateVisibility(child);
-        }
-      }
-    };
-    for (const node of this.rootNodes.values()) {
-      updateVisibility(node);
+      this.footprintsMesh.geometry.dispose();
+      (this.footprintsMesh.material as THREE.Material).dispose();
+      this.footprintsMesh = undefined;
+      this.loadedFootprintsBBox = undefined;
     }
   }
 
@@ -739,6 +661,98 @@ export class TileManager {
     return sprite;
   }
 
+  private updateViewportFootprints(): void {
+    if (!this.showFootprints) {
+      return;
+    }
+
+    // 1. Compute current visible bounding box by unioning bounds of active visible nodes
+    let west = Infinity, east = -Infinity, south = Infinity, north = -Infinity;
+    let hasVisible = false;
+
+    const collectBounds = (node: TileNode) => {
+      if (node.visible && node.loaded) {
+        west = Math.min(west, node.bounds.west);
+        east = Math.max(east, node.bounds.east);
+        south = Math.min(south, node.bounds.south);
+        north = Math.max(north, node.bounds.north);
+        hasVisible = true;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          collectBounds(child);
+        }
+      }
+    };
+
+    for (const node of this.rootNodes.values()) {
+      collectBounds(node);
+    }
+
+    if (!hasVisible) {
+      return;
+    }
+
+    // Convert bounds to lon/lat geographic coordinates
+    const [westLon, southLat] = mercatorToLonLat(west, south);
+    const [eastLon, northLat] = mercatorToLonLat(east, north);
+
+    // 2. Check if the current visible bbox is fully contained in loadedFootprintsBBox
+    const isContained =
+      this.loadedFootprintsBBox &&
+      westLon >= this.loadedFootprintsBBox.west &&
+      eastLon <= this.loadedFootprintsBBox.east &&
+      southLat >= this.loadedFootprintsBBox.south &&
+      northLat <= this.loadedFootprintsBBox.north;
+
+    if (isContained || this.isFetchingFootprints) {
+      return;
+    }
+
+    // 3. Query viewport-based footprints with a 50% buffer padding
+    this.isFetchingFootprints = true;
+    const dw = eastLon - westLon;
+    const dh = northLat - southLat;
+
+    const qWest = westLon - 0.5 * dw;
+    const qEast = eastLon + 0.5 * dw;
+    const qSouth = southLat - 0.5 * dh;
+    const qNorth = northLat + 0.5 * dh;
+
+    loadViewportFootprints(this.baseUrl, qWest, qSouth, qEast, qNorth)
+      .then((footprints) => {
+        if (!this.showFootprints) {
+          this.isFetchingFootprints = false;
+          return;
+        }
+
+        const lines = this.buildViewportFootprintsMesh(footprints);
+
+        // Replace the old mesh in the scene
+        if (this.footprintsMesh) {
+          if (this.footprintsMesh.parent === this.scene) {
+            this.scene.remove(this.footprintsMesh);
+          }
+          this.footprintsMesh.geometry.dispose();
+          (this.footprintsMesh.material as THREE.Material).dispose();
+        }
+
+        if (lines) {
+          this.footprintsMesh = lines;
+          this.scene.add(this.footprintsMesh);
+        } else {
+          this.footprintsMesh = undefined;
+        }
+
+        this.loadedFootprintsBBox = { west: qWest, south: qSouth, east: qEast, north: qNorth };
+        this.isFetchingFootprints = false;
+      })
+      .catch((err) => {
+        console.warn(`Failed to load viewport footprints: ${err.message}`);
+        this.isFetchingFootprints = false;
+      });
+  }
+
   /**
    * Completely clean up all roots and scene meshes.
    */
@@ -748,5 +762,15 @@ export class TileManager {
     }
     this.rootNodes.clear();
     this.activeKeys.clear();
+
+    if (this.footprintsMesh) {
+      if (this.footprintsMesh.parent === this.scene) {
+        this.scene.remove(this.footprintsMesh);
+      }
+      this.footprintsMesh.geometry.dispose();
+      (this.footprintsMesh.material as THREE.Material).dispose();
+      this.footprintsMesh = undefined;
+    }
+    this.loadedFootprintsBBox = undefined;
   }
 }
