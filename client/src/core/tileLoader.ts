@@ -98,3 +98,17 @@ export async function loadFootprints(baseUrl: string, t: TileId): Promise<Footpr
   );
   return res.json();
 }
+
+export async function loadViewportFootprints(
+  baseUrl: string,
+  west: number,
+  south: number,
+  east: number,
+  north: number
+): Promise<FootprintCollection> {
+  const res = await fetchTile(
+    `${baseUrl}/terrain-footprints/viewport?west=${west}&south=${south}&east=${east}&north=${north}`,
+    `viewport footprints`
+  );
+  return res.json();
+}
