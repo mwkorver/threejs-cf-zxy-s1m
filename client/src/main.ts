@@ -100,6 +100,15 @@ hud.innerHTML = `
   <div style="margin-bottom: 4px;">LAT/LON: <span id="hud-pos">- / -</span></div>
   <div style="margin-bottom: 4px;">ALTITUDE: <span id="hud-alt">0</span> m</div>
   <div style="margin-bottom: 4px;">SPEED: <span id="hud-speed">0</span> kt</div>
+
+  <div style="margin-top: 8px; margin-bottom: 8px;">
+    <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+      <span>FLIGHT SPEED SETTING</span>
+      <span id="val-speed-ctrl">200 kt</span>
+    </div>
+    <input type="range" id="ctrl-speed-ctrl" min="50" max="1000" step="10" value="200" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+  </div>
+
   <div style="margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; margin-bottom: 4px;">ACTIVE TILES: <span id="hud-tiles">0</span></div>
   <div>GPU CACHE: <span id="hud-cache">0.00</span> / 256 MB</div>
   
@@ -199,12 +208,14 @@ const ctrlAltitude = document.getElementById("ctrl-altitude") as HTMLInputElemen
 const ctrlFog = document.getElementById("ctrl-fog") as HTMLInputElement;
 const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInputElement;
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
+const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
 
 const valHillshade = document.getElementById("val-hillshade")!;
 const valAzimuth = document.getElementById("val-azimuth")!;
 const valAltitude = document.getElementById("val-altitude")!;
 const valFog = document.getElementById("val-fog")!;
 const valExaggeration = document.getElementById("val-exaggeration")!;
+const valSpeedCtrl = document.getElementById("val-speed-ctrl")!;
 
 // Preset configurations
 interface MoodPreset {
@@ -325,6 +336,11 @@ ctrlFootprints.addEventListener("change", () => {
   tileManager.setShowFootprints(ctrlFootprints.checked);
 });
 
+ctrlSpeedCtrl.addEventListener("input", () => {
+  baseSpeedKnots = parseInt(ctrlSpeedCtrl.value);
+  valSpeedCtrl.textContent = `${baseSpeedKnots} kt`;
+});
+
 ctrlPreset.addEventListener("change", () => {
   const key = ctrlPreset.value;
   if (key in PRESETS) {
@@ -339,7 +355,8 @@ applyPreset(PRESETS.midday);
 const activeKeys = new Set<string>();
 let isInteractingWithHud = false;
 let previousMousePosition = { x: 0, y: 0 };
-let speedKnots = 120; // Default airspeed simulation
+let baseSpeedKnots = 200; // Customizable flight speed setting in knots
+let speedKnots = 200; // Default active airspeed simulation
 
 // Track keyboard state
 window.addEventListener("keydown", (e) => activeKeys.add(e.code));
@@ -424,8 +441,8 @@ function frameLoop() {
   const dt = Math.min((now - lastFrameTime) / 1000, 0.1); // Clamp to avoid spikes
   lastFrameTime = now;
 
-  // Determine current flight speed (boost with shift)
-  const baseSpeed = 100; // Mercator meters per second (~200 knots)
+  // Convert knots setting to Mercator meters per second (1 knot = 0.514444 m/s)
+  const baseSpeed = baseSpeedKnots * 0.514444;
   const speedMultiplier = activeKeys.has("ShiftLeft") || activeKeys.has("ShiftRight") ? 4 : 1;
   const speed = baseSpeed * speedMultiplier;
   speedKnots = Math.round(speed * 1.94384); // Convert relative m/s to simulated knots
