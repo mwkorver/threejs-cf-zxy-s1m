@@ -93,9 +93,12 @@ def test_terrain_farfield_below_threshold():
 def test_terrain_no_coverage_404():
     with (
         patch.object(app_module, "get_s1m_resolver") as s1m,
+        patch.object(app_module, "get_usgs13_resolver") as usgs13,
         patch.object(app_module, "render_terrain_tile", return_value=None),
+        patch.object(app_module, "render_farfield_tile", return_value=None),
     ):
         s1m.return_value.resolve.return_value = []
+        usgs13.return_value.resolve.return_value = []
         assert client.get("/terrain/14/4804/6172.webp").status_code == 404
 
 
