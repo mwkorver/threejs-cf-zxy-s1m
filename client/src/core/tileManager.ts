@@ -20,6 +20,8 @@ export interface TileNode {
   centerMercator: [number, number];
   mesh?: THREE.Mesh;
   footprintsMesh?: THREE.LineSegments;
+  labelSprite?: THREE.Sprite;
+  centerElevation?: number;
   children?: TileNode[];
   loading: boolean;
   loaded: boolean;
@@ -38,6 +40,8 @@ export class TileManager {
   public verticalExaggeration = 4;
   // Toggle for footprints visibility
   public showFootprints = false;
+  // Toggle for Z/X/Y tile labels visibility
+  public showLabels = false;
 
   public globalUniforms = {
     // matches the midday preset + HUD slider default (main.ts applyPreset)
@@ -264,6 +268,10 @@ export class TileManager {
     // Check if the bundle exists in the cache
     const cached = this.bundleCache.get(key);
     if (cached) {
+      node.centerElevation = cached.centerElevation;
+      if (!node.labelSprite) {
+        node.labelSprite = this.buildLabelSprite(node.tile, tileBoundsMercator(node.tile), cached.centerElevation ?? 0);
+      }
       this.createMeshFromBundle(node, cached.geometry, cached.texture, cached.footprints);
       node.loaded = true;
       node.loading = false;
@@ -328,7 +336,16 @@ export class TileManager {
           (texture ? 512 * 512 * 4 : 0) +
           footprintsBytes;
 
-        const bundle: Bundle = { key, bytes, geometry: geom, texture, footprints: footprintsMesh };
+        const centerCol = 256;
+        const centerRow = 256;
+        const centerH = heights[centerRow * 512 + centerCol] ?? 0;
+        node.centerElevation = centerH;
+
+        if (!node.labelSprite) {
+          node.labelSprite = this.buildLabelSprite(node.tile, bounds, centerH);
+        }
+
+        const bundle: Bundle = { key, bytes, geometry: geom, texture, footprints: footprintsMesh, centerElevation: centerH };
         this.bundleCache.put(bundle, this.activeKeys);
 
         this.createMeshFromBundle(node, geom, texture, footprintsMesh);
@@ -490,12 +507,23 @@ export class TileManager {
           this.scene.remove(node.footprintsMesh);
         }
       }
+      if (node.labelSprite) {
+        const inScene = node.labelSprite.parent === this.scene;
+        if (this.showLabels && !inScene) {
+          this.scene.add(node.labelSprite);
+        } else if (!this.showLabels && inScene) {
+          this.scene.remove(node.labelSprite);
+        }
+      }
     } else {
       if (node.mesh && node.mesh.parent === this.scene) {
         this.scene.remove(node.mesh);
       }
       if (node.footprintsMesh && node.footprintsMesh.parent === this.scene) {
         this.scene.remove(node.footprintsMesh);
+      }
+      if (node.labelSprite && node.labelSprite.parent === this.scene) {
+        this.scene.remove(node.labelSprite);
       }
     }
 
@@ -532,6 +560,16 @@ export class TileManager {
       }
       node.footprintsMesh = undefined;
     }
+    if (node.labelSprite) {
+      if (node.labelSprite.parent === this.scene) {
+        this.scene.remove(node.labelSprite);
+      }
+      if (node.labelSprite.material) {
+        node.labelSprite.material.map?.dispose();
+        node.labelSprite.material.dispose();
+      }
+      node.labelSprite = undefined;
+    }
 
     node.loaded = false;
 
@@ -554,6 +592,9 @@ export class TileManager {
       }
       if (node.footprintsMesh) {
         node.footprintsMesh.scale.z = val;
+      }
+      if (node.labelSprite && node.centerElevation !== undefined) {
+        node.labelSprite.position.z = node.centerElevation * val + 150;
       }
       if (node.children) {
         for (const child of node.children) {
@@ -599,6 +640,101 @@ export class TileManager {
    */
   setShowOutlines(show: boolean): void {
     this.globalUniforms.showOutlines.value = show;
+  }
+
+  /**
+   * Dynamically toggle Z/X/Y labels on all active and future tiles.
+   */
+  setShowLabels(show: boolean): void {
+    this.showLabels = show;
+    // Walk all nodes and update label visibility in the scene
+    const updateVisibility = (node: TileNode) => {
+      if (node.labelSprite) {
+        if (show && node.visible && node.loaded) {
+          if (node.labelSprite.parent !== this.scene) {
+            this.scene.add(node.labelSprite);
+          }
+        } else {
+          if (node.labelSprite.parent === this.scene) {
+            this.scene.remove(node.labelSprite);
+          }
+        }
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          updateVisibility(child);
+        }
+      }
+    };
+    for (const node of this.rootNodes.values()) {
+      updateVisibility(node);
+    }
+  }
+
+  /**
+   * Render coordinate label to a texture canvas and create a floating 3D sprite.
+   */
+  private buildLabelSprite(
+    tile: TileId,
+    bounds: { west: number; south: number; east: number; north: number },
+    centerElevation: number
+  ): THREE.Sprite | undefined {
+    if (typeof document === "undefined") {
+      return undefined;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d")!;
+
+    // Background panel - dark slate with subtle cyan border
+    const r = 8;
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.6)";
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.lineTo(w - r, 0);
+    ctx.quadraticCurveTo(w, 0, w, r);
+    ctx.lineTo(w, h - r);
+    ctx.quadraticCurveTo(w, h, w - r, h);
+    ctx.lineTo(r, h);
+    ctx.quadraticCurveTo(0, h, 0, h - r);
+    ctx.lineTo(0, r);
+    ctx.quadraticCurveTo(0, 0, r, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Centered label text
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 20px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+    ctx.shadowBlur = 4;
+    ctx.fillText(`${tile.z}/${tile.x}/${tile.y}`, w / 2, h / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(material);
+
+    // Calculate dynamic proportional width and height relative to tile size
+    const tileW = bounds.east - bounds.west;
+    const spriteW = tileW * 0.22;
+    const spriteH = spriteW * (64 / 256);
+    sprite.scale.set(spriteW, spriteH, 1);
+
+    // Position sprite at tile center, offset by buffer above terrain height
+    const localX = (bounds.west + bounds.east) / 2 - this.worldAnchor[0];
+    const localY = (bounds.north + bounds.south) / 2 - this.worldAnchor[1];
+    const localZ = centerElevation * this.verticalExaggeration + 150;
+    sprite.position.set(localX, localY, localZ);
+
+    return sprite;
   }
 
   /**
