@@ -70,7 +70,7 @@ export class TileManager {
     readonly scene: THREE.Scene,
     readonly bundleCache: BundleCache,
     readonly worldAnchor: [number, number],
-    readonly baseZoom = 12,
+    public baseZoom = 12,
     readonly maxZoom = 18,
     readonly lodFactor = 2.2,
     readonly cullTiles = true
@@ -82,6 +82,24 @@ export class TileManager {
    * @param camera Optional Three.js Camera to build view frustum for view culling.
    */
   update(localCameraPos: THREE.Vector3, camera?: THREE.Camera): void {
+    // 0. Compute dynamic base zoom from camera altitude
+    const altitude = localCameraPos.z;
+    let computedBaseZoom = 12;
+    if (altitude > 40000) {
+      computedBaseZoom = 8;
+    } else if (altitude > 20000) {
+      computedBaseZoom = 9;
+    } else if (altitude > 10000) {
+      computedBaseZoom = 10;
+    } else if (altitude > 5000) {
+      computedBaseZoom = 11;
+    }
+
+    if (computedBaseZoom !== this.baseZoom) {
+      this.clear();
+      this.baseZoom = computedBaseZoom;
+    }
+
     // 1. Convert local offset space to global Mercator meters
     const cx = localCameraPos.x + this.worldAnchor[0];
     const cy = localCameraPos.y + this.worldAnchor[1];
