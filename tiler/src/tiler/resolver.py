@@ -137,8 +137,8 @@ class S1MResolver:
                 hrefs.append(f"s3://{S1M_BUCKET}/StagedProducts/Elevation/{dataset}")
         return hrefs
 
-    def resolve_footprints(self, z: int, x: int, y: int) -> dict:
-        """GeoJSON FeatureCollection of S1M COG footprints intersecting tile z/x/y."""
+    def resolve_footprints(self, z: int, x: int, y: int, dataset_type: str = "s1m") -> dict:
+        """GeoJSON FeatureCollection of footprints intersecting tile z/x/y."""
         b = TMS.bounds(morecantile.Tile(x, y, z))
         xs, ys = [], []
         for lon, lat in [(b.left, b.bottom), (b.right, b.bottom), (b.right, b.top), (b.left, b.top)]:
@@ -174,7 +174,8 @@ class S1MResolver:
                     "type": "Feature",
                     "properties": {
                         "dataset": dataset,
-                        "href": f"s3://{S1M_BUCKET}/StagedProducts/Elevation/{dataset}"
+                        "href": f"s3://{S1M_BUCKET}/StagedProducts/Elevation/{dataset}",
+                        "type": dataset_type
                     },
                     "geometry": mapping(geom_wgs)
                 })

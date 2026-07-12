@@ -157,9 +157,21 @@ hud.innerHTML = `
       <input type="range" id="ctrl-exaggeration" min="1" max="10" step="0.5" value="4.0" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
-    <div style="margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
-      <input type="checkbox" id="ctrl-footprints" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
-      <label for="ctrl-footprints" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW S1M DEM FOOTPRINTS</label>
+    <div style="margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="ctrl-footprints" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+        <label for="ctrl-footprints" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW DEM FOOTPRINTS</label>
+      </div>
+      <div style="display: flex; gap: 12px; font-size: 9px; color: #94a3b8; margin-left: 22px;">
+        <span style="display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 8px; height: 8px; background: #00ffff; border-radius: 2px;"></span>
+          S1M (1m)
+        </span>
+        <span style="display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 8px; height: 8px; background: #ff00ff; border-radius: 2px;"></span>
+          USGS 1/3" (10m)
+        </span>
+      </div>
     </div>
   </div>
 

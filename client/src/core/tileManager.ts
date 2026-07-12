@@ -325,9 +325,13 @@ export class TileManager {
     const tileW = bounds.east - bounds.west;
     const tileH = bounds.north - bounds.south;
     const vertices: number[] = [];
+    const colors: number[] = [];
 
-    const addRingSegments = (ring: [number, number][]) => {
+    const addRingSegments = (ring: [number, number][], isS1M: boolean) => {
       if (ring.length < 2) return;
+
+      // S1M (1m) = Cyan (0, 1, 1), USGS 1/3 Arc-Second (10m) = Magenta (1, 0, 1)
+      const colorRGB = isS1M ? [0.0, 1.0, 1.0] : [1.0, 0.0, 1.0];
 
       const localCoords: [number, number, number][] = [];
       for (const [lon, lat] of ring) {
@@ -352,19 +356,23 @@ export class TileManager {
         const p0 = localCoords[i]!;
         const p1 = localCoords[i + 1]!;
         vertices.push(...p0, ...p1);
+        colors.push(...colorRGB, ...colorRGB);
       }
     };
 
     for (const feat of footprints.features) {
       const geom = feat.geometry;
+      // Default to S1M if properties/type is missing (e.g. backward compatibility)
+      const isS1M = feat.properties?.type !== "usgs13";
+      
       if (geom.type === "Polygon") {
         for (const ring of geom.coordinates) {
-          addRingSegments(ring);
+          addRingSegments(ring, isS1M);
         }
       } else if (geom.type === "MultiPolygon") {
         for (const poly of geom.coordinates) {
           for (const ring of poly) {
-            addRingSegments(ring);
+            addRingSegments(ring, isS1M);
           }
         }
       }
@@ -374,10 +382,11 @@ export class TileManager {
 
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
 
-    // A nice bright, glowing cyan material for footprint outlines
+    // Enable vertexColors to apply per-segment S1M vs USGS 1/3 colors
     const mat = new THREE.LineBasicMaterial({
-      color: 0x00ffff,
+      vertexColors: true,
       transparent: true,
       opacity: 0.8
     });

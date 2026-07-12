@@ -78,6 +78,7 @@ export interface FootprintFeature {
   properties: {
     dataset: string;
     href: string;
+    type?: string;
   };
   geometry: {
     type: "Polygon" | "MultiPolygon";
