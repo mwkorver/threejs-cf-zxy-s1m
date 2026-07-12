@@ -46,7 +46,7 @@ describe("TileManager", () => {
       mockCache,
       worldAnchor,
       12, // baseZoom
-      16, // maxZoom
+      18, // maxZoom
       3.0 // high lodFactor to trigger easy splitting
     );
 
@@ -87,7 +87,7 @@ describe("TileManager", () => {
       mockCache,
       worldAnchor,
       12, // baseZoom
-      16, // maxZoom
+      18, // maxZoom
       1.0 // low lodFactor
     );
 

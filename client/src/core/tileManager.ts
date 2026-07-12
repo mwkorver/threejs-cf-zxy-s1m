@@ -59,7 +59,7 @@ export class TileManager {
     readonly bundleCache: BundleCache,
     readonly worldAnchor: [number, number],
     readonly baseZoom = 12,
-    readonly maxZoom = 16,
+    readonly maxZoom = 18,
     readonly lodFactor = 2.2
   ) {}
 

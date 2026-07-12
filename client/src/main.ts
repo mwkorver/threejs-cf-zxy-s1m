@@ -20,7 +20,7 @@ const BASE_URL = useLocal
 
 const LAYER = params.get("layer") ?? "naip-visualization";
 const YEAR = Number(params.get("year") ?? 2023);
-const MAX_ZOOM = Number(params.get("maxzoom") ?? 16);
+const MAX_ZOOM = Number(params.get("maxzoom") ?? 18);
 const LOD_FACTOR = Number(params.get("lod") ?? 2.2);
 
 // NJ flight corridor center
