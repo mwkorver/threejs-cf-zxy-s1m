@@ -44,13 +44,20 @@ async function bitmapToRgba(bmp: ImageBitmap): Promise<{ rgba: Uint8ClampedArray
   return { rgba: data, w: bmp.width, h: bmp.height };
 }
 
-/** Decoded terrain elevations (true meters), row-major, north-first. */
-export async function loadTerrain(baseUrl: string, t: TileId): Promise<Float32Array> {
+export interface DecodedTerrain {
+  heights: Float32Array;
+  demSource: string;
+}
+
+/** Decoded terrain elevations (true meters), row-major, north-first, plus the source DEM. */
+export async function loadTerrain(baseUrl: string, t: TileId): Promise<DecodedTerrain> {
   const res = await fetchTile(`${baseUrl}/terrain/${t.z}/${t.x}/${t.y}.webp`, `terrain ${t.z}/${t.x}/${t.y}`);
+  const demSource = res.headers.get("X-DEM-Source") || "farfield";
   const bmp = await createImageBitmap(await res.blob());
   const { rgba, w, h } = await bitmapToRgba(bmp);
   bmp.close();
-  return decodeTerrarium(rgba, w, h);
+  const heights = decodeTerrarium(rgba, w, h);
+  return { heights, demSource };
 }
 
 /** Imagery tile as an ImageBitmap ready for GPU upload. */

@@ -7,6 +7,7 @@ export interface Bundle {
   texture?: THREE.Texture;
   footprints?: THREE.LineSegments;
   centerElevation?: number;
+  demSource?: string;
 }
 
 export class BundleCache {

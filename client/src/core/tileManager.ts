@@ -21,6 +21,7 @@ export interface TileNode {
   mesh?: THREE.Mesh;
   labelSprite?: THREE.Sprite;
   centerElevation?: number;
+  demSource?: string;
   children?: TileNode[];
   loading: boolean;
   loaded: boolean;
@@ -41,6 +42,8 @@ export class TileManager {
   public showFootprints = false;
   // Toggle for Z/X/Y tile labels visibility
   public showLabels = false;
+  // Toggle for showing DEM source colors
+  public showDemColors = false;
 
   // Viewport footprint global mesh & cache box
   private footprintsMesh?: THREE.LineSegments;
@@ -53,6 +56,7 @@ export class TileManager {
     sunDirection: { value: new THREE.Vector3(-1, -1, 1.4).normalize() },
     fallbackColor: { value: new THREE.Color(0x556655) },
     showOutlines: { value: false },
+    showDemColors: { value: false },
   };
   
   constructor(
@@ -278,6 +282,7 @@ export class TileManager {
     const cached = this.bundleCache.get(key);
     if (cached) {
       node.centerElevation = cached.centerElevation;
+      node.demSource = cached.demSource;
       if (!node.labelSprite) {
         node.labelSprite = this.buildLabelSprite(node.tile, tileBoundsMercator(node.tile), cached.centerElevation ?? 0);
       }
@@ -292,12 +297,14 @@ export class TileManager {
       loadTerrain(this.baseUrl, node.tile),
       loadImagery(this.baseUrl, this.layer, this.year, node.tile).catch(() => null)
     ])
-      .then(([heights, imageBitmap]) => {
+      .then(([terrain, imageBitmap]) => {
         if (!node.loading) {
           // Node was pruned/cancelled during fetch
           if (imageBitmap) imageBitmap.close();
           return;
         }
+
+        const { heights, demSource } = terrain;
 
         // Build grid mesh
         const meshData = buildTerrainMesh(heights, node.tile, this.gridStep);
@@ -325,13 +332,14 @@ export class TileManager {
         const centerRow = 256;
         const centerH = heights[centerRow * 512 + centerCol] ?? 0;
         node.centerElevation = centerH;
+        node.demSource = demSource;
 
         const bounds = tileBoundsMercator(node.tile);
         if (!node.labelSprite) {
           node.labelSprite = this.buildLabelSprite(node.tile, bounds, centerH);
         }
 
-        const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation: centerH };
+        const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation: centerH, demSource };
         this.bundleCache.put(bundle, this.activeKeys);
 
         this.createMeshFromBundle(node, geom, texture);
@@ -429,6 +437,13 @@ export class TileManager {
     geom: THREE.BufferGeometry,
     texture?: THREE.Texture
   ): void {
+    let demSourceVal = 0.0;
+    if (node.demSource === "s1m") {
+      demSourceVal = 2.0;
+    } else if (node.demSource === "usgs13") {
+      demSourceVal = 1.0;
+    }
+
     const material = new THREE.ShaderMaterial({
       uniforms: {
         map: { value: texture || null },
@@ -437,6 +452,8 @@ export class TileManager {
         hillshadeIntensity: this.globalUniforms.hillshadeIntensity,
         sunDirection: this.globalUniforms.sunDirection,
         showOutlines: this.globalUniforms.showOutlines,
+        showDemColors: this.globalUniforms.showDemColors,
+        demSourceType: { value: demSourceVal },
         ...THREE.UniformsLib.fog
       },
       vertexShader: TerrainShader.vertexShader,
@@ -569,6 +586,14 @@ export class TileManager {
    */
   setShowOutlines(show: boolean): void {
     this.globalUniforms.showOutlines.value = show;
+  }
+
+  /**
+   * Dynamically toggle showing DEM source colors.
+   */
+  setShowDemColors(show: boolean): void {
+    this.showDemColors = show;
+    this.globalUniforms.showDemColors.value = show;
   }
 
   /**
