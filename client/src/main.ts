@@ -189,6 +189,27 @@ hud.innerHTML = `
       <input type="checkbox" id="ctrl-outlines" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
       <label for="ctrl-outlines" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW TMS OUTLINES & LABELS</label>
     </div>
+
+    <div style="margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="ctrl-dem-colors" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+        <label for="ctrl-dem-colors" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW DEM COLORS</label>
+      </div>
+      <div style="display: flex; gap: 12px; font-size: 9px; color: #94a3b8; margin-left: 22px;">
+        <span style="display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 8px; height: 8px; background: #00cccc; border-radius: 2px;"></span>
+          S1M (1m)
+        </span>
+        <span style="display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 8px; height: 8px; background: #cc00cc; border-radius: 2px;"></span>
+          USGS 1/3" (10m)
+        </span>
+        <span style="display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 8px; height: 8px; background: #666666; border-radius: 2px;"></span>
+          Far-field
+        </span>
+      </div>
+    </div>
   </div>
 
   <div style="margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; font-size: 11px; color: #94a3b8; line-height: 1.4;">
@@ -217,6 +238,7 @@ const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInp
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
 const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
+const ctrlDemColors = document.getElementById("ctrl-dem-colors") as HTMLInputElement;
 
 const valHillshade = document.getElementById("val-hillshade")!;
 const valAzimuth = document.getElementById("val-azimuth")!;
@@ -353,6 +375,10 @@ ctrlOutlines.addEventListener("change", () => {
   const isChecked = ctrlOutlines.checked;
   tileManager.setShowOutlines(isChecked);
   tileManager.setShowLabels(isChecked);
+});
+
+ctrlDemColors.addEventListener("change", () => {
+  tileManager.setShowDemColors(ctrlDemColors.checked);
 });
 
 ctrlPreset.addEventListener("change", () => {

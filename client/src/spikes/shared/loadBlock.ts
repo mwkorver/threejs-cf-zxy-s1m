@@ -76,11 +76,11 @@ export async function loadBlock(): Promise<Block> {
       const t = { z: m.z, x, y };
       jobs.push(
         (async () => {
-          const [heights, imagery] = await Promise.all([
+          const [terrain, imagery] = await Promise.all([
             loadTerrain(base, t),
             loadImagery(base, m.layer, m.year, t).catch(() => null),
           ]);
-          const mesh = buildTerrainMesh(heights, t, GRID_STEP);
+          const mesh = buildTerrainMesh(terrain.heights, t, GRID_STEP);
           tiles.push({ mesh, imagery, offset: [mesh.anchor[0] - worldAnchor[0], mesh.anchor[1] - worldAnchor[1]] });
         })(),
       );

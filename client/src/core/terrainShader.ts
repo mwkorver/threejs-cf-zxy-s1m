@@ -23,13 +23,26 @@ export const TerrainShader = {
     uniform float hillshadeIntensity;
     uniform vec3 sunDirection;
     uniform bool showOutlines;
+    uniform bool showDemColors;
+    uniform float demSourceType; // 0.0=farfield, 1.0=usgs13, 2.0=s1m
 
     varying vec2 vUv;
     varying vec3 vWorldNormal;
     #include <fog_pars_fragment>
 
     void main() {
-      vec4 baseColor = useTexture ? texture2D(map, vUv) : vec4(fallbackColor, 1.0);
+      vec4 baseColor;
+      if (showDemColors) {
+        vec3 col = vec3(0.4, 0.4, 0.4); // farfield dark gray
+        if (demSourceType > 1.5) {
+          col = vec3(0.0, 0.8, 0.8); // s1m cyan
+        } else if (demSourceType > 0.5) {
+          col = vec3(0.8, 0.0, 0.8); // usgs13 magenta
+        }
+        baseColor = vec4(col, 1.0);
+      } else {
+        baseColor = useTexture ? texture2D(map, vUv) : vec4(fallbackColor, 1.0);
+      }
       
       // Perform dot product with unexaggerated normal and sun direction
       vec3 normal = normalize(vWorldNormal);
