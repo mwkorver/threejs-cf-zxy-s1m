@@ -7,6 +7,7 @@ import { BundleCache } from "./bundleCache";
 vi.mock("./tileLoader", () => ({
   loadTerrain: vi.fn(() => Promise.resolve({ heights: new Float32Array(512 * 512), demSource: "farfield" })),
   loadImagery: vi.fn(() => Promise.resolve(null)),
+  loadImageryExternal: vi.fn(() => Promise.resolve(null)),
   loadFootprints: vi.fn(() => Promise.resolve({ type: "FeatureCollection", features: [] })),
   loadViewportFootprints: vi.fn(() => Promise.resolve({ type: "FeatureCollection", features: [] })),
 }));

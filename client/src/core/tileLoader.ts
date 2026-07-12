@@ -5,7 +5,13 @@
  */
 
 import { decodeTerrarium } from "./terrarium";
-import type { TileId } from "./mercator";
+import { tileBoundsMercator, type TileId } from "./mercator";
+
+// USDA APFO NAIP ImageServer (CONUS). Serves a proper full-coverage NAIP mosaic
+// via exportImage for an arbitrary Web-Mercator bbox — used for low zooms where
+// the COG tiler is slow and coverage-capped. CORS is open, so fetch direct.
+const USDA_IMAGESERVER =
+  "https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer";
 
 export interface TileManifest {
   layer: string;
@@ -71,6 +77,17 @@ export async function loadImagery(
     `${baseUrl}/imagery/${layer}/${year}/${t.z}/${t.x}/${t.y}.webp`,
     `imagery ${t.z}/${t.x}/${t.y}`,
   );
+  return createImageBitmap(await res.blob());
+}
+
+/** Imagery from the USDA NAIP ImageServer (exportImage over the tile's 3857 bbox).
+ *  Used for low zooms where the COG tiler is slow/coverage-capped. */
+export async function loadImageryExternal(t: TileId): Promise<ImageBitmap> {
+  const b = tileBoundsMercator(t);
+  const url =
+    `${USDA_IMAGESERVER}/exportImage?f=image&bboxSR=3857&imageSR=3857&size=512,512` +
+    `&format=jpgpng&bbox=${b.west},${b.south},${b.east},${b.north}`;
+  const res = await fetchTile(url, `usda ${t.z}/${t.x}/${t.y}`);
   return createImageBitmap(await res.blob());
 }
 
