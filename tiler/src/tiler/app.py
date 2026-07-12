@@ -32,6 +32,15 @@ def get_s1m_resolver() -> S1MResolver:
     return S1MResolver(settings.s1m_index_path, settings.aws_region)
 
 
+@lru_cache(maxsize=1)
+def get_usgs13_resolver() -> S1MResolver:
+    """One USGS 1/3 Arc-Second resolver (using local data/USGS_13_DEM_Index.parquet) per container."""
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    local_path = os.path.join(current_dir, "data", "USGS_13_DEM_Index.parquet")
+    return S1MResolver(local_path, settings.aws_region)
+
+
 @app.get("/imagery/{layer}/{year}/{z}/{x}/{y}.webp")
 def imagery_tile(layer: str, year: int, z: int, x: int, y: int) -> Response:
     """512px WebP q~75 imagery tile (plan §4.1)."""
@@ -64,12 +73,21 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
     if not (0 <= z and 0 <= x < n and 0 <= y < n):
         raise HTTPException(404, "tile out of range")
 
+    body = None
     if z >= settings.s1m_min_zoom:
-        hrefs = get_s1m_resolver().resolve(z, x, y)
-        body = render_terrain_tile(hrefs, z, x, y, tilesize=settings.tile_size)
-    else:
-        # Far-field: elevation-tiles-prod passthrough, one endpoint for the
-        # whole planet (plan §4.2, §10.5).
+        # 1. Try high-resolution S1M terrain first
+        s1m_hrefs = get_s1m_resolver().resolve(z, x, y)
+        if s1m_hrefs:
+            body = render_terrain_tile(s1m_hrefs, z, x, y, tilesize=settings.tile_size)
+
+        # 2. If no S1M tile is available, check 10m USGS 1/3 arc-second DEM fallback index
+        if body is None:
+            usgs13_hrefs = get_usgs13_resolver().resolve(z, x, y)
+            if usgs13_hrefs:
+                body = render_terrain_tile(usgs13_hrefs, z, x, y, tilesize=settings.tile_size)
+
+    # 3. Fall back to far-field planet-wide tiles if still no coverage
+    if body is None:
         body = render_farfield_tile(z, x, y, tilesize=settings.tile_size)
 
     if body is None:
