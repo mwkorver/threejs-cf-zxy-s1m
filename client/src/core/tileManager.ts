@@ -436,8 +436,15 @@ export class TileManager {
       if (node.mesh.parent !== this.scene) {
         this.scene.add(node.mesh);
       }
-      if (this.showFootprints && node.footprintsMesh && node.footprintsMesh.parent !== this.scene) {
-        this.scene.add(node.footprintsMesh);
+      // Add/remove footprints to track the toggle even while the tile stays
+      // visible (otherwise unchecking leaves them on screen until prune).
+      if (node.footprintsMesh) {
+        const inScene = node.footprintsMesh.parent === this.scene;
+        if (this.showFootprints && !inScene) {
+          this.scene.add(node.footprintsMesh);
+        } else if (!this.showFootprints && inScene) {
+          this.scene.remove(node.footprintsMesh);
+        }
       }
     } else {
       if (node.mesh && node.mesh.parent === this.scene) {
@@ -466,9 +473,16 @@ export class TileManager {
       if (node.mesh.parent === this.scene) {
         this.scene.remove(node.mesh);
       }
+      // Dispose the per-mesh ShaderMaterial — it's created fresh per mesh in
+      // createMeshFromBundle and is NOT owned by the bundle cache (which owns
+      // geometry + texture + footprints). Not disposing it leaks a material +
+      // its uniforms on every tile eviction.
+      (node.mesh.material as THREE.Material).dispose();
       node.mesh = undefined;
     }
     if (node.footprintsMesh) {
+      // Footprints geometry/material are owned by the bundle cache — just
+      // detach from the scene here.
       if (node.footprintsMesh.parent === this.scene) {
         this.scene.remove(node.footprintsMesh);
       }
