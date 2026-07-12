@@ -1,14 +1,14 @@
-from tiler.resolver import REQUESTER_PAYS_BUCKETS, CogAsset, build_tile_query, lake_read_path
+from tiler.resolver import REQUESTER_PAYS_BUCKETS, CogAsset, build_tile_query, lake_read_paths
 
 
 def test_read_path_narrows_to_partition_subtree():
     # Path scoping shrinks the S3 LIST (ported from _lake_read_path)
-    p = lake_read_path("s3://bucket/lake/", "naip-visualization")
-    assert p == "s3://bucket/lake/collection=naip-visualization/region=*/year=*/*.parquet"
+    p = lake_read_paths("s3://bucket/lake/", "naip-visualization", ["nj"])
+    assert p == ["s3://bucket/lake/collection=naip-visualization/region=nj/year=*/*.parquet"]
 
 
 def test_query_has_prune_and_refine():
-    sql = build_tile_query("s3://b/lake/collection=naip/region=*/year=*/*.parquet",
+    sql = build_tile_query(["s3://b/lake/collection=naip/region=nj/year=*/*.parquet"],
                            west=-74.5, south=40.4, east=-74.4, north=40.5, requested_year=2021)
     # cheap bbox-column prune against row-group stats...
     assert "bbox_xmin <= -74.4" in sql and "bbox_xmax >= -74.5" in sql
