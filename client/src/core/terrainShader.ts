@@ -22,6 +22,7 @@ export const TerrainShader = {
     uniform vec3 fallbackColor;
     uniform float hillshadeIntensity;
     uniform vec3 sunDirection;
+    uniform bool showOutlines;
 
     varying vec2 vUv;
     varying vec3 vWorldNormal;
@@ -37,7 +38,20 @@ export const TerrainShader = {
       // Multiplicative hillshade
       float shade = 1.0 - hillshadeIntensity * (1.0 - diffuse);
       
-      gl_FragColor = vec4(baseColor.rgb * shade, baseColor.a);
+      vec3 rgb = baseColor.rgb * shade;
+      
+      if (showOutlines) {
+        // Use screen-space derivatives to compute a crisp 1.5-pixel wide border
+        vec2 uvDeriv = fwidth(vUv);
+        vec2 edgeThreshold = uvDeriv * 1.5;
+        bool isEdge = vUv.x < edgeThreshold.x || vUv.x > 1.0 - edgeThreshold.x ||
+                      vUv.y < edgeThreshold.y || vUv.y > 1.0 - edgeThreshold.y;
+        if (isEdge) {
+          rgb = mix(rgb, vec3(1.0, 1.0, 1.0), 0.7); // blend with white outline
+        }
+      }
+      
+      gl_FragColor = vec4(rgb, baseColor.a);
       
       #include <fog_fragment>
     }

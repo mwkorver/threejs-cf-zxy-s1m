@@ -182,6 +182,11 @@ hud.innerHTML = `
         </span>
       </div>
     </div>
+
+    <div style="margin-top: 8px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+      <input type="checkbox" id="ctrl-outlines" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+      <label for="ctrl-outlines" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW TMS TILE OUTLINES</label>
+    </div>
   </div>
 
   <div style="margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; font-size: 11px; color: #94a3b8; line-height: 1.4;">
@@ -209,6 +214,7 @@ const ctrlFog = document.getElementById("ctrl-fog") as HTMLInputElement;
 const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInputElement;
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
+const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
 
 const valHillshade = document.getElementById("val-hillshade")!;
 const valAzimuth = document.getElementById("val-azimuth")!;
@@ -339,6 +345,10 @@ ctrlFootprints.addEventListener("change", () => {
 ctrlSpeedCtrl.addEventListener("input", () => {
   baseSpeedKnots = parseInt(ctrlSpeedCtrl.value);
   valSpeedCtrl.textContent = `${baseSpeedKnots} kt`;
+});
+
+ctrlOutlines.addEventListener("change", () => {
+  tileManager.setShowOutlines(ctrlOutlines.checked);
 });
 
 ctrlPreset.addEventListener("change", () => {
