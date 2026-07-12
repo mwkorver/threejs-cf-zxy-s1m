@@ -22,9 +22,11 @@ class Settings(BaseSettings):
     tile_size: int = 512  # both imagery and terrain (plan §2 row 4, §4.2)
     imagery_webp_quality: int = 75  # plan §4.1
 
-    # Zoom at/above which S1M is used instead of far-field passthrough.
-    # Provisional; tune against S1M coverage + SSE threshold in Phase 0.
-    s1m_min_zoom: int = 11
+    # Zoom at/above which S1M is used instead of USGS 1/3" DEM.
+    s1m_min_zoom: int = 15
+
+    # Zoom at/above which USGS 1/3" DEM is used instead of far-field.
+    usgs_min_zoom: int = 11
 
     aws_region: str = "us-west-2"  # same region as sources (plan §2 row 10)
 

@@ -113,11 +113,11 @@ def test_footprints_nearfield():
         mock_geojson = {"type": "FeatureCollection", "features": []}
         s1m.return_value.resolve_footprints.return_value = mock_geojson
         usgs13.return_value.resolve_footprints.return_value = mock_geojson
-        r = client.get("/terrain-footprints/14/4804/6172.json")
+        r = client.get("/terrain-footprints/16/4804/6172.json")
     assert r.status_code == 200
     assert r.json() == mock_geojson
-    s1m.return_value.resolve_footprints.assert_called_once_with(14, 4804, 6172, dataset_type="s1m")
-    usgs13.return_value.resolve_footprints.assert_called_once_with(14, 4804, 6172, dataset_type="usgs13")
+    s1m.return_value.resolve_footprints.assert_called_once_with(16, 4804, 6172, dataset_type="s1m")
+    usgs13.return_value.resolve_footprints.assert_called_once_with(16, 4804, 6172, dataset_type="usgs13")
 
 
 def test_footprints_farfield():
