@@ -59,10 +59,11 @@ export class TileManager {
   ) {}
 
   /**
-   * Update active tiles and LOD based on camera position (relative to worldAnchor).
+   * Update active tiles and LOD based on camera position (relative to worldAnchor) and frustum.
    * @param localCameraPos Camera position in local offset space.
+   * @param camera Optional Three.js Camera to build view frustum for view culling.
    */
-  update(localCameraPos: THREE.Vector3): void {
+  update(localCameraPos: THREE.Vector3, camera?: THREE.Camera): void {
     // 1. Convert local offset space to global Mercator meters
     const cx = localCameraPos.x + this.worldAnchor[0];
     const cy = localCameraPos.y + this.worldAnchor[1];
@@ -113,15 +114,24 @@ export class TileManager {
       }
     }
 
-    // 5. Run LOD update on each root node recursively
+    // 5. Build view frustum if camera is provided
+    let frustum: THREE.Frustum | undefined;
+    if (camera) {
+      frustum = new THREE.Frustum();
+      const projScreenMatrix = new THREE.Matrix4();
+      projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      frustum.setFromProjectionMatrix(projScreenMatrix);
+    }
+
+    // 6. Run LOD update on each root node recursively
     this.activeKeys.clear();
     const cameraPosGlobal = new THREE.Vector3(cx, cy, localCameraPos.z);
 
     for (const node of this.rootNodes.values()) {
-      this.updateNode(node, cameraPosGlobal);
+      this.updateNode(node, cameraPosGlobal, frustum);
     }
 
-    // 6. Update scene visibility & sync mesh additions/removals
+    // 7. Update scene visibility & sync mesh additions/removals
     for (const node of this.rootNodes.values()) {
       this.syncScene(node);
     }
@@ -134,7 +144,29 @@ export class TileManager {
     return this.activeKeys;
   }
 
-  private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3): void {
+  private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): void {
+    // 1. Perform frustum culling check first
+    if (frustum) {
+      const tileMinZ = -1000 * this.verticalExaggeration;
+      const tileMaxZ = 9000 * this.verticalExaggeration;
+      const box = new THREE.Box3(
+        new THREE.Vector3(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ),
+        new THREE.Vector3(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ)
+      );
+
+      if (!frustum.intersectsBox(box)) {
+        // Node is completely out of view: prune its children and make it invisible
+        node.visible = false;
+        if (node.children) {
+          for (const child of node.children) {
+            this.pruneNode(child);
+          }
+          delete node.children;
+        }
+        return; // Stop recursion and loading!
+      }
+    }
+
     const tileW = node.bounds.east - node.bounds.west;
     const tileCenter = new THREE.Vector3(node.centerMercator[0], node.centerMercator[1], 0);
     const dist = cameraPosGlobal.distanceTo(tileCenter);
@@ -152,7 +184,7 @@ export class TileManager {
       // Recursively update children
       let allChildrenLoaded = true;
       for (const child of node.children) {
-        this.updateNode(child, cameraPosGlobal);
+        this.updateNode(child, cameraPosGlobal, frustum);
         if (!child.loaded) {
           allChildrenLoaded = false;
         }

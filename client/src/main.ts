@@ -468,7 +468,7 @@ function frameLoop() {
   }
 
   // Update LOD and stream/cache terrain tiles
-  tileManager.update(camera.position);
+  tileManager.update(camera.position, camera);
 
   // Render frame
   renderer.render(scene, camera);
