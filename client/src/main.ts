@@ -168,6 +168,14 @@ hud.innerHTML = `
       <input type="range" id="ctrl-exaggeration" min="1" max="10" step="0.5" value="4.0" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>USDA IMAGERY &le; Z (else COG tiler)</span>
+        <span id="val-extimagery">13</span>
+      </div>
+      <input type="range" id="ctrl-extimagery" min="0" max="18" step="1" value="13" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
     <div style="margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
       <div style="display: flex; align-items: center; gap: 8px;">
         <input type="checkbox" id="ctrl-footprints" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
@@ -235,6 +243,7 @@ const ctrlAzimuth = document.getElementById("ctrl-azimuth") as HTMLInputElement;
 const ctrlAltitude = document.getElementById("ctrl-altitude") as HTMLInputElement;
 const ctrlFog = document.getElementById("ctrl-fog") as HTMLInputElement;
 const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInputElement;
+const ctrlExtImagery = document.getElementById("ctrl-extimagery") as HTMLInputElement;
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
 const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
@@ -245,6 +254,7 @@ const valAzimuth = document.getElementById("val-azimuth")!;
 const valAltitude = document.getElementById("val-altitude")!;
 const valFog = document.getElementById("val-fog")!;
 const valExaggeration = document.getElementById("val-exaggeration")!;
+const valExtImagery = document.getElementById("val-extimagery")!;
 const valSpeedCtrl = document.getElementById("val-speed-ctrl")!;
 
 // Preset configurations
@@ -364,6 +374,12 @@ ctrlExaggeration.addEventListener("input", () => {
 
 ctrlFootprints.addEventListener("change", () => {
   tileManager.setShowFootprints(ctrlFootprints.checked);
+});
+
+ctrlExtImagery.addEventListener("input", () => {
+  const z = parseInt(ctrlExtImagery.value);
+  valExtImagery.textContent = z.toString();
+  tileManager.setExternalImageryMaxZoom(z);
 });
 
 ctrlSpeedCtrl.addEventListener("input", () => {

@@ -8,7 +8,7 @@ import {
   mercatorScale,
   mercatorToLonLat
 } from "./mercator";
-import { loadTerrain, loadImagery, loadViewportFootprints, type FootprintCollection } from "./tileLoader";
+import { loadTerrain, loadImagery, loadImageryExternal, loadViewportFootprints, type FootprintCollection } from "./tileLoader";
 import { buildTerrainMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import { TerrainShader } from "./terrainShader";
@@ -42,6 +42,10 @@ export class TileManager {
   public showFootprints = false;
   // Toggle for Z/X/Y tile labels visibility
   public showLabels = false;
+  // Imagery zoom threshold: tiles at z <= this load from the USDA NAIP
+  // ImageServer instead of the COG tiler (which is slow/coverage-capped at low
+  // zoom). Set to maxZoom to route everything external.
+  public externalImageryMaxZoom = 13;
   // Toggle for showing DEM source colors
   public showDemColors = false;
 
@@ -292,10 +296,16 @@ export class TileManager {
       return;
     }
 
+    // Imagery source: USDA ImageServer at/below the threshold, COG tiler above.
+    const loadImageryForTile =
+      node.tile.z <= this.externalImageryMaxZoom
+        ? loadImageryExternal(node.tile)
+        : loadImagery(this.baseUrl, this.layer, this.year, node.tile);
+
     // Load from backend tiler
     Promise.all([
       loadTerrain(this.baseUrl, node.tile),
-      loadImagery(this.baseUrl, this.layer, this.year, node.tile).catch(() => null)
+      loadImageryForTile.catch(() => null)
     ])
       .then(([terrain, imageBitmap]) => {
         if (!node.loading) {
@@ -586,6 +596,17 @@ export class TileManager {
    */
   setShowOutlines(show: boolean): void {
     this.globalUniforms.showOutlines.value = show;
+  }
+
+  /**
+   * Change the imagery zoom threshold (z <= this uses the USDA ImageServer).
+   * Drops cached/loaded tiles so they refetch from the correct source.
+   */
+  setExternalImageryMaxZoom(z: number): void {
+    if (z === this.externalImageryMaxZoom) return;
+    this.externalImageryMaxZoom = z;
+    this.bundleCache.clear();
+    this.clear(); // reset nodes; next update() rebuilds + refetches
   }
 
   /**
