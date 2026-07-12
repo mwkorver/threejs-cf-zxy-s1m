@@ -44,6 +44,7 @@ export class TileManager {
     hillshadeIntensity: { value: 0.25 },
     sunDirection: { value: new THREE.Vector3(-1, -1, 1.4).normalize() },
     fallbackColor: { value: new THREE.Color(0x556655) },
+    showOutlines: { value: false },
   };
   
   constructor(
@@ -440,6 +441,7 @@ export class TileManager {
         fallbackColor: this.globalUniforms.fallbackColor,
         hillshadeIntensity: this.globalUniforms.hillshadeIntensity,
         sunDirection: this.globalUniforms.sunDirection,
+        showOutlines: this.globalUniforms.showOutlines,
         ...THREE.UniformsLib.fog
       },
       vertexShader: TerrainShader.vertexShader,
@@ -590,6 +592,13 @@ export class TileManager {
     for (const node of this.rootNodes.values()) {
       updateVisibility(node);
     }
+  }
+
+  /**
+   * Dynamically toggle TMS tile outlines.
+   */
+  setShowOutlines(show: boolean): void {
+    this.globalUniforms.showOutlines.value = show;
   }
 
   /**
