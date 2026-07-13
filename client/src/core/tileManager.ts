@@ -42,6 +42,8 @@ export class TileManager {
   public showFootprints = false;
   // Toggle for Z/X/Y tile labels visibility
   public showLabels = false;
+  // Dynamic scaling factor for Z/X/Y labels
+  public labelScale = 1.0;
   // Imagery zoom threshold: tiles at z <= this load from the USDA NAIP
   // ImageServer instead of the COG tiler (which is slow/coverage-capped at low
   // zoom). Set to maxZoom to route everything external.
@@ -684,6 +686,29 @@ export class TileManager {
     }
   }
 
+  /** Dynamically scale the tile labels on all active and future tiles. */
+  setLabelScale(scale: number): void {
+    this.labelScale = scale;
+    // Walk all nodes and update label scales
+    const updateNodeScale = (node: TileNode) => {
+      if (node.labelSprite) {
+        const bounds = tileBoundsMercator(node.tile);
+        const tileW = bounds.east - bounds.west;
+        const spriteW = tileW * 0.22 * this.labelScale;
+        const spriteH = spriteW * (96 / 384);
+        node.labelSprite.scale.set(spriteW, spriteH, 1);
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          updateNodeScale(child);
+        }
+      }
+    };
+    for (const node of this.rootNodes.values()) {
+      updateNodeScale(node);
+    }
+  }
+
   /**
    * Render coordinate label to a texture canvas and create a floating 3D sprite.
    */
@@ -737,8 +762,8 @@ export class TileManager {
 
     // Calculate dynamic proportional width and height relative to tile size
     const tileW = bounds.east - bounds.west;
-    const spriteW = tileW * 0.22;
-    const spriteH = spriteW * (64 / 256);
+    const spriteW = tileW * 0.22 * this.labelScale;
+    const spriteH = spriteW * (96 / 384);
     sprite.scale.set(spriteW, spriteH, 1);
 
     // Position sprite at tile center, offset by buffer above terrain height

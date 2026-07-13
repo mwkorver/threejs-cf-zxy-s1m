@@ -198,6 +198,14 @@ hud.innerHTML = `
       <label for="ctrl-outlines" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW TMS OUTLINES & LABELS</label>
     </div>
 
+    <div id="container-label-size" style="margin-top: 6px; margin-bottom: 8px; display: none;">
+      <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; margin-bottom: 2px; margin-left: 22px;">
+        <span>LABEL SIZE</span>
+        <span id="val-label-size">1.0x</span>
+      </div>
+      <input type="range" id="ctrl-label-size" min="0.5" max="3.0" step="0.1" value="1.0" style="width: calc(100% - 22px); margin-left: 22px; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
     <div style="margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
       <div style="display: flex; align-items: center; gap: 8px;">
         <input type="checkbox" id="ctrl-dem-colors" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
@@ -248,6 +256,8 @@ const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputEl
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
 const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
 const ctrlDemColors = document.getElementById("ctrl-dem-colors") as HTMLInputElement;
+const containerLabelSize = document.getElementById("container-label-size") as HTMLDivElement;
+const ctrlLabelSize = document.getElementById("ctrl-label-size") as HTMLInputElement;
 
 const valHillshade = document.getElementById("val-hillshade")!;
 const valAzimuth = document.getElementById("val-azimuth")!;
@@ -256,6 +266,7 @@ const valFog = document.getElementById("val-fog")!;
 const valExaggeration = document.getElementById("val-exaggeration")!;
 const valExtImagery = document.getElementById("val-extimagery")!;
 const valSpeedCtrl = document.getElementById("val-speed-ctrl")!;
+const valLabelSize = document.getElementById("val-label-size")!;
 
 // Preset configurations
 interface MoodPreset {
@@ -391,6 +402,13 @@ ctrlOutlines.addEventListener("change", () => {
   const isChecked = ctrlOutlines.checked;
   tileManager.setShowOutlines(isChecked);
   tileManager.setShowLabels(isChecked);
+  containerLabelSize.style.display = isChecked ? "block" : "none";
+});
+
+ctrlLabelSize.addEventListener("input", () => {
+  const scale = parseFloat(ctrlLabelSize.value);
+  valLabelSize.textContent = `${scale.toFixed(1)}x`;
+  tileManager.setLabelScale(scale);
 });
 
 ctrlDemColors.addEventListener("change", () => {
