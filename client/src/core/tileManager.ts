@@ -57,6 +57,8 @@ export class TileManager {
   private footprintsMesh?: THREE.LineSegments;
   private loadedFootprintsBBox?: { west: number; south: number; east: number; north: number };
   private isFetchingFootprints = false;
+  // Keep old root nodes rendering smoothly until new base level roots are fully loaded
+  private transitionNodes = new Map<string, TileNode>();
 
   public globalUniforms = {
     // matches the midday preset + HUD slider default (main.ts applyPreset)
@@ -65,6 +67,9 @@ export class TileManager {
     fallbackColor: { value: new THREE.Color(0x556655) },
     showOutlines: { value: false },
     showDemColors: { value: false },
+    brightness: { value: 1.15 },
+    contrast: { value: 1.10 },
+    saturation: { value: 1.15 }
   };
   
   constructor(
@@ -89,7 +94,17 @@ export class TileManager {
     // 0. Compute dynamic base zoom from camera altitude
     const altitude = localCameraPos.z;
     let computedBaseZoom = 12;
-    if (altitude > 40000) {
+    if (altitude > 1280000) {
+      computedBaseZoom = 3;
+    } else if (altitude > 640000) {
+      computedBaseZoom = 4;
+    } else if (altitude > 320000) {
+      computedBaseZoom = 5;
+    } else if (altitude > 160000) {
+      computedBaseZoom = 6;
+    } else if (altitude > 80000) {
+      computedBaseZoom = 7;
+    } else if (altitude > 40000) {
       computedBaseZoom = 8;
     } else if (altitude > 20000) {
       computedBaseZoom = 9;
@@ -100,7 +115,12 @@ export class TileManager {
     }
 
     if (computedBaseZoom !== this.baseZoom) {
-      this.clear();
+      // Move current root nodes to transitionNodes to keep them on screen during transition
+      for (const [key, node] of this.rootNodes.entries()) {
+        this.transitionNodes.set(key, node);
+        this.applyPolygonOffset(node, true);
+      }
+      this.rootNodes.clear();
       this.baseZoom = computedBaseZoom;
     }
 
@@ -172,8 +192,34 @@ export class TileManager {
       this.updateNode(node, cameraPosGlobal, frustum);
     }
 
+    // Re-check and update transition nodes if they exist
+    if (this.transitionNodes.size > 0) {
+      let allNewRootsLoaded = true;
+      for (const node of this.rootNodes.values()) {
+        if (this.isNodeVisible(node, frustum) && !node.loaded) {
+          allNewRootsLoaded = false;
+        }
+      }
+      
+      if (allNewRootsLoaded) {
+        // Swap complete! Prune and discard all old transition nodes
+        for (const node of this.transitionNodes.values()) {
+          this.pruneNode(node);
+        }
+        this.transitionNodes.clear();
+      } else {
+        // Still loading: keep transition nodes alive and visible
+        for (const node of this.transitionNodes.values()) {
+          this.updateTransitionNode(node, cameraPosGlobal, frustum);
+        }
+      }
+    }
+
     // 7. Update scene visibility & sync mesh additions/removals
     for (const node of this.rootNodes.values()) {
+      this.syncScene(node);
+    }
+    for (const node of this.transitionNodes.values()) {
       this.syncScene(node);
     }
 
@@ -507,6 +553,9 @@ export class TileManager {
         sunDirection: this.globalUniforms.sunDirection,
         showOutlines: this.globalUniforms.showOutlines,
         showDemColors: this.globalUniforms.showDemColors,
+        brightness: this.globalUniforms.brightness,
+        contrast: this.globalUniforms.contrast,
+        saturation: this.globalUniforms.saturation,
         demSourceType: { value: demSourceVal },
         ...THREE.UniformsLib.fog
       },
@@ -593,6 +642,46 @@ export class TileManager {
         this.pruneNode(child);
       }
       delete node.children;
+    }
+  }
+
+  private isNodeVisible(node: TileNode, frustum?: THREE.Frustum): boolean {
+    if (this.cullTiles && frustum) {
+      const bbox = new THREE.Box3(
+        new THREE.Vector3(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], -1000),
+        new THREE.Vector3(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], 9000),
+      );
+      return frustum.intersectsBox(bbox);
+    }
+    return true;
+  }
+
+  private updateTransitionNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): void {
+    const isVisible = this.isNodeVisible(node, frustum);
+    this.activeKeys.add(node.key);
+    
+    // Node is only visible on screen during transition if it's within the frustum and loaded
+    node.visible = isVisible && node.loaded;
+    
+    if (node.children) {
+      for (const child of node.children) {
+        this.updateTransitionNode(child, cameraPosGlobal, frustum);
+      }
+    }
+  }
+
+  private applyPolygonOffset(node: TileNode, enable: boolean): void {
+    if (node.mesh && node.mesh.material) {
+      const mat = node.mesh.material as THREE.ShaderMaterial;
+      mat.polygonOffset = enable;
+      mat.polygonOffsetFactor = enable ? 4.0 : 0.0;
+      mat.polygonOffsetUnits = enable ? 4.0 : 0.0;
+      mat.needsUpdate = true;
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        this.applyPolygonOffset(child, enable);
+      }
     }
   }
 
@@ -901,6 +990,10 @@ export class TileManager {
       this.pruneNode(node);
     }
     this.rootNodes.clear();
+    for (const node of this.transitionNodes.values()) {
+      this.pruneNode(node);
+    }
+    this.transitionNodes.clear();
     this.activeKeys.clear();
 
     if (this.footprintsMesh) {

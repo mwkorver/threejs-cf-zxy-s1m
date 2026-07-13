@@ -42,7 +42,7 @@ const fogColor = new THREE.Color(0xdce8f7);
 scene.background = skyColor;
 scene.fog = new THREE.FogExp2(fogColor.getHex(), 0.00006);
 
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 80000);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 10000000);
 camera.up.set(0, 0, 1); // Z-up world
 
 // Position camera initially relative to NJ worldAnchor (1500m altitude, offset south)
@@ -142,6 +142,30 @@ hud.innerHTML = `
         <span id="val-hillshade">0.25</span>
       </div>
       <input type="range" id="ctrl-hillshade" min="0" max="1" step="0.05" value="0.25" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>IMAGERY BRIGHTNESS</span>
+        <span id="val-brightness">1.15</span>
+      </div>
+      <input type="range" id="ctrl-brightness" min="0.5" max="2.0" step="0.05" value="1.15" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>IMAGERY CONTRAST</span>
+        <span id="val-contrast">1.10</span>
+      </div>
+      <input type="range" id="ctrl-contrast" min="0.5" max="2.0" step="0.05" value="1.10" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>IMAGERY SATURATION</span>
+        <span id="val-saturation">1.15</span>
+      </div>
+      <input type="range" id="ctrl-saturation" min="0.5" max="2.0" step="0.05" value="1.15" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
     <div style="margin-bottom: 8px;">
@@ -267,6 +291,9 @@ const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElemen
 const ctrlDemColors = document.getElementById("ctrl-dem-colors") as HTMLInputElement;
 const containerLabelSize = document.getElementById("container-label-size") as HTMLDivElement;
 const ctrlLabelSize = document.getElementById("ctrl-label-size") as HTMLInputElement;
+const ctrlBrightness = document.getElementById("ctrl-brightness") as HTMLInputElement;
+const ctrlContrast = document.getElementById("ctrl-contrast") as HTMLInputElement;
+const ctrlSaturation = document.getElementById("ctrl-saturation") as HTMLInputElement;
 
 const valHillshade = document.getElementById("val-hillshade")!;
 const valAzimuth = document.getElementById("val-azimuth")!;
@@ -276,6 +303,9 @@ const valExaggeration = document.getElementById("val-exaggeration")!;
 const valExtImagery = document.getElementById("val-extimagery")!;
 const valSpeedCtrl = document.getElementById("val-speed-ctrl")!;
 const valLabelSize = document.getElementById("val-label-size")!;
+const valBrightness = document.getElementById("val-brightness")!;
+const valContrast = document.getElementById("val-contrast")!;
+const valSaturation = document.getElementById("val-saturation")!;
 
 // Preset configurations
 interface MoodPreset {
@@ -361,6 +391,24 @@ ctrlHillshade.addEventListener("input", () => {
   valHillshade.textContent = val.toFixed(2);
   tileManager.globalUniforms.hillshadeIntensity.value = val;
   ctrlPreset.value = "custom";
+});
+
+ctrlBrightness.addEventListener("input", () => {
+  const val = parseFloat(ctrlBrightness.value);
+  valBrightness.textContent = val.toFixed(2);
+  tileManager.globalUniforms.brightness.value = val;
+});
+
+ctrlContrast.addEventListener("input", () => {
+  const val = parseFloat(ctrlContrast.value);
+  valContrast.textContent = val.toFixed(2);
+  tileManager.globalUniforms.contrast.value = val;
+});
+
+ctrlSaturation.addEventListener("input", () => {
+  const val = parseFloat(ctrlSaturation.value);
+  valSaturation.textContent = val.toFixed(2);
+  tileManager.globalUniforms.saturation.value = val;
 });
 
 ctrlAzimuth.addEventListener("input", () => {
@@ -513,6 +561,57 @@ window.addEventListener("mouseup", () => {
   isInteractingWithHud = false;
 });
 
+// Dynamic mouse wheel zoom (dolly) along the camera's viewing axis
+window.addEventListener("wheel", (e) => {
+  if (hud.contains(e.target as Node)) {
+    return; // Do not zoom when scrolling inside the HUD panel
+  }
+  e.preventDefault(); // Prevent page scrolling
+
+  // Proportional zoom speed based on current height to keep interaction fluid at all scales
+  const zoomScale = Math.max(50, camera.position.z) * 0.12;
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  const direction = e.deltaY > 0 ? -1 : 1;
+
+  camera.position.addScaledVector(forward, direction * zoomScale);
+}, { passive: false });
+
+// Mouse double click to center view and zoom in by 2x at the clicked terrain point
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+window.addEventListener("dblclick", (e) => {
+  if (hud.contains(e.target as Node)) {
+    return; // Ignore double clicks inside the HUD controls
+  }
+
+  // Calculate mouse position in normalized device coordinates (-1 to +1)
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+
+  // Intersect with active terrain mesh objects in the scene
+  const intersects = raycaster.intersectObjects(scene.children, true)
+    .filter(hit => hit.object.type === "Mesh");
+
+  if (intersects.length > 0) {
+    const firstHit = intersects[0];
+    if (firstHit) {
+      const point = firstHit.point;
+
+      // Zoom in by 2x (halve the distance between camera and target point)
+      const offset = new THREE.Vector3().subVectors(camera.position, point);
+      offset.multiplyScalar(0.5);
+      const newPosition = new THREE.Vector3().addVectors(point, offset);
+
+      // Smoothly relocate camera and center gaze on the clicked point
+      camera.position.copy(newPosition);
+      camera.lookAt(point);
+    }
+  }
+});
+
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -532,7 +631,9 @@ function frameLoop() {
   // Convert knots setting to Mercator meters per second (1 knot = 0.514444 m/s)
   const baseSpeed = baseSpeedKnots * 0.514444;
   const speedMultiplier = activeKeys.has("ShiftLeft") || activeKeys.has("ShiftRight") ? 4 : 1;
-  const speed = baseSpeed * speedMultiplier;
+  // Scale speed dynamically as a function of altitude (with a floor of 1.0 at 1500m)
+  const altitudeFactor = Math.max(1.0, camera.position.z / 1500.0);
+  const speed = baseSpeed * speedMultiplier * altitudeFactor;
   speedKnots = Math.round(speed * 1.94384); // Convert relative m/s to simulated knots
 
   // Process movement input relative to camera heading
