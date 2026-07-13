@@ -118,6 +118,14 @@ hud.innerHTML = `
     <div style="font-weight: bold; color: #38bdf8; margin-bottom: 8px;">🌅 ATMOSPHERE & LIGHTING</div>
     
     <div style="margin-bottom: 8px;">
+      <label style="display: block; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">IMAGERY SOURCE</label>
+      <select id="ctrl-imagery-source" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; padding: 4px; font-family: monospace; font-size: 12px; cursor: pointer; outline: none;">
+        <option value="satellite">USGS Satellite / NAIP</option>
+        <option value="osm">OpenStreetMap Roads</option>
+      </select>
+    </div>
+    
+    <div style="margin-bottom: 8px;">
       <label style="display: block; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">PRESET MOOD</label>
       <select id="ctrl-preset" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; padding: 4px; font-family: monospace; font-size: 12px; cursor: pointer; outline: none;">
         <option value="midday">Bright Midday (Realism)</option>
@@ -246,6 +254,7 @@ const hudTiles = document.getElementById("hud-tiles")!;
 const hudCache = document.getElementById("hud-cache")!;
 
 const ctrlPreset = document.getElementById("ctrl-preset") as HTMLSelectElement;
+const ctrlImagerySource = document.getElementById("ctrl-imagery-source") as HTMLSelectElement;
 const ctrlHillshade = document.getElementById("ctrl-hillshade") as HTMLInputElement;
 const ctrlAzimuth = document.getElementById("ctrl-azimuth") as HTMLInputElement;
 const ctrlAltitude = document.getElementById("ctrl-altitude") as HTMLInputElement;
@@ -413,6 +422,11 @@ ctrlLabelSize.addEventListener("input", () => {
 
 ctrlDemColors.addEventListener("change", () => {
   tileManager.setShowDemColors(ctrlDemColors.checked);
+});
+
+ctrlImagerySource.addEventListener("change", () => {
+  const source = ctrlImagerySource.value as "satellite" | "osm";
+  tileManager.setImagerySource(source);
 });
 
 ctrlPreset.addEventListener("change", () => {

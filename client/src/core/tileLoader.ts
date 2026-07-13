@@ -87,6 +87,13 @@ export async function loadImageryExternal(t: TileId): Promise<ImageBitmap> {
   return createImageBitmap(await res.blob());
 }
 
+/** Imagery from the official OpenStreetMap tile server. */
+export async function loadImageryOSM(t: TileId): Promise<ImageBitmap> {
+  const url = `https://tile.openstreetmap.org/${t.z}/${t.x}/${t.y}.png`;
+  const res = await fetchTile(url, `osm ${t.z}/${t.x}/${t.y}`);
+  return createImageBitmap(await res.blob());
+}
+
 export async function loadManifest(baseUrl: string): Promise<TileManifest> {
   const res = await fetch(`${baseUrl}/manifest.json`);
   if (!res.ok) throw new Error(`manifest: ${res.status}`);
