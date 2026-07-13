@@ -696,17 +696,17 @@ export class TileManager {
       return undefined;
     }
     const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 64;
+    canvas.width = 384;
+    canvas.height = 96;
     const ctx = canvas.getContext("2d")!;
 
-    // Background panel - dark slate with subtle cyan border
-    const r = 8;
+    // Background panel - white with clean black border
+    const r = 12;
     const w = canvas.width;
     const h = canvas.height;
-    ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
-    ctx.strokeStyle = "rgba(56, 189, 248, 0.6)";
-    ctx.lineWidth = 3;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+    ctx.lineWidth = 4;
 
     ctx.beginPath();
     ctx.moveTo(r, 0);
@@ -722,13 +722,13 @@ export class TileManager {
     ctx.fill();
     ctx.stroke();
 
-    // Centered label text
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 20px monospace";
+    // Centered label text - black and 50% larger
+    ctx.fillStyle = "#000000";
+    ctx.font = "bold 30px monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
-    ctx.shadowBlur = 4;
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
     ctx.fillText(`${tile.z}/${tile.x}/${tile.y}`, w / 2, h / 2);
 
     const texture = new THREE.CanvasTexture(canvas);
