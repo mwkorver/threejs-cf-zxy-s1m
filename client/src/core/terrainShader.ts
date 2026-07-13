@@ -25,6 +25,9 @@ export const TerrainShader = {
     uniform bool showOutlines;
     uniform bool showDemColors;
     uniform float demSourceType; // 0.0=farfield, 1.0=usgs13, 2.0=s1m
+    uniform float brightness;
+    uniform float contrast;
+    uniform float saturation;
 
     varying vec2 vUv;
     varying vec3 vWorldNormal;
@@ -52,6 +55,22 @@ export const TerrainShader = {
       float shade = 1.0 - hillshadeIntensity * (1.0 - diffuse);
       
       vec3 rgb = baseColor.rgb * shade;
+      
+      // Apply brightness, contrast, and saturation adjustments to textures
+      if (!showDemColors && useTexture) {
+        // Brightness
+        rgb *= brightness;
+
+        // Contrast (relative to 0.5 middle gray)
+        rgb = (rgb - 0.5) * contrast + 0.5;
+
+        // Saturation (using standard luma coefficients)
+        float luma = dot(rgb, vec3(0.299, 0.587, 0.114));
+        rgb = mix(vec3(luma), rgb, saturation);
+
+        // Keep values in valid [0, 1] range
+        rgb = clamp(rgb, 0.0, 1.0);
+      }
       
       if (showOutlines) {
         // Use screen-space derivatives to compute a crisp 1.5-pixel wide border

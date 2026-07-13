@@ -110,7 +110,7 @@ describe("TileManager", () => {
     expect(rootNode.children).toBeDefined();
 
     // 2. Move camera extremely far away
-    const cameraPosFar = new THREE.Vector3(1000000, 1000000, 10000);
+    const cameraPosFar = new THREE.Vector3(1000000, 1000000, 50);
     tileManager.update(cameraPosFar);
 
     // The old root node should be pruned (distance > Chebyshev threshold) or collapsed
