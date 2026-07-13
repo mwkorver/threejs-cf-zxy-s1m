@@ -7,6 +7,7 @@ CloudFront cache keys stay path-only and every tile is immutable (plan §4.1).
 from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .imagery import render_imagery_tile
@@ -16,6 +17,17 @@ from .settings import settings
 from .terrain import render_farfield_tile, render_terrain_tile
 
 app = FastAPI(title="flight-sim tiler", version="0.0.1")
+
+# CORS for local dev only: browsers reach the deployed tiler through CloudFront
+# (which adds CORS via its ResponseHeadersPolicy and never exposes the Function
+# URL directly), but a `?src=tiler-local` client on :5180 hits uvicorn straight,
+# and without Access-Control-Allow-Origin the browser blocks every tile read.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    expose_headers=["X-DEM-Source"],
+)
 
 IMMUTABLE = "public, max-age=31536000, immutable"
 
