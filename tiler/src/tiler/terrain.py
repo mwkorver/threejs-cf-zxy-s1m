@@ -31,7 +31,7 @@ _FARFIELD_ENV = {"AWS_S3_ENDPOINT": "s3.us-east-1.amazonaws.com", "AWS_REGION": 
 
 
 def _s1m_tile(href: str, x: int, y: int, z: int, tilesize: int) -> "object":
-    with Reader(href) as src:
+    with rasterio.Env(AWS_REQUEST_PAYER="requester"), Reader(href) as src:
         # Band 1 only; keep native float elevation (no rescale/expression).
         return src.tile(x, y, z, tilesize=tilesize, indexes=(1,))
 
