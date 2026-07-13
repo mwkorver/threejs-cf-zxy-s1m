@@ -198,13 +198,18 @@ export class TileManager {
 
     // Re-check and update transition nodes if they exist
     if (this.transitionNodes.size > 0) {
+      // The new base level is ready once every in-view root is COVERED, not
+      // necessarily loaded itself: a root that immediately subdivides is hidden
+      // by its children and never gets triggerLoad'd (so node.loaded stays
+      // false forever), yet its footprint is fully drawn by those children.
+      // Checking node.loaded here would pin the old coarse roots permanently.
       let allNewRootsLoaded = true;
       for (const node of this.rootNodes.values()) {
-        if (this.isNodeVisible(node, frustum) && !node.loaded) {
+        if (!this.isCovered(node, frustum)) {
           allNewRootsLoaded = false;
         }
       }
-      
+
       if (allNewRootsLoaded) {
         // Swap complete! Prune and discard all old transition nodes
         for (const node of this.transitionNodes.values()) {
@@ -663,6 +668,21 @@ export class TileManager {
       }
       delete node.children;
     }
+  }
+
+  /**
+   * A node's footprint is "covered" for transition purposes if it is out of
+   * view (nothing to draw), already loaded, or fully covered by covered
+   * children. Mirrors what actually renders, so a root hidden behind its
+   * loaded children still counts as ready.
+   */
+  private isCovered(node: TileNode, frustum?: THREE.Frustum): boolean {
+    if (!this.isNodeVisible(node, frustum)) return true;
+    if (node.loaded) return true;
+    if (node.children && node.children.length > 0) {
+      return node.children.every((c) => this.isCovered(c, frustum));
+    }
+    return false;
   }
 
   private isNodeVisible(node: TileNode, frustum?: THREE.Frustum): boolean {
