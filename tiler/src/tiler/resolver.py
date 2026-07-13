@@ -181,15 +181,12 @@ class S1MResolver:
 
     def resolve(self, z: int, x: int, y: int) -> list[str]:
         """s3:// hrefs of S1M COGs intersecting tile z/x/y (empty if none)."""
-        is_usgs = "usgs" in self.index_path.lower()
-        lat_shift = 1.0 if is_usgs else 0.0
-
         b = TMS.bounds(morecantile.Tile(x, y, z))
         # Transform all 4 corners; Albers isn't axis-aligned to lon/lat so the
         # envelope over the corners slightly overestimates (admits edge tiles).
         xs, ys = [], []
         for lon, lat in [(b.left, b.bottom), (b.right, b.bottom), (b.right, b.top), (b.left, b.top)]:
-            ax, ay = self._to_albers.transform(lon, lat + lat_shift)
+            ax, ay = self._to_albers.transform(lon, lat)
             xs.append(ax)
             ys.append(ay)
         axmin, axmax, aymin, aymax = min(xs), max(xs), min(ys), max(ys)
@@ -217,13 +214,10 @@ class S1MResolver:
 
     def resolve_footprints(self, z: int, x: int, y: int, dataset_type: str = "s1m") -> dict:
         """GeoJSON FeatureCollection of footprints intersecting tile z/x/y."""
-        is_usgs = "usgs" in self.index_path.lower()
-        lat_shift = 1.0 if is_usgs else 0.0
-
         b = TMS.bounds(morecantile.Tile(x, y, z))
         xs, ys = [], []
         for lon, lat in [(b.left, b.bottom), (b.right, b.bottom), (b.right, b.top), (b.left, b.top)]:
-            ax, ay = self._to_albers.transform(lon, lat + lat_shift)
+            ax, ay = self._to_albers.transform(lon, lat)
             xs.append(ax)
             ys.append(ay)
         axmin, axmax, aymin, aymax = min(xs), max(xs), min(ys), max(ys)
@@ -251,9 +245,6 @@ class S1MResolver:
             if geom.intersects(envelope):
                 # Reproject geometry to WGS84 for GeoJSON
                 geom_wgs = shapely.ops.transform(self._to_latlon.transform, geom)
-                if is_usgs:
-                    from shapely.affinity import translate
-                    geom_wgs = translate(geom_wgs, yoff=-1.0)
                 features.append({
                     "type": "Feature",
                     "properties": {
@@ -273,13 +264,10 @@ class S1MResolver:
         self, west: float, south: float, east: float, north: float, dataset_type: str = "s1m", max_features: int = 1000
     ) -> dict:
         """GeoJSON FeatureCollection of S1M footprints intersecting the visible lon/lat bounding box."""
-        is_usgs = "usgs" in self.index_path.lower()
-        lat_shift = 1.0 if is_usgs else 0.0
-
         # Transform the 4 corner points; Albers envelope calculation
         xs, ys = [], []
         for lon, lat in [(west, south), (east, south), (east, north), (west, north)]:
-            ax, ay = self._to_albers.transform(lon, lat + lat_shift)
+            ax, ay = self._to_albers.transform(lon, lat)
             xs.append(ax)
             ys.append(ay)
         axmin, axmax, aymin, aymax = min(xs), max(xs), min(ys), max(ys)
@@ -308,9 +296,6 @@ class S1MResolver:
             if geom.intersects(envelope):
                 # Reproject geometry to WGS84 for GeoJSON
                 geom_wgs = shapely.ops.transform(self._to_latlon.transform, geom)
-                if is_usgs:
-                    from shapely.affinity import translate
-                    geom_wgs = translate(geom_wgs, yoff=-1.0)
                 features.append({
                     "type": "Feature",
                     "properties": {
