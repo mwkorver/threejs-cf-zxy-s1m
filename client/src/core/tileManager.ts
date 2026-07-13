@@ -8,7 +8,7 @@ import {
   mercatorScale,
   mercatorToLonLat
 } from "./mercator";
-import { loadTerrain, loadImagery, loadImageryExternal, loadViewportFootprints, type FootprintCollection } from "./tileLoader";
+import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM, loadViewportFootprints, type FootprintCollection } from "./tileLoader";
 import { buildTerrainMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import { TerrainShader } from "./terrainShader";
@@ -48,6 +48,8 @@ export class TileManager {
   // ImageServer instead of the COG tiler (which is slow/coverage-capped at low
   // zoom). Set to maxZoom to route everything external.
   public externalImageryMaxZoom = 13;
+  // Selected imagery source layer type
+  public imagerySource: "satellite" | "osm" = "satellite";
   // Toggle for showing DEM source colors
   public showDemColors = false;
 
@@ -335,11 +337,13 @@ export class TileManager {
       return;
     }
 
-    // Imagery source: USDA ImageServer at/below the threshold, COG tiler above.
+    // Imagery source selection
     const loadImageryForTile =
-      node.tile.z <= this.externalImageryMaxZoom
-        ? loadImageryExternal(node.tile)
-        : loadImagery(this.baseUrl, this.layer, this.year, node.tile);
+      this.imagerySource === "osm"
+        ? loadImageryOSM(node.tile)
+        : (node.tile.z <= this.externalImageryMaxZoom
+            ? loadImageryExternal(node.tile)
+            : loadImagery(this.baseUrl, this.layer, this.year, node.tile));
 
     // Load from backend tiler
     Promise.all([
@@ -706,6 +710,28 @@ export class TileManager {
     };
     for (const node of this.rootNodes.values()) {
       updateNodeScale(node);
+    }
+  }
+
+  /** Change dynamic imagery base layer source and force refresh active tiles. */
+  setImagerySource(source: "satellite" | "osm"): void {
+    this.imagerySource = source;
+    // Clear cache to discard current tile textures
+    this.bundleCache.clear();
+    
+    // Force reload all nodes in the tree
+    const resetNode = (node: TileNode) => {
+      node.loaded = false;
+      node.loading = false;
+      node.retryAfter = undefined;
+      if (node.children) {
+        for (const child of node.children) {
+          resetNode(child);
+        }
+      }
+    };
+    for (const node of this.rootNodes.values()) {
+      resetNode(node);
     }
   }
 
