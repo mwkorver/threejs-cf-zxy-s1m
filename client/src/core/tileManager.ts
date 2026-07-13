@@ -234,9 +234,18 @@ export class TileManager {
         // Children take over: hide parent mesh
         node.visible = false;
       } else {
-        // Keep parent visible as fallback while children load
+        // Not all four children are ready. Render ONLY the parent as a
+        // coarse fallback and hide the partially-loaded child subtree, so a
+        // parent and its finer children never render in the same footprint at
+        // once. Overlapping them z-fights, and when they come from different
+        // DEM sources (far-field parent vs S1M children across the z15
+        // boundary) that z-fight shows as a cyan/gray "camo" within one tile.
+        // Children swap in atomically once all four have loaded.
         node.visible = true;
         this.triggerLoad(node);
+        for (const child of node.children) {
+          this.hideSubtree(child);
+        }
       }
     } else {
       // Do not subdivide: show parent
@@ -249,6 +258,16 @@ export class TileManager {
           this.pruneNode(child);
         }
         delete node.children;
+      }
+    }
+  }
+
+  /** Mark a node and its whole descendant subtree invisible (kept loaded/cached). */
+  private hideSubtree(node: TileNode): void {
+    node.visible = false;
+    if (node.children) {
+      for (const child of node.children) {
+        this.hideSubtree(child);
       }
     }
   }
