@@ -264,7 +264,6 @@ export class TileManager {
 
   /** Mark a node and its whole descendant subtree invisible (kept loaded/cached). */
   private hideSubtree(node: TileNode): void {
-    if (!node.visible) return;
     node.visible = false;
     if (node.children) {
       for (const child of node.children) {
