@@ -79,6 +79,8 @@ const tileManager = new TileManager(
   LOD_FACTOR,
   CULL_TILES
 );
+// Debug handle for the browser console.
+(window as any).tileManager = tileManager;
 
 // 4. Create floating HUD overlay
 const hud = document.createElement("div");
@@ -208,6 +210,14 @@ hud.innerHTML = `
       <input type="range" id="ctrl-extimagery" min="0" max="18" step="1" value="13" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+        <span>TERRAIN &ge; Z (else flat)</span>
+        <span id="val-terrainmin">14</span>
+      </div>
+      <input type="range" id="ctrl-terrainmin" min="0" max="18" step="1" value="14" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
     <div style="margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
       <div style="display: flex; align-items: center; gap: 8px;">
         <input type="checkbox" id="ctrl-footprints" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
@@ -256,6 +266,10 @@ hud.innerHTML = `
           <span style="display: inline-block; width: 8px; height: 8px; background: #666666; border-radius: 2px;"></span>
           Far-field
         </span>
+        <span style="display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 8px; height: 8px; background: #ccb300; border-radius: 2px;"></span>
+          Flat
+        </span>
       </div>
     </div>
   </div>
@@ -285,6 +299,7 @@ const ctrlAltitude = document.getElementById("ctrl-altitude") as HTMLInputElemen
 const ctrlFog = document.getElementById("ctrl-fog") as HTMLInputElement;
 const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInputElement;
 const ctrlExtImagery = document.getElementById("ctrl-extimagery") as HTMLInputElement;
+const ctrlTerrainMin = document.getElementById("ctrl-terrainmin") as HTMLInputElement;
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
 const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
@@ -301,6 +316,7 @@ const valAltitude = document.getElementById("val-altitude")!;
 const valFog = document.getElementById("val-fog")!;
 const valExaggeration = document.getElementById("val-exaggeration")!;
 const valExtImagery = document.getElementById("val-extimagery")!;
+const valTerrainMin = document.getElementById("val-terrainmin")!;
 const valSpeedCtrl = document.getElementById("val-speed-ctrl")!;
 const valLabelSize = document.getElementById("val-label-size")!;
 const valBrightness = document.getElementById("val-brightness")!;
@@ -448,6 +464,12 @@ ctrlExtImagery.addEventListener("input", () => {
   const z = parseInt(ctrlExtImagery.value);
   valExtImagery.textContent = z.toString();
   tileManager.setExternalImageryMaxZoom(z);
+});
+
+ctrlTerrainMin.addEventListener("input", () => {
+  const z = parseInt(ctrlTerrainMin.value);
+  valTerrainMin.textContent = z.toString();
+  tileManager.setTerrainMinZoom(z);
 });
 
 ctrlSpeedCtrl.addEventListener("input", () => {

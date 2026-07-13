@@ -24,7 +24,7 @@ export const TerrainShader = {
     uniform vec3 sunDirection;
     uniform bool showOutlines;
     uniform bool showDemColors;
-    uniform float demSourceType; // 0.0=farfield, 1.0=usgs13, 2.0=s1m
+    uniform float demSourceType; // 0.0=farfield, 1.0=usgs13, 2.0=s1m, 3.0=flat
     uniform float brightness;
     uniform float contrast;
     uniform float saturation;
@@ -37,7 +37,9 @@ export const TerrainShader = {
       vec4 baseColor;
       if (showDemColors) {
         vec3 col = vec3(0.4, 0.4, 0.4); // farfield dark gray
-        if (demSourceType > 1.5) {
+        if (demSourceType > 2.5) {
+          col = vec3(0.8, 0.7, 0.0); // flat (no DEM) yellow
+        } else if (demSourceType > 1.5) {
           col = vec3(0.0, 0.8, 0.8); // s1m cyan
         } else if (demSourceType > 0.5) {
           col = vec3(0.8, 0.0, 0.8); // usgs13 magenta

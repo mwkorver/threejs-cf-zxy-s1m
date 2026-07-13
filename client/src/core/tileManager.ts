@@ -9,7 +9,7 @@ import {
   mercatorToLonLat
 } from "./mercator";
 import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM, loadViewportFootprints, type FootprintCollection } from "./tileLoader";
-import { buildTerrainMesh } from "./terrainMesh";
+import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import { TerrainShader } from "./terrainShader";
 
@@ -48,6 +48,10 @@ export class TileManager {
   // ImageServer instead of the COG tiler (which is slow/coverage-capped at low
   // zoom). Set to maxZoom to route everything external.
   public externalImageryMaxZoom = 13;
+  // Terrain zoom floor: tiles at z < this skip the DEM fetch entirely and
+  // render as flat sea-level quads (relief is subpixel at those altitudes).
+  // Keeps low zoom off the tiler's far-field path; z14 = USGS 1/3, z15+ = S1M.
+  public terrainMinZoom = 14;
   // Selected imagery source layer type
   public imagerySource: "satellite" | "osm" = "satellite";
   // Toggle for showing DEM source colors
@@ -234,7 +238,8 @@ export class TileManager {
     return this.activeKeys;
   }
 
-  private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): void {
+  /** @returns true if the node was frustum-culled (renders nothing on screen). */
+  private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): boolean {
     // 1. Perform frustum culling check first
     if (this.cullTiles && frustum) {
       const tileMinZ = -1000 * this.verticalExaggeration;
@@ -253,7 +258,7 @@ export class TileManager {
           }
           delete node.children;
         }
-        return; // Stop recursion and loading!
+        return true; // Stop recursion and loading!
       }
     }
 
@@ -271,11 +276,13 @@ export class TileManager {
         node.children = this.createChildren(node.tile);
       }
 
-      // Recursively update children
+      // Recursively update children. A frustum-culled child renders nothing
+      // on screen, so it must not block the parent->children swap — otherwise
+      // any partially-off-screen parent keeps its coarse mesh forever.
       let allChildrenLoaded = true;
       for (const child of node.children) {
-        this.updateNode(child, cameraPosGlobal, frustum);
-        if (!child.loaded) {
+        const culled = this.updateNode(child, cameraPosGlobal, frustum);
+        if (!culled && !child.loaded) {
           allChildrenLoaded = false;
         }
       }
@@ -310,6 +317,8 @@ export class TileManager {
         delete node.children;
       }
     }
+
+    return false; // in view
   }
 
   /** Mark a node and its whole descendant subtree invisible (kept loaded/cached). */
@@ -391,9 +400,15 @@ export class TileManager {
             ? loadImageryExternal(node.tile)
             : loadImagery(this.baseUrl, this.layer, this.year, node.tile));
 
+    // Below the terrain floor: no DEM fetch, flat quad (relief is subpixel).
+    const terrainPromise =
+      node.tile.z < this.terrainMinZoom
+        ? Promise.resolve(null)
+        : loadTerrain(this.baseUrl, node.tile);
+
     // Load from backend tiler
     Promise.all([
-      loadTerrain(this.baseUrl, node.tile),
+      terrainPromise,
       loadImageryForTile.catch(() => null)
     ])
       .then(([terrain, imageBitmap]) => {
@@ -403,10 +418,13 @@ export class TileManager {
           return;
         }
 
-        const { heights, demSource } = terrain;
+        const heights = terrain?.heights;
+        const demSource = terrain ? terrain.demSource : "flat";
 
-        // Build grid mesh
-        const meshData = buildTerrainMesh(heights, node.tile, this.gridStep);
+        // Build grid mesh (or a 4-vertex flat quad below the terrain floor)
+        const meshData = heights
+          ? buildTerrainMesh(heights, node.tile, this.gridStep)
+          : buildFlatMesh(node.tile);
         const geom = new THREE.BufferGeometry();
         geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
         geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
@@ -429,7 +447,7 @@ export class TileManager {
 
         const centerCol = 256;
         const centerRow = 256;
-        const centerH = heights[centerRow * 512 + centerCol] ?? 0;
+        const centerH = heights ? (heights[centerRow * 512 + centerCol] ?? 0) : 0;
         node.centerElevation = centerH;
         node.demSource = demSource;
 
@@ -538,7 +556,9 @@ export class TileManager {
     texture?: THREE.Texture
   ): void {
     let demSourceVal = 0.0;
-    if (node.demSource === "s1m") {
+    if (node.demSource === "flat") {
+      demSourceVal = 3.0;
+    } else if (node.demSource === "s1m") {
       demSourceVal = 2.0;
     } else if (node.demSource === "usgs13") {
       demSourceVal = 1.0;
@@ -738,6 +758,17 @@ export class TileManager {
   setExternalImageryMaxZoom(z: number): void {
     if (z === this.externalImageryMaxZoom) return;
     this.externalImageryMaxZoom = z;
+    this.bundleCache.clear();
+    this.clear(); // reset nodes; next update() rebuilds + refetches
+  }
+
+  /**
+   * Change the terrain zoom floor (z < this renders as a flat quad, no DEM
+   * fetch). Drops cached/loaded tiles so geometry rebuilds in the right mode.
+   */
+  setTerrainMinZoom(z: number): void {
+    if (z === this.terrainMinZoom) return;
+    this.terrainMinZoom = z;
     this.bundleCache.clear();
     this.clear(); // reset nodes; next update() rebuilds + refetches
   }
