@@ -50,6 +50,36 @@ export function skirtHeight(tile: TileId, tileSize = 512, texels = 4): number {
 }
 
 /**
+ * Flat sea-level quad for low zooms, where relief is subpixel anyway.
+ * Replaces the whole terrain pipeline below TileManager.terrainMinZoom:
+ * no terrain fetch, no grid, no skirts (coplanar neighbors can't crack).
+ * Same TerrainMesh contract so the manager treats it like any tile.
+ */
+export function buildFlatMesh(tile: TileId): TerrainMesh {
+  const b = tileBoundsMercator(tile);
+  const anchor: [number, number] = [b.west, b.north]; // NW corner
+  const tileW = b.east - b.west;
+  const tileH = b.north - b.south;
+
+  // 2x2 vertices: NW, NE, SW, SE (anchor-relative, Z-up, elevation 0).
+  const positions = new Float32Array([
+    0, 0, 0,
+    tileW, 0, 0,
+    0, -tileH, 0,
+    tileW, -tileH, 0,
+  ]);
+  const uvs = new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]);
+  // Up-normals: the shared hillshade formula then shades flat tiles exactly
+  // like flat ground inside terrain tiles, so no brightness step at the
+  // flat->terrain boundary.
+  const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  // Same +Z winding as the interior grid triangles above.
+  const indices = new Uint32Array([0, 2, 1, 1, 2, 3]);
+
+  return { positions, uvs, normals, indices, anchor, tile, gridSize: 2 };
+}
+
+/**
  * @param heights  decoded Terrarium elevations (true meters), row-major,
  *                 length tileSize*tileSize (row 0 = north edge).
  * @param gridStep vertices every N source texels; LOD manager picks per SSE.
