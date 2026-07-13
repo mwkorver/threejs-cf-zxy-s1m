@@ -7,12 +7,10 @@
 import { decodeTerrarium } from "./terrarium";
 import { tileBoundsMercator, type TileId } from "./mercator";
 
-// USDA APFO NAIP Tile Server (CONUS). Serves pre-cached tiles at /tile/{z}/{y}/{x}.
-// Note: The active/running service name on the USDA server is NAIP/USDA_CONUS_PRIME/ImageServer,
-// while NAIP/NAIP Imagery/MapServer is currently offline (returning 503/500).
-// We default to the active CONUS PRIME service to ensure imagery successfully loads.
-const USDA_TILE_URL = (z: number, x: number, y: number) =>
-  `https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer/tile/${z}/${y}/${x}`;
+// USGS Imagery Only Tile Server (CONUS + global coverage, served via Nginx/CloudFront).
+// Highly optimized and reliable XYZ tiles with wide-open CORS headers.
+const USGS_TILE_URL = (z: number, x: number, y: number) =>
+  `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${z}/${y}/${x}`;
 
 export interface TileManifest {
   layer: string;
@@ -81,11 +79,11 @@ export async function loadImagery(
   return createImageBitmap(await res.blob());
 }
 
-/** Imagery from the USDA NAIP Tile Server (directly fetching pre-cached XYZ tiles).
+/** Imagery from the USGS Imagery Only Tile Server (directly fetching pre-cached XYZ tiles).
  *  Used for low zooms where the COG tiler is slow/coverage-capped. */
 export async function loadImageryExternal(t: TileId): Promise<ImageBitmap> {
-  const url = USDA_TILE_URL(t.z, t.x, t.y);
-  const res = await fetchTile(url, `usda ${t.z}/${t.x}/${t.y}`);
+  const url = USGS_TILE_URL(t.z, t.x, t.y);
+  const res = await fetchTile(url, `usgs ${t.z}/${t.x}/${t.y}`);
   return createImageBitmap(await res.blob());
 }
 
