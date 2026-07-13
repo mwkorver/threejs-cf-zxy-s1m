@@ -79,8 +79,9 @@ const tileManager = new TileManager(
   LOD_FACTOR,
   CULL_TILES
 );
-// Debug handle for the browser console.
+// Debug handles for the browser console.
 (window as any).tileManager = tileManager;
+(window as any).camera = camera;
 
 // 4. Create floating HUD overlay
 const hud = document.createElement("div");
