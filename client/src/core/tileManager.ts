@@ -471,6 +471,7 @@ export class TileManager {
       vertexColors: true,
       transparent: true,
       opacity: 0.8,
+      linewidth: 2, // Double thickness (note: WebGL may clamp to 1.0 depending on GPU/driver support)
       depthTest: false // Render on top of everything!
     });
 
