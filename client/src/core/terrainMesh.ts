@@ -212,8 +212,8 @@ export function buildTerrainMesh(
     const t1 = ring[next]!;
     const b0 = g * g + e;
     const b1 = g * g + next;
-    indices[k++] = t0; indices[k++] = b0; indices[k++] = t1;
-    indices[k++] = t1; indices[k++] = b0; indices[k++] = b1;
+    indices[k++] = t0; indices[k++] = t1; indices[k++] = b0;
+    indices[k++] = t1; indices[k++] = b1; indices[k++] = b0;
   }
 
   return { positions, uvs, normals, indices, anchor, tile, gridSize: g };
