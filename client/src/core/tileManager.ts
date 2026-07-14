@@ -52,7 +52,7 @@ export class TileManager {
   // Terrain zoom floor: tiles at z < this skip the DEM fetch entirely and
   // render as flat sea-level quads (relief is subpixel at those altitudes).
   // Keeps low zoom off the tiler's far-field path; z14 = USGS 1/3, z15+ = S1M.
-  public terrainMinZoom = 14;
+  public terrainMinZoom = 0;
   // Selected imagery source layer type
   public imagerySource: "satellite" | "osm" = "satellite";
   // Toggle for showing DEM source colors
