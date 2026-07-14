@@ -202,12 +202,9 @@ export class TileWorkerPool {
         heights = terrain.heights;
         demSource = terrain.demSource;
       } catch (err: any) {
-        if (err instanceof Error && err.message.includes("404")) {
-          heights = null;
-          demSource = "flat";
-        } else {
-          throw err;
-        }
+        console.warn(`Fallback terrain load failed for tile ${tile.z}/${tile.x}/${tile.y}, falling back to flat terrain:`, err);
+        heights = null;
+        demSource = "flat";
       }
     }
 
