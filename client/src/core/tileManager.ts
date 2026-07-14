@@ -12,6 +12,7 @@ import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM, loadView
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import { TerrainShader } from "./terrainShader";
+import { TileWorkerPool } from "./tileWorkerPool";
 
 export interface TileNode {
   key: string;
@@ -63,6 +64,7 @@ export class TileManager {
   private isFetchingFootprints = false;
   // Keep old root nodes rendering smoothly until new base level roots are fully loaded
   private transitionNodes = new Map<string, TileNode>();
+  private workerPool = new TileWorkerPool();
 
   public globalUniforms = {
     // matches the midday preset + HUD slider default (main.ts applyPreset)
@@ -304,7 +306,7 @@ export class TileManager {
         // boundary) that z-fight shows as a cyan/gray "camo" within one tile.
         // Children swap in atomically once all four have loaded.
         node.visible = true;
-        this.triggerLoad(node);
+        this.triggerLoad(node, -dist);
         for (const child of node.children) {
           this.hideSubtree(child);
         }
@@ -312,7 +314,7 @@ export class TileManager {
     } else {
       // Do not subdivide: show parent
       node.visible = true;
-      this.triggerLoad(node);
+      this.triggerLoad(node, -dist);
 
       // Collapse and dispose children if they exist to conserve memory
       if (node.children) {
@@ -370,7 +372,7 @@ export class TileManager {
     return children;
   }
 
-  private triggerLoad(node: TileNode): void {
+  private triggerLoad(node: TileNode, priority: number): void {
     if (node.loaded || node.loading) {
       return;
     }
@@ -397,39 +399,27 @@ export class TileManager {
       return;
     }
 
-    // Imagery source selection
-    const loadImageryForTile =
-      this.imagerySource === "osm"
-        ? loadImageryOSM(node.tile)
-        : (node.tile.z <= this.externalImageryMaxZoom
-            ? loadImageryExternal(node.tile)
-            : loadImagery(this.baseUrl, this.layer, this.year, node.tile));
+    const options = {
+      baseUrl: this.baseUrl,
+      layer: this.layer,
+      year: this.year,
+      imagerySource: this.imagerySource,
+      terrainMinZoom: this.terrainMinZoom,
+      gridStep: this.gridStep,
+      externalImageryMaxZoom: this.externalImageryMaxZoom
+    };
 
-    // Below the terrain floor: no DEM fetch, flat quad (relief is subpixel).
-    const terrainPromise =
-      node.tile.z < this.terrainMinZoom
-        ? Promise.resolve(null)
-        : loadTerrain(this.baseUrl, node.tile);
-
-    // Load from backend tiler
-    Promise.all([
-      terrainPromise,
-      loadImageryForTile.catch(() => null)
-    ])
-      .then(([terrain, imageBitmap]) => {
+    this.workerPool.requestTile(node.tile, priority, options)
+      .then((res) => {
         if (!node.loading) {
           // Node was pruned/cancelled during fetch
-          if (imageBitmap) imageBitmap.close();
+          if (res.imageBitmap) res.imageBitmap.close();
           return;
         }
 
-        const heights = terrain?.heights;
-        const demSource = terrain ? terrain.demSource : "flat";
+        const { demSource, centerElevation, meshData, imageBitmap } = res;
 
-        // Build grid mesh (or a 4-vertex flat quad below the terrain floor)
-        const meshData = heights
-          ? buildTerrainMesh(heights, node.tile, this.gridStep)
-          : buildFlatMesh(node.tile);
+        // Build Three.js geometry from worker-returned typed arrays
         const geom = new THREE.BufferGeometry();
         geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
         geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
@@ -450,18 +440,15 @@ export class TileManager {
           meshData.indices.byteLength +
           (texture ? 512 * 512 * 4 : 0);
 
-        const centerCol = 256;
-        const centerRow = 256;
-        const centerH = heights ? (heights[centerRow * 512 + centerCol] ?? 0) : 0;
-        node.centerElevation = centerH;
+        node.centerElevation = centerElevation;
         node.demSource = demSource;
 
         const bounds = tileBoundsMercator(node.tile);
         if (!node.labelSprite) {
-          node.labelSprite = this.buildLabelSprite(node.tile, bounds, centerH);
+          node.labelSprite = this.buildLabelSprite(node.tile, bounds, centerElevation);
         }
 
-        const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation: centerH, demSource };
+        const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation, demSource };
         this.bundleCache.put(bundle, this.activeKeys);
 
         this.createMeshFromBundle(node, geom, texture);
@@ -470,9 +457,11 @@ export class TileManager {
         node.retryAfter = undefined;
       })
       .catch((err) => {
-        // Loader already retried transient throttling; hold off a few seconds
-        // before the manager tries this tile again.
-        console.warn(`tile ${key} deferred: ${err.message}`);
+        if (err instanceof DOMException && err.name === "AbortError") {
+          // Task aborted, don't set cooldown or error out
+          return;
+        }
+        console.warn(`tile ${key} deferred: ${err.message || err}`);
         node.loading = false;
         node.retryAfter = performance.now() + 2000 + Math.random() * 2000;
       });
@@ -638,6 +627,9 @@ export class TileManager {
    * Recursively remove meshes from the scene, prune children, and reset node loading flags.
    */
   private pruneNode(node: TileNode): void {
+    if (node.loading) {
+      this.workerPool.cancelTile(node.tile);
+    }
     node.loading = false;
     node.visible = false;
 
@@ -1037,6 +1029,7 @@ export class TileManager {
    * Completely clean up all roots and scene meshes.
    */
   clear(): void {
+    this.workerPool.clear();
     for (const node of this.rootNodes.values()) {
       this.pruneNode(node);
     }
