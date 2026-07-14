@@ -297,7 +297,11 @@ export class TileManager {
 
     const tileW = node.bounds.east - node.bounds.west;
     const tileCenter = new THREE.Vector3(node.centerMercator[0], node.centerMercator[1], 0);
-    const dist = cameraPosGlobal.distanceTo(tileCenter);
+
+    const clampX = Math.max(node.bounds.west, Math.min(node.bounds.east, cameraPosGlobal.x));
+    const clampY = Math.max(node.bounds.south, Math.min(node.bounds.north, cameraPosGlobal.y));
+    const closestPoint = new THREE.Vector3(clampX, clampY, node.centerElevation ?? 0);
+    const dist = cameraPosGlobal.distanceTo(closestPoint);
 
     // Pin this key as active
     this.activeKeys.add(node.key);
