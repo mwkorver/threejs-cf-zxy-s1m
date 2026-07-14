@@ -439,7 +439,14 @@ export class TileManager {
   }
 
   private triggerLoad(node: TileNode, priority: number): void {
-    if (node.loaded || node.loading) {
+    if (node.loaded) {
+      return;
+    }
+    if (node.loading) {
+      // Already queued/running: refresh its priority with the current camera
+      // distance so tiles queued near an old camera position can't outrank
+      // the tiles now in front of a moving camera.
+      this.workerPool.reprioritize(node.tile, priority);
       return;
     }
     // Cooldown after a failure so a persistently-failing tile isn't re-fetched

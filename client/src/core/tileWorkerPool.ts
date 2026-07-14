@@ -11,12 +11,21 @@ interface PendingTask {
   resolve: (value: any) => void;
   reject: (reason: any) => void;
   aborted: boolean;
+  /** Worker this task was dispatched to (set on dispatch). */
+  worker?: Worker;
 }
+
+// Tile tasks are almost entirely I/O (fetch + decode awaits), so a worker can
+// interleave several concurrently — capping at 1 task/worker throttled the
+// whole pipeline to 4 tiles in flight and starved forward flight.
+const MAX_TASKS_PER_WORKER = 4;
 
 export class TileWorkerPool {
   private workers: Worker[] = [];
-  private idleWorkers: Worker[] = [];
-  private workerToTask = new Map<Worker, PendingTask>();
+  /** Tasks in flight per worker. */
+  private workerLoad = new Map<Worker, number>();
+  /** Dispatched tasks by requestId (kept until the worker responds). */
+  private tasksByRequestId = new Map<string, PendingTask>();
   private pendingTasks = new Map<string, PendingTask>();
   private runningTasks = new Map<string, PendingTask>();
   private nextRequestId = 0;
@@ -33,13 +42,13 @@ export class TileWorkerPool {
     for (let i = 0; i < numWorkers; i++) {
       // Use standard module worker instantiation which Vite natively compiles
       const worker = new Worker(new URL("./tile.worker.ts", import.meta.url), { type: "module" });
-      
+
       worker.onmessage = (e: MessageEvent) => {
-        this.handleWorkerMessage(worker, e.data);
+        this.handleWorkerMessage(e.data);
       };
-      
+
       this.workers.push(worker);
-      this.idleWorkers.push(worker);
+      this.workerLoad.set(worker, 0);
     }
   }
 
@@ -89,11 +98,24 @@ export class TileWorkerPool {
   }
 
   /**
+   * Update the priority of a still-queued tile. Priorities are captured at
+   * enqueue time; without this, tiles queued near an old camera position
+   * outrank the tiles now in front of a moving camera (stale-priority
+   * inversion). The manager calls this every frame for loading nodes.
+   */
+  reprioritize(tile: TileId, priority: number): void {
+    const pending = this.pendingTasks.get(this.getTileKey(tile));
+    if (pending) {
+      pending.priority = priority;
+    }
+  }
+
+  /**
    * Cancel an active or pending tile load request.
    */
   cancelTile(tile: TileId): void {
     const key = this.getTileKey(tile);
-    
+
     // Remove from pending queue immediately
     const pending = this.pendingTasks.get(key);
     if (pending) {
@@ -103,27 +125,35 @@ export class TileWorkerPool {
       return;
     }
 
-    // Abort actively running worker request. Keep the worker->task mapping and
-    // do NOT re-idle the worker here: it is still executing until it posts its
-    // ABORTED/SUCCESS response, and handleWorkerMessage re-idles it exactly
-    // once. Re-idling early could assign a second task to a busy worker.
+    // Abort actively running worker request. Keep the requestId mapping and
+    // the worker's load slot occupied: the worker is still executing until it
+    // posts its ABORTED/SUCCESS response, and handleWorkerMessage releases the
+    // slot exactly once when that arrives.
     const running = this.runningTasks.get(key);
     if (running) {
       running.aborted = true;
       this.runningTasks.delete(key);
       running.reject(new DOMException("Aborted", "AbortError"));
-
-      for (const [worker, task] of this.workerToTask.entries()) {
-        if (task.key === key) {
-          worker.postMessage({ type: "ABORT", requestId: task.requestId });
-          break;
-        }
-      }
+      running.worker?.postMessage({ type: "ABORT", requestId: running.requestId });
     }
   }
 
+  /** Least-loaded worker with a free slot, or null if all are saturated. */
+  private pickWorker(): Worker | null {
+    let best: Worker | null = null;
+    let bestLoad = MAX_TASKS_PER_WORKER;
+    for (const worker of this.workers) {
+      const load = this.workerLoad.get(worker) ?? 0;
+      if (load < bestLoad) {
+        best = worker;
+        bestLoad = load;
+      }
+    }
+    return best;
+  }
+
   private processQueue(): void {
-    if (this.idleWorkers.length === 0 || this.pendingTasks.size === 0) {
+    if (this.pendingTasks.size === 0) {
       return;
     }
 
@@ -131,13 +161,15 @@ export class TileWorkerPool {
     const sortedTasks = Array.from(this.pendingTasks.values())
       .sort((a, b) => b.priority - a.priority);
 
-    while (this.idleWorkers.length > 0 && sortedTasks.length > 0) {
-      const task = sortedTasks.shift()!;
-      this.pendingTasks.delete(task.key);
+    for (const task of sortedTasks) {
+      const worker = this.pickWorker();
+      if (!worker) break; // every worker is at MAX_TASKS_PER_WORKER
 
-      const worker = this.idleWorkers.pop()!;
-      this.workerToTask.set(worker, task);
+      this.pendingTasks.delete(task.key);
+      task.worker = worker;
+      this.workerLoad.set(worker, (this.workerLoad.get(worker) ?? 0) + 1);
       this.runningTasks.set(task.key, task);
+      this.tasksByRequestId.set(task.requestId, task);
 
       worker.postMessage({
         requestId: task.requestId,
@@ -153,19 +185,26 @@ export class TileWorkerPool {
     }
   }
 
-  private handleWorkerMessage(worker: Worker, data: any): void {
+  private handleWorkerMessage(data: any): void {
     const { type, requestId, error, demSource, centerElevation, meshData, imageBitmap } = data;
-    
-    const task = this.workerToTask.get(worker);
-    if (!task || task.requestId !== requestId) {
+
+    const task = this.tasksByRequestId.get(requestId);
+    if (!task) {
       // Task was cleaned up earlier (e.g. pool clear); don't leak the bitmap.
       imageBitmap?.close();
       return;
     }
 
-    this.workerToTask.delete(worker);
-    this.idleWorkers.push(worker);
-    this.runningTasks.delete(task.key);
+    // Release the worker slot exactly once, on response.
+    this.tasksByRequestId.delete(requestId);
+    if (task.worker) {
+      this.workerLoad.set(task.worker, Math.max(0, (this.workerLoad.get(task.worker) ?? 1) - 1));
+    }
+    // Only remove the running entry if it is still THIS task (a cancelled key
+    // may have been re-requested, creating a newer task under the same key).
+    if (this.runningTasks.get(task.key) === task) {
+      this.runningTasks.delete(task.key);
+    }
 
     if (task.aborted) {
       imageBitmap?.close();
@@ -242,7 +281,10 @@ export class TileWorkerPool {
   }
 
   /**
-   * Clear all pending tasks from the queue.
+   * Clear all pending tasks and abort all dispatched ones. Dispatched tasks
+   * keep their requestId mapping and worker slot until the worker responds —
+   * handleWorkerMessage releases each slot exactly once, so capacity can't
+   * leak or double-count.
    */
   clear(): void {
     for (const task of this.pendingTasks.values()) {
@@ -250,14 +292,13 @@ export class TileWorkerPool {
     }
     this.pendingTasks.clear();
 
-    // Send abort to all running tasks
-    for (const [worker, task] of this.workerToTask.entries()) {
-      worker.postMessage({ type: "ABORT", requestId: task.requestId });
-      task.reject(new DOMException("Aborted", "AbortError"));
+    for (const task of this.tasksByRequestId.values()) {
+      if (!task.aborted) {
+        task.aborted = true;
+        task.reject(new DOMException("Aborted", "AbortError"));
+        task.worker?.postMessage({ type: "ABORT", requestId: task.requestId });
+      }
     }
-    this.workerToTask.clear();
     this.runningTasks.clear();
-    
-    this.idleWorkers = [...this.workers];
   }
 }
