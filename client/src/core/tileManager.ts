@@ -312,8 +312,16 @@ export class TileManager {
       // Cosine of the angle between camera look direction and direction to tile
       const cosAngle = Math.max(0.1, this.currentLookDir.dot(toTile));
 
-      // Dynamic LOD factor: tilt = 1 looking straight down, 0 at horizon
-      dynamicLodFactor = this.lodFactor * (0.4 + 0.6 * this.currentTilt) * cosAngle;
+      // Perspective scale factor: tilt = 1 looking straight down, 0 at horizon
+      const perspectiveScale = (0.4 + 0.6 * this.currentTilt) * cosAngle;
+
+      // Distance-weighted transition: 0 (no LOD reduction) when camera is close,
+      // transitioning to 1 (full perspective optimization) for distant tiles.
+      const ratio = dist / tileW;
+      const weight = Math.max(0.0, Math.min(1.0, (ratio - 1.0) / 2.0));
+      const finalMultiplier = THREE.MathUtils.lerp(1.0, perspectiveScale, weight);
+
+      dynamicLodFactor = this.lodFactor * finalMultiplier;
     }
 
     const shouldSubdivide = dist < tileW * dynamicLodFactor && node.tile.z < this.maxZoom;
