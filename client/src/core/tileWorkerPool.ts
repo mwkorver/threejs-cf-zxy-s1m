@@ -103,23 +103,22 @@ export class TileWorkerPool {
       return;
     }
 
-    // Abort actively running worker request
+    // Abort actively running worker request. Keep the worker->task mapping and
+    // do NOT re-idle the worker here: it is still executing until it posts its
+    // ABORTED/SUCCESS response, and handleWorkerMessage re-idles it exactly
+    // once. Re-idling early could assign a second task to a busy worker.
     const running = this.runningTasks.get(key);
     if (running) {
       running.aborted = true;
       this.runningTasks.delete(key);
       running.reject(new DOMException("Aborted", "AbortError"));
 
-      // Find the worker executing this task and tell it to abort
       for (const [worker, task] of this.workerToTask.entries()) {
         if (task.key === key) {
           worker.postMessage({ type: "ABORT", requestId: task.requestId });
-          this.workerToTask.delete(worker);
-          this.idleWorkers.push(worker);
           break;
         }
       }
-      this.processQueue();
     }
   }
 
@@ -159,7 +158,8 @@ export class TileWorkerPool {
     
     const task = this.workerToTask.get(worker);
     if (!task || task.requestId !== requestId) {
-      // Task was likely aborted and cleaned up earlier
+      // Task was cleaned up earlier (e.g. pool clear); don't leak the bitmap.
+      imageBitmap?.close();
       return;
     }
 
@@ -202,9 +202,15 @@ export class TileWorkerPool {
         heights = terrain.heights;
         demSource = terrain.demSource;
       } catch (err: any) {
-        console.warn(`Fallback terrain load failed for tile ${tile.z}/${tile.x}/${tile.y}, falling back to flat terrain:`, err);
-        heights = null;
-        demSource = "flat";
+        // Mirror the worker: only a 404 (no DEM coverage) falls back to flat;
+        // transient failures rethrow so the retry cooldown handles them.
+        if (typeof err?.message === "string" && err.message.endsWith(": 404")) {
+          console.warn(`No terrain coverage for tile ${tile.z}/${tile.x}/${tile.y}, using flat terrain`);
+          heights = null;
+          demSource = "flat";
+        } else {
+          throw err;
+        }
       }
     }
 

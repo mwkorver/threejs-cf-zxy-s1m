@@ -755,6 +755,12 @@ export class TileManager {
   }
 
   private isActiveTileCovered(tile: TileId): boolean {
+    // Covered means FULLY covered: this exact tile, or an ancestor (a coarser
+    // active tile spans this one entirely). Finer active descendants only
+    // cover part of the footprint — one visible z12 inside a z7 transition
+    // tile must NOT hide the whole z7 tile, or the uncovered remainder shows
+    // as a hole. Partial overlap is fine: transition meshes carry a polygon
+    // offset, so the active tiles win the depth test where they coexist.
     const selfKey = tileKey(tile);
     if (this.activeVisibleKeys.has(selfKey)) return true;
 
@@ -770,19 +776,6 @@ export class TileManager {
       parentY = Math.floor(parentY / 2);
     }
 
-    // Check descendants
-    for (const activeKey of this.activeVisibleKeys) {
-      const parts = activeKey.split("/");
-      const az = parseInt(parts[0]!, 10);
-      const ax = parseInt(parts[1]!, 10);
-      const ay = parseInt(parts[2]!, 10);
-      if (az > tile.z) {
-        const scale = 2 ** (az - tile.z);
-        if (Math.floor(ax / scale) === tile.x && Math.floor(ay / scale) === tile.y) {
-          return true;
-        }
-      }
-    }
     return false;
   }
 
@@ -996,7 +989,12 @@ export class TileManager {
     this.imagerySource = source;
     // Clear cache to discard current tile textures
     this.bundleCache.clear();
-    
+
+    // Cancel in-flight worker tasks: requestTile de-dupes by tile key alone,
+    // so without this a re-request would chain onto a task started with the
+    // OLD imagery source and cache its texture under the new source.
+    this.workerPool.clear();
+
     // Force reload all nodes in the tree
     const resetNode = (node: TileNode) => {
       node.loaded = false;

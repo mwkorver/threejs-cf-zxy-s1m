@@ -4,38 +4,45 @@ import { type TileId } from "./mercator";
 
 const ctx: any = self;
 
+/** Abortable sleep that removes its abort listener on normal wake-up. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function fetchTile(url: string, label: string, maxAttempts = 5, signal?: AbortSignal): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
+    let res: Response;
     try {
-      const res = await fetch(url, { signal });
-      if (res.ok) return res;
-      
-      const transient = res.status === 429 || res.status === 503;
-      if (!transient || attempt >= maxAttempts - 1) {
-        throw new Error(`${label}: ${res.status}`);
-      }
-      
-      const retryAfter = Number(res.headers.get("retry-after")) * 1000;
-      const backoff = retryAfter > 0 ? retryAfter : 300 * 2 ** attempt * (0.5 + Math.random());
-      
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(resolve, Math.min(backoff, 8000));
-        if (signal) {
-          signal.addEventListener("abort", () => {
-            clearTimeout(timeout);
-            reject(new DOMException("Aborted", "AbortError"));
-          });
-        }
-      });
+      res = await fetch(url, { signal });
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        throw err;
-      }
-      if (attempt >= maxAttempts - 1) {
-        throw err;
-      }
-      await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+      // Network-level failure: retry unless aborted or out of attempts.
+      if (err instanceof DOMException && err.name === "AbortError") throw err;
+      if (attempt >= maxAttempts - 1) throw err;
+      await sleep(1000, signal);
+      continue;
     }
+    if (res.ok) return res;
+
+    // Only throttling/unavailable are retryable; anything else (404, 500...)
+    // is terminal — retrying a 404 five times just clogs the worker.
+    const transient = res.status === 429 || res.status === 503;
+    if (!transient || attempt >= maxAttempts - 1) {
+      throw new Error(`${label}: ${res.status}`);
+    }
+
+    const retryAfter = Number(res.headers.get("retry-after")) * 1000;
+    const backoff = retryAfter > 0 ? retryAfter : 300 * 2 ** attempt * (0.5 + Math.random());
+    await sleep(Math.min(backoff, 8000), signal);
   }
 }
 
@@ -48,6 +55,11 @@ async function bitmapToRgba(bmp: ImageBitmap): Promise<{ rgba: Uint8ClampedArray
 }
 
 ctx.onmessage = async (e: MessageEvent) => {
+  // ABORT control messages are handled by the per-request listeners below;
+  // without this guard they'd fall through, crash on the missing tile field,
+  // and post a spurious ERROR for the aborted requestId.
+  if (e.data.type === "ABORT") return;
+
   const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom } = e.data;
   
   const abortController = new AbortController();
@@ -84,9 +96,17 @@ ctx.onmessage = async (e: MessageEvent) => {
         if (err instanceof DOMException && err.name === "AbortError") {
           throw err;
         }
-        console.warn(`Terrain load failed for tile ${tile.z}/${tile.x}/${tile.y}, falling back to flat terrain:`, err);
-        heights = null;
-        demSource = "flat";
+        // 404 = genuinely no DEM coverage: fall back to flat so the LOD can
+        // subdivide past the coverage edge. Anything else (5xx burst, network)
+        // is transient — rethrow so the manager's retry cooldown handles it
+        // instead of caching a permanently-flat tile as loaded.
+        if (typeof err?.message === "string" && err.message.endsWith(": 404")) {
+          console.warn(`No terrain coverage for tile ${tile.z}/${tile.x}/${tile.y}, using flat terrain`);
+          heights = null;
+          demSource = "flat";
+        } else {
+          throw err;
+        }
       }
     }
 
