@@ -9,12 +9,15 @@ S1M terrain resolution (Albers-indexed, Python-side refine) comes with
 Phase 0 step 3.
 """
 
+import logging
 from dataclasses import dataclass
 
 import duckdb
 import morecantile
 
 from . import duck
+
+logger = logging.getLogger(__name__)
 
 TMS = morecantile.tms.get("WebMercatorQuad")
 
@@ -155,11 +158,15 @@ class MosaicResolver:
         sql = build_tile_query(paths, bounds.left, bounds.bottom, bounds.right, bounds.top, year)
         try:
             rows = self._con.execute(sql).fetchall()
-        except Exception as e:
-            import logging
-            logging.error(f"DuckDB query failed for {collection} {year} {z}/{x}/{y}: {e}")
-            # No partition for this collection -> empty glob -> 404 upstream
+        except duckdb.IOException as e:
+            # No partition for this collection -> empty glob -> 404 upstream.
+            logger.warning(f"Lake read failed for {collection} {year} {z}/{x}/{y}: {e}")
             return []
+        except Exception:
+            # Anything else (auth/expired creds, malformed query) is a real
+            # failure: surface a 500 rather than a cacheable "no coverage" 404.
+            logger.exception(f"DuckDB query failed for {collection} {year} {z}/{x}/{y}")
+            raise
         return [CogAsset(href=r[0], source_bucket=r[1], gsd=r[2]) for r in rows]
 
 
