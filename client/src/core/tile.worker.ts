@@ -81,16 +81,12 @@ ctx.onmessage = async (e: MessageEvent) => {
         bmp.close();
         heights = decodeTerrarium(rgba, w, h);
       } catch (err: any) {
-        // If the terrain tile is not found (404), fall back to flat terrain
-        // instead of failing the entire tile load.
-        if (err instanceof Error && err.message.includes("404")) {
-          console.warn(`Terrain tile not found (404) for ${tile.z}/${tile.x}/${tile.y}, falling back to flat terrain.`);
-          heights = null;
-          demSource = "flat";
-        } else {
-          // Re-throw other network or abort errors
+        if (err instanceof DOMException && err.name === "AbortError") {
           throw err;
         }
+        console.warn(`Terrain load failed for tile ${tile.z}/${tile.x}/${tile.y}, falling back to flat terrain:`, err);
+        heights = null;
+        demSource = "flat";
       }
     }
 
