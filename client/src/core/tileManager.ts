@@ -177,20 +177,28 @@ export class TileManager {
           newRootKeys.add(key);
 
           if (!this.rootNodes.has(key)) {
-            const bounds = tileBoundsMercator(t);
-            const center: [number, number] = [
-              (bounds.west + bounds.east) / 2,
-              (bounds.north + bounds.south) / 2,
-            ];
-            this.rootNodes.set(key, {
-              key,
-              tile: t,
-              bounds,
-              centerMercator: center,
-              loading: false,
-              loaded: false,
-              visible: false,
-            });
+            if (this.transitionNodes.has(key)) {
+              // Reclaim the existing node from transitionNodes instead of instantiating a duplicate
+              const node = this.transitionNodes.get(key)!;
+              this.rootNodes.set(key, node);
+              this.transitionNodes.delete(key);
+              this.applyPolygonOffset(node, false);
+            } else {
+              const bounds = tileBoundsMercator(t);
+              const center: [number, number] = [
+                (bounds.west + bounds.east) / 2,
+                (bounds.north + bounds.south) / 2,
+              ];
+              this.rootNodes.set(key, {
+                key,
+                tile: t,
+                bounds,
+                centerMercator: center,
+                loading: false,
+                loaded: false,
+                visible: false,
+              });
+            }
           }
         }
       }
