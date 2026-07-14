@@ -743,13 +743,51 @@ export class TileManager {
   private updateTransitionNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): void {
     const isVisible = this.isNodeVisible(node, frustum);
     this.activeKeys.add(node.key);
-    
-    // Node is only visible on screen during transition if it's within the frustum and loaded
-    node.visible = isVisible && node.loaded;
-    
-    if (node.children) {
+
+    if (!isVisible) {
+      node.visible = false;
+      if (node.children) {
+        for (const child of node.children) {
+          this.hideTransitionSubtree(child);
+        }
+      }
+      return;
+    }
+
+    let useChildren = false;
+    if (node.children && node.children.length > 0) {
+      let allChildrenReady = true;
+      for (const child of node.children) {
+        if (!this.isCovered(child, frustum)) {
+          allChildrenReady = false;
+        }
+      }
+      if (allChildrenReady) {
+        useChildren = true;
+      }
+    }
+
+    if (useChildren && node.children) {
+      node.visible = false;
       for (const child of node.children) {
         this.updateTransitionNode(child, cameraPosGlobal, frustum);
+      }
+    } else {
+      node.visible = node.loaded;
+      if (node.children) {
+        for (const child of node.children) {
+          this.hideTransitionSubtree(child);
+        }
+      }
+    }
+  }
+
+  private hideTransitionSubtree(node: TileNode): void {
+    node.visible = false;
+    this.activeKeys.add(node.key);
+    if (node.children) {
+      for (const child of node.children) {
+        this.hideTransitionSubtree(child);
       }
     }
   }
