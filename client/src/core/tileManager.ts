@@ -293,14 +293,8 @@ export class TileManager {
       );
 
       if (!frustum.intersectsBox(box)) {
-        // Node is completely out of view: prune its children and make it invisible
-        node.visible = false;
-        if (node.children) {
-          for (const child of node.children) {
-            this.pruneNode(child);
-          }
-          delete node.children;
-        }
+        // Node is completely out of view: make it and its subtree invisible
+        this.hideSubtree(node);
         return true; // Stop recursion and loading!
       }
     }
