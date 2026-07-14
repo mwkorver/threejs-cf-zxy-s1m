@@ -155,7 +155,9 @@ class MosaicResolver:
         sql = build_tile_query(paths, bounds.left, bounds.bottom, bounds.right, bounds.top, year)
         try:
             rows = self._con.execute(sql).fetchall()
-        except duckdb.IOException:
+        except Exception as e:
+            import logging
+            logging.error(f"DuckDB query failed for {collection} {year} {z}/{x}/{y}: {e}")
             # No partition for this collection -> empty glob -> 404 upstream
             return []
         return [CogAsset(href=r[0], source_bucket=r[1], gsd=r[2]) for r in rows]
