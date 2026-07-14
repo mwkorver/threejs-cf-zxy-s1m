@@ -71,6 +71,7 @@ export class TileManager {
   private currentLookDir = new THREE.Vector3(0, 0, -1);
   private currentTilt = 1.0;
   private currentCameraPos = new THREE.Vector3();
+  private activeVisibleKeys = new Set<string>();
 
   public globalUniforms = {
     // matches the midday preset + HUD slider default (main.ts applyPreset)
@@ -226,6 +227,7 @@ export class TileManager {
 
     // 6. Run LOD update on each root node recursively
     this.activeKeys.clear();
+    this.activeVisibleKeys.clear();
     const cameraPosGlobal = new THREE.Vector3(cx, cy, localCameraPos.z);
 
     for (const node of this.rootNodes.values()) {
@@ -383,6 +385,10 @@ export class TileManager {
         }
         delete node.children;
       }
+    }
+
+    if (node.visible) {
+      this.activeVisibleKeys.add(node.key);
     }
 
     return false; // in view
@@ -748,10 +754,52 @@ export class TileManager {
     return true;
   }
 
+  private isActiveTileCovered(tile: TileId): boolean {
+    const selfKey = tileKey(tile);
+    if (this.activeVisibleKeys.has(selfKey)) return true;
+
+    // Check ancestors
+    let parentZ = tile.z - 1;
+    let parentX = Math.floor(tile.x / 2);
+    let parentY = Math.floor(tile.y / 2);
+    while (parentZ >= 0) {
+      const parentKey = `${parentZ}/${parentX}/${parentY}`;
+      if (this.activeVisibleKeys.has(parentKey)) return true;
+      parentZ--;
+      parentX = Math.floor(parentX / 2);
+      parentY = Math.floor(parentY / 2);
+    }
+
+    // Check descendants
+    for (const activeKey of this.activeVisibleKeys) {
+      const parts = activeKey.split("/");
+      const az = parseInt(parts[0]!, 10);
+      const ax = parseInt(parts[1]!, 10);
+      const ay = parseInt(parts[2]!, 10);
+      if (az > tile.z) {
+        const scale = 2 ** (az - tile.z);
+        if (Math.floor(ax / scale) === tile.x && Math.floor(ay / scale) === tile.y) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   private updateTransitionNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): void {
-    const isVisible = this.isNodeVisible(node, frustum);
     this.activeKeys.add(node.key);
 
+    if (this.isActiveTileCovered(node.tile)) {
+      node.visible = false;
+      if (node.children) {
+        for (const child of node.children) {
+          this.hideTransitionSubtree(child);
+        }
+      }
+      return;
+    }
+
+    const isVisible = this.isNodeVisible(node, frustum);
     if (!isVisible) {
       node.visible = false;
       if (node.children) {
