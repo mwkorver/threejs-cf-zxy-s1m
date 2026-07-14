@@ -67,18 +67,31 @@ ctx.onmessage = async (e: MessageEvent) => {
 
     // 1. Fetch & decode terrain WebP if above the floor
     if (tile.z >= terrainMinZoom) {
-      const res = await fetchTile(
-        `${baseUrl}/terrain/${tile.z}/${tile.x}/${tile.y}.webp`,
-        `terrain ${tile.z}/${tile.x}/${tile.y}`,
-        5,
-        signal
-      );
-      demSource = res.headers.get("X-DEM-Source") || "farfield";
-      const blob = await res.blob();
-      const bmp = await createImageBitmap(blob);
-      const { rgba, w, h } = await bitmapToRgba(bmp);
-      bmp.close();
-      heights = decodeTerrarium(rgba, w, h);
+      try {
+        const res = await fetchTile(
+          `${baseUrl}/terrain/${tile.z}/${tile.x}/${tile.y}.webp`,
+          `terrain ${tile.z}/${tile.x}/${tile.y}`,
+          5,
+          signal
+        );
+        demSource = res.headers.get("X-DEM-Source") || "farfield";
+        const blob = await res.blob();
+        const bmp = await createImageBitmap(blob);
+        const { rgba, w, h } = await bitmapToRgba(bmp);
+        bmp.close();
+        heights = decodeTerrarium(rgba, w, h);
+      } catch (err: any) {
+        // If the terrain tile is not found (404), fall back to flat terrain
+        // instead of failing the entire tile load.
+        if (err instanceof Error && err.message.includes("404")) {
+          console.warn(`Terrain tile not found (404) for ${tile.z}/${tile.x}/${tile.y}, falling back to flat terrain.`);
+          heights = null;
+          demSource = "flat";
+        } else {
+          // Re-throw other network or abort errors
+          throw err;
+        }
+      }
     }
 
     // 2. Fetch & decode imagery WebP/PNG

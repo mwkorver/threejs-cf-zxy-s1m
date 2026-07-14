@@ -197,9 +197,18 @@ export class TileWorkerPool {
     let demSource = "flat";
 
     if (tile.z >= options.terrainMinZoom) {
-      const terrain = await loadTerrain(options.baseUrl, tile);
-      heights = terrain.heights;
-      demSource = terrain.demSource;
+      try {
+        const terrain = await loadTerrain(options.baseUrl, tile);
+        heights = terrain.heights;
+        demSource = terrain.demSource;
+      } catch (err: any) {
+        if (err instanceof Error && err.message.includes("404")) {
+          heights = null;
+          demSource = "flat";
+        } else {
+          throw err;
+        }
+      }
     }
 
     let imageBitmap: ImageBitmap | null = null;
