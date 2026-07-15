@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .basemap import BASEMAP_MAX_ZOOM, render_basemap_tile
 from .imagery import render_imagery_tile
 from .registry import LAYERS
 from .resolver import MosaicResolver, S1MResolver
@@ -73,6 +74,24 @@ def imagery_tile(layer: str, year: int, z: int, x: int, y: int) -> Response:
         tilesize=settings.tile_size,
         quality=settings.imagery_webp_quality,
     )
+    if body is None:
+        raise HTTPException(404, "no coverage")
+    return Response(body, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})
+
+
+@app.get("/basemap/{z}/{x}/{y}.webp")
+def basemap_tile(z: int, x: int, y: int) -> Response:
+    """512px WebP low-zoom basemap = 2x2 stitch of USDA NAIP cache children.
+
+    Path-only so CloudFront caches it; the browser never hits ArcGIS directly.
+    """
+    if not 0 <= z <= BASEMAP_MAX_ZOOM:
+        raise HTTPException(404, f"z {z} beyond basemap maxzoom {BASEMAP_MAX_ZOOM}")
+    n = 2**z
+    if not (0 <= x < n and 0 <= y < n):
+        raise HTTPException(404, "tile out of range")
+
+    body = render_basemap_tile(z, x, y, tilesize=settings.tile_size)
     if body is None:
         raise HTTPException(404, "no coverage")
     return Response(body, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})

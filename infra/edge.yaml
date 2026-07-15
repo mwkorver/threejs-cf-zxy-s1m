@@ -96,7 +96,7 @@ Resources:
             OriginShield:
               Enabled: true
               OriginShieldRegion: us-west-2
-        DefaultCacheBehavior: # /imagery/* and /terrain/* are the only paths
+        DefaultCacheBehavior: # covers all tiler paths: /imagery/*, /terrain/*, /basemap/*
           TargetOriginId: tiler
           ViewerProtocolPolicy: https-only
           CachePolicyId: !Ref TileCachePolicy

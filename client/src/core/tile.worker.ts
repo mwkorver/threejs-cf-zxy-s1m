@@ -127,9 +127,11 @@ ctx.onmessage = async (e: MessageEvent) => {
             signal
           );
         } else if (tile.z <= externalImageryMaxZoom) {
+          // Low-zoom basemap: the tiler stitches 4 USDA NAIP cache children
+          // into a 512px tile, served (and cached) through CloudFront.
           imgRes = await fetchTile(
-            `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${tile.z}/${tile.y}/${tile.x}`,
-            `usgs ${tile.z}/${tile.x}/${tile.y}`,
+            `${baseUrl}/basemap/${tile.z}/${tile.x}/${tile.y}.webp`,
+            `basemap ${tile.z}/${tile.x}/${tile.y}`,
             5,
             signal
           );
