@@ -263,7 +263,7 @@ export class TileWorkerPool {
         imageBitmap = await loadImageryOSM(tile);
       } else {
         if (tile.z <= options.externalImageryMaxZoom) {
-          imageBitmap = await loadImageryExternal(tile);
+          imageBitmap = await loadImageryExternal(options.baseUrl, tile);
         } else {
           imageBitmap = await loadImagery(options.baseUrl, options.layer, options.year, tile);
         }
