@@ -71,7 +71,7 @@ const scene = new THREE.Scene();
 const skyColor = new THREE.Color(0xa3c2f0);
 const fogColor = new THREE.Color(0xdce8f7);
 scene.background = skyColor;
-scene.fog = new THREE.FogExp2(fogColor.getHex(), 0.00006);
+scene.fog = new THREE.FogExp2(fogColor.getHex(), 0.0);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 10000000);
 camera.up.set(0, 0, 1); // Z-up world
@@ -141,9 +141,9 @@ hud.innerHTML = `
   <div style="margin-top: 8px; margin-bottom: 8px;">
     <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
       <span>FLIGHT SPEED SETTING</span>
-      <span id="val-speed-ctrl">200 kt</span>
+      <span id="val-speed-ctrl">800 kt</span>
     </div>
-    <input type="range" id="ctrl-speed-ctrl" min="50" max="1000" step="10" value="200" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    <input type="range" id="ctrl-speed-ctrl" min="50" max="1000" step="10" value="800" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
   </div>
 
   <div style="margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; margin-bottom: 4px;">ACTIVE TILES: <span id="hud-tiles">0</span></div>
@@ -222,17 +222,17 @@ hud.innerHTML = `
     <div style="margin-bottom: 8px;">
       <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
         <span>FOG DENSITY</span>
-        <span id="val-fog">0.00006</span>
+        <span id="val-fog">0.00000</span>
       </div>
-      <input type="range" id="ctrl-fog" min="0" max="0.0003" step="0.00001" value="0.00006" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+      <input type="range" id="ctrl-fog" min="0" max="0.0003" step="0.00001" value="0" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
     <div style="margin-bottom: 8px;">
       <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
         <span>VERTICAL EXAGGERATION</span>
-        <span id="val-exaggeration">4.0x</span>
+        <span id="val-exaggeration">2.0x</span>
       </div>
-      <input type="range" id="ctrl-exaggeration" min="1" max="10" step="0.5" value="4.0" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+      <input type="range" id="ctrl-exaggeration" min="1" max="10" step="0.5" value="2.0" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
     <div style="margin-bottom: 8px;">
@@ -243,9 +243,9 @@ hud.innerHTML = `
       <input type="range" id="ctrl-extimagery" min="0" max="18" step="1" value="13" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
-    <div style="margin-bottom: 12px;">
+    <div id="container-terrain-bands" style="margin-bottom: 12px;">
       <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 4px;">
-        <span>TERRAIN RESOLUTION BANDS</span>
+        <span>TERRAIN RESOLUTION BANDS <span style="color: #f59e0b;">(local tiler only)</span></span>
       </div>
       <div style="display: flex; justify-content: space-between; font-size: 9px; color: #cbd5e1; margin-bottom: 6px; gap: 4px;">
         <span style="display: flex; align-items: center; gap: 3px;">
@@ -387,6 +387,13 @@ const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInp
 const ctrlExtImagery = document.getElementById("ctrl-extimagery") as HTMLInputElement;
 const ctrlUsgsMin = document.getElementById("ctrl-usgs-min") as HTMLInputElement;
 const ctrlS1mMin = document.getElementById("ctrl-s1m-min") as HTMLInputElement;
+// The DEM-band thresholds ride on ?usgs_min_zoom/?s1m_min_zoom query params,
+// which CloudFront's path-only cache policy strips — so they're a no-op on the
+// deployed tiler and only work against a local tiler. Hide them otherwise.
+const containerTerrainBands = document.getElementById("container-terrain-bands") as HTMLDivElement;
+if (!useLocalTiler) {
+  containerTerrainBands.style.display = "none";
+}
 const sliderTrack = document.getElementById("slider-track")!;
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
@@ -434,7 +441,7 @@ const PRESETS = {
     hillshade: 0.25,
     azimuth: 225,
     altitude: 55,
-    fogDensity: 0.00006,
+    fogDensity: 0.0,
     skyColor: 0xa3c2f0,
     fogColor: 0xdce8f7
   },
@@ -664,8 +671,8 @@ applyPreset(PRESETS.midday);
 const activeKeys = new Set<string>();
 let isInteractingWithHud = false;
 let previousMousePosition = { x: 0, y: 0 };
-let baseSpeedKnots = 200; // Customizable flight speed setting in knots
-let speedKnots = 200; // Default active airspeed simulation
+let baseSpeedKnots = 800; // Customizable flight speed setting in knots
+let speedKnots = 800; // Default active airspeed simulation
 
 // Track keyboard state
 window.addEventListener("keydown", (e) => activeKeys.add(e.code));

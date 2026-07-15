@@ -172,7 +172,7 @@ describe("TileManager root eviction", () => {
 
 describe("TileManager LOD subdivision", () => {
   it("creates 4 children when camera is within lodFactor * tileWidth", () => {
-    const tm = makeManager({ maxZoom: 18, lodFactor: 5.0 });
+    const tm = makeManager({ maxZoom: 14, lodFactor: 5.0 });
     tm.update(new THREE.Vector3(0, 0, 50));
 
     const { rootNodes } = internals(tm);
@@ -192,7 +192,7 @@ describe("TileManager LOD subdivision", () => {
   }, 15000);
 
   it("children tile IDs are the correct quadtree subdivisions", () => {
-    const tm = makeManager({ maxZoom: 18, lodFactor: 5.0 });
+    const tm = makeManager({ maxZoom: 14, lodFactor: 5.0 });
     tm.update(new THREE.Vector3(0, 0, 50));
 
     const { rootNodes } = internals(tm);
@@ -221,7 +221,7 @@ describe("TileManager LOD subdivision", () => {
   });
 
   it("does not subdivide roots when camera is far from tiles (low lodFactor)", () => {
-    const tm = makeManager({ maxZoom: 18, lodFactor: 0.01 });
+    const tm = makeManager({ maxZoom: 14, lodFactor: 0.01 });
     // Very low lodFactor: camera must be within 0.01 * tileWidth to subdivide.
     // At altitude 100m with z12 tiles (~9.8km wide), 0.01 * 9800 = 98m.
     // Camera at 100m altitude with horizontal offset means distance >> 98m.
@@ -238,19 +238,19 @@ describe("TileManager LOD subdivision", () => {
 
 describe("TileManager dynamic base zoom", () => {
   it("computes base zoom z3 from high altitude (>1.28M m)", () => {
-    const tm = makeManager({ maxZoom: 18 });
+    const tm = makeManager({ maxZoom: 14 });
     tm.update(new THREE.Vector3(0, 0, 1300000));
     expect(internals(tm).baseZoom).toBe(3);
   });
 
   it("computes base zoom z12 from low altitude (<5K m)", () => {
-    const tm = makeManager({ maxZoom: 18 });
+    const tm = makeManager({ maxZoom: 14 });
     tm.update(new THREE.Vector3(0, 0, 1000));
     expect(internals(tm).baseZoom).toBe(12);
   });
 
   it("transitions root nodes when base zoom drops from z12 to z3", () => {
-    const tm = makeManager({ maxZoom: 18 });
+    const tm = makeManager({ maxZoom: 14 });
 
     // z12 roots
     tm.update(new THREE.Vector3(0, 0, 1000));
@@ -273,7 +273,7 @@ describe("TileManager dynamic base zoom", () => {
   });
 
   it("cancels loading tasks in transition node subtrees", () => {
-    const tm = makeManager({ maxZoom: 18 });
+    const tm = makeManager({ maxZoom: 14 });
 
     // Initial base zoom 12 roots: start loading
     tm.update(new THREE.Vector3(0, 0, 1000));
@@ -311,10 +311,16 @@ describe("TileManager frustum culling", () => {
 
     tm.update(camera.position, camera);
 
-    const activeKeys = tm.getActiveKeys();
-    // Should be fewer than 9 since frustum culls distant tiles
-    expect(activeKeys.size).toBeLessThan(9);
-    expect(activeKeys.size).toBeGreaterThan(0);
+    // Culled tiles stay pinned in activeKeys (so the cache can't dispose their
+    // retained meshes) but are marked invisible. Frustum culling is therefore
+    // measured by how many roots are actually visible, not by activeKeys size.
+    const { rootNodes } = internals(tm);
+    let visibleRoots = 0;
+    for (const node of rootNodes.values()) {
+      if (node.visible) visibleRoots++;
+    }
+    expect(visibleRoots).toBeLessThan(9);
+    expect(visibleRoots).toBeGreaterThan(0);
   });
 
   it("does not cull when cullTiles is false", () => {
@@ -328,7 +334,7 @@ describe("TileManager frustum culling", () => {
     const cache = new BundleCache(64 * 1024 * 1024);
     const tm = new TileManager(
       "http://test-tiler", "test-layer", 2023, scene, cache,
-      [0, 0], 12, 18, 2.2, true, // baseZoom = 12, maxZoom = 18, cullTiles = true
+      [0, 0], 12, 14, 2.2, true, // baseZoom = 12, maxZoom = 14, cullTiles = true
     );
 
     // 1. Position camera looking down at (0, 0, 1000) to force subdivision of roots
@@ -412,7 +418,7 @@ describe("TileManager clear", () => {
 
 describe("TileManager setting changes", () => {
   it("setImagerySource clears cache and resets nodes", () => {
-    const tm = makeManager({ maxZoom: 18 });
+    const tm = makeManager({ maxZoom: 14 });
     tm.update(new THREE.Vector3(0, 0, 100));
 
     // Preload a fake bundle into the cache
@@ -427,7 +433,7 @@ describe("TileManager setting changes", () => {
   });
 
   it("setTerrainMinZoom clears cache and resets nodes", () => {
-    const tm = makeManager({ maxZoom: 18 });
+    const tm = makeManager({ maxZoom: 14 });
     tm.update(new THREE.Vector3(0, 0, 100));
 
     const cache = (tm as any).bundleCache as BundleCache;
@@ -440,7 +446,7 @@ describe("TileManager setting changes", () => {
   });
 
   it("setExternalImageryMaxZoom clears cache and resets nodes", () => {
-    const tm = makeManager({ maxZoom: 18 });
+    const tm = makeManager({ maxZoom: 14 });
     tm.update(new THREE.Vector3(0, 0, 100));
 
     const cache = (tm as any).bundleCache as BundleCache;
@@ -453,7 +459,7 @@ describe("TileManager setting changes", () => {
   });
 
   it("setUsgsMinZoom clears cache and resets nodes", () => {
-    const tm = makeManager({ maxZoom: 18 });
+    const tm = makeManager({ maxZoom: 14 });
     tm.update(new THREE.Vector3(0, 0, 100));
 
     const cache = (tm as any).bundleCache as BundleCache;
@@ -467,7 +473,7 @@ describe("TileManager setting changes", () => {
   });
 
   it("setS1mMinZoom clears cache and resets nodes", () => {
-    const tm = makeManager({ maxZoom: 18 });
+    const tm = makeManager({ maxZoom: 14 });
     tm.update(new THREE.Vector3(0, 0, 100));
 
     const cache = (tm as any).bundleCache as BundleCache;
@@ -564,7 +570,7 @@ describe("TileManager vertical exaggeration", () => {
 
 describe("TileManager active keys", () => {
   it("active keys at high altitude produce many subdivided tiles", () => {
-    const tm = makeManager({ maxZoom: 18, lodFactor: 5.0 });
+    const tm = makeManager({ maxZoom: 14, lodFactor: 5.0 });
     // At 1M altitude, dynamic base zoom is z3, but with high lodFactor and maxZoom 18,
     // tiles near the camera will subdivide deeply, producing many active keys.
     tm.update(new THREE.Vector3(0, 0, 1000000));
