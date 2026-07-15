@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .basemap import BASEMAP_MAX_ZOOM, render_basemap_tile
+from .basemap import BASEMAP_MAX_ZOOM, TransientBasemapError, render_basemap_tile
 from .imagery import render_imagery_tile
 from .registry import LAYERS
 from .resolver import MosaicResolver, S1MResolver
@@ -91,7 +91,13 @@ def basemap_tile(z: int, x: int, y: int) -> Response:
     if not (0 <= x < n and 0 <= y < n):
         raise HTTPException(404, "tile out of range")
 
-    body = render_basemap_tile(z, x, y, tilesize=settings.tile_size)
+    try:
+        body = render_basemap_tile(z, x, y, tilesize=settings.tile_size)
+    except TransientBasemapError:
+        # Upstream fetch failed transiently — 503 so the client retries and this
+        # immutable tile isn't cached with a hole. (CloudFront error-caches 5xx
+        # ~10s by default; the client's fetchTile backs off and retries 503.)
+        raise HTTPException(503, "basemap upstream unavailable, retry", headers={"Retry-After": "2"})
     if body is None:
         raise HTTPException(404, "no coverage")
     return Response(body, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})

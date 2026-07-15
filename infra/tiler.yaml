@@ -17,7 +17,7 @@ Resources:
       PackageType: Image
       Architectures: [arm64] # Graviton: cheaper, builds native on arm64 Macs
       MemorySize: 2048 # warp + WebP encode are CPU-bound; tune in Phase 0 step 5
-      Timeout: 30
+      Timeout: 60 # headroom for cold start + basemap child retries
       # Guarantees the tiler a floor of 100 concurrent slots (blunts fast-low-
       # pass spikes, plan §8) and caps it at 100 — a cost ceiling against a
       # runaway spawning expensive cold Lambdas. Free (reserved, not
