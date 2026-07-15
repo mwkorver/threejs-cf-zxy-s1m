@@ -155,7 +155,7 @@ hud.innerHTML = `
     <div style="margin-bottom: 8px;">
       <label style="display: block; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">IMAGERY SOURCE</label>
       <select id="ctrl-imagery-source" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; padding: 4px; font-family: monospace; font-size: 12px; cursor: pointer; outline: none;">
-        <option value="satellite">USGS Satellite / NAIP</option>
+        <option value="satellite">NAIP Aerial (USDA)</option>
         <option value="osm">OpenStreetMap Roads</option>
       </select>
     </div>
