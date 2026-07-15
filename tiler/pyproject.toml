@@ -12,13 +12,13 @@ dependencies = [
     "pyproj>=3.6",           # 4326<->Albers for S1M index (plan §4.2)
     "shapely>=2.0",          # S1M footprint refine (index has no ST_Intersects)
     "pydantic-settings>=2.6",
+    "httpx>=0.28",           # basemap.py: pooled concurrent fetch of USDA cache tiles
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
     "uvicorn>=0.32",
-    "httpx>=0.28",           # FastAPI test client
     "boto3>=1.35",           # duck.py static-secret fallback (local dev)
     "botocore[crt]>=1.35",   # `aws login` credential provider
 ]
