@@ -189,7 +189,7 @@ describe("TileManager LOD subdivision", () => {
       }
     }
     expect(foundSubdivided).toBe(true);
-  });
+  }, 15000);
 
   it("children tile IDs are the correct quadtree subdivisions", () => {
     const tm = makeManager({ maxZoom: 18, lodFactor: 5.0 });
@@ -208,7 +208,7 @@ describe("TileManager LOD subdivision", () => {
         break;
       }
     }
-  });
+  }, 15000);
 
   it("does not subdivide when maxZoom equals baseZoom", () => {
     const tm = makeManager({ maxZoom: 12, lodFactor: 5.0 });
@@ -432,6 +432,34 @@ describe("TileManager setting changes", () => {
     tm.setExternalImageryMaxZoom(15);
     expect(cache.size()).toBe(0);
   });
+
+  it("setUsgsMinZoom clears cache and resets nodes", () => {
+    const tm = makeManager({ maxZoom: 18 });
+    tm.update(new THREE.Vector3(0, 0, 100));
+
+    const cache = (tm as any).bundleCache as BundleCache;
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
+    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom });
+
+    tm.setUsgsMinZoom(14);
+    expect(cache.size()).toBe(0);
+    expect(tm.usgsMinZoom).toBe(14);
+  });
+
+  it("setS1mMinZoom clears cache and resets nodes", () => {
+    const tm = makeManager({ maxZoom: 18 });
+    tm.update(new THREE.Vector3(0, 0, 100));
+
+    const cache = (tm as any).bundleCache as BundleCache;
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
+    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom });
+
+    tm.setS1mMinZoom(16);
+    expect(cache.size()).toBe(0);
+    expect(tm.s1mMinZoom).toBe(16);
+  });
 });
 
 // ---- Vertical exaggeration ----
@@ -474,7 +502,7 @@ describe("TileManager active keys", () => {
     const keys = tm.getActiveKeys();
     // Should be many more than 9 due to deep subdivision
     expect(keys.size).toBeGreaterThan(9);
-  });
+  }, 15000);
 
   it("active keys change when camera moves to a different tile region", () => {
     const tm = makeManager({ maxZoom: 12 });

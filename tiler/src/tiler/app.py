@@ -79,17 +79,26 @@ def imagery_tile(layer: str, year: int, z: int, x: int, y: int) -> Response:
 
 
 @app.get("/terrain/{z}/{x}/{y}.webp")
-def terrain_tile(z: int, x: int, y: int) -> Response:
+def terrain_tile(
+    z: int,
+    x: int,
+    y: int,
+    usgs_min_zoom: int = None,
+    s1m_min_zoom: int = None
+) -> Response:
     """512px Terrarium Terrain-RGB tile, lossless WebP (plan §4.2)."""
     n = 2**z
     if not (0 <= z and 0 <= x < n and 0 <= y < n):
         raise HTTPException(404, "tile out of range")
 
+    resolved_usgs_min_zoom = usgs_min_zoom if usgs_min_zoom is not None else settings.usgs_min_zoom
+    resolved_s1m_min_zoom = s1m_min_zoom if s1m_min_zoom is not None else settings.s1m_min_zoom
+
     body = None
     dem_source = "farfield"
     
     # 1. Try high-resolution S1M terrain first if zoom is high enough
-    if z >= settings.s1m_min_zoom:
+    if z >= resolved_s1m_min_zoom:
         s1m_hrefs = get_s1m_resolver().resolve(z, x, y)
         if s1m_hrefs:
             body = render_terrain_tile(s1m_hrefs, z, x, y, tilesize=settings.tile_size)
@@ -97,7 +106,7 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
                 dem_source = "s1m"
 
     # 2. If no S1M tile is available, check 10m USGS 1/3 arc-second DEM fallback index if zoom is high enough
-    if body is None and z >= settings.usgs_min_zoom:
+    if body is None and z >= resolved_usgs_min_zoom:
         usgs13_hrefs = get_usgs13_resolver().resolve(z, x, y)
         if usgs13_hrefs:
             body = render_terrain_tile(usgs13_hrefs, z, x, y, tilesize=settings.tile_size)

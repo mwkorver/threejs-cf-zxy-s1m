@@ -36,6 +36,37 @@ appDiv.style.position = "relative";
 appDiv.style.width = "100%";
 appDiv.style.height = "100%";
 
+const dualSliderStyle = document.createElement("style");
+dualSliderStyle.textContent = `
+  .dual-slider-container input[type="range"] {
+    -webkit-appearance: none;
+    pointer-events: none;
+  }
+  .dual-slider-container input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #f8fafc;
+    border: 2px solid #38bdf8;
+    cursor: pointer;
+    pointer-events: auto;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .dual-slider-container input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #f8fafc;
+    border: 2px solid #38bdf8;
+    cursor: pointer;
+    pointer-events: auto;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+`;
+document.head.appendChild(dualSliderStyle);
+
 const scene = new THREE.Scene();
 const skyColor = new THREE.Color(0xa3c2f0);
 const fogColor = new THREE.Color(0xdce8f7);
@@ -79,6 +110,7 @@ const tileManager = new TileManager(
   LOD_FACTOR,
   CULL_TILES
 );
+tileManager.terrainMinZoom = 0;
 // Debug handles for the browser console.
 (window as any).tileManager = tileManager;
 (window as any).camera = camera;
@@ -211,12 +243,29 @@ hud.innerHTML = `
       <input type="range" id="ctrl-extimagery" min="0" max="18" step="1" value="13" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>TERRAIN &ge; Z (else flat)</span>
-        <span id="val-terrainmin">14</span>
+    <div style="margin-bottom: 12px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 4px;">
+        <span>TERRAIN RESOLUTION BANDS</span>
       </div>
-      <input type="range" id="ctrl-terrainmin" min="0" max="18" step="1" value="14" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+      <div style="display: flex; justify-content: space-between; font-size: 9px; color: #cbd5e1; margin-bottom: 6px; gap: 4px;">
+        <span style="display: flex; align-items: center; gap: 3px;">
+          <span style="display: inline-block; width: 6px; height: 6px; background: #64748b; border-radius: 1px;"></span>
+          Mapzen: z1-<span id="val-mapzen-max">10</span>
+        </span>
+        <span style="display: flex; align-items: center; gap: 3px;">
+          <span style="display: inline-block; width: 6px; height: 6px; background: #ff00ff; border-radius: 1px;"></span>
+          USGS: z<span id="val-usgs-min">11</span>-<span id="val-usgs-max">14</span>
+        </span>
+        <span style="display: flex; align-items: center; gap: 3px;">
+          <span style="display: inline-block; width: 6px; height: 6px; background: #00ffff; border-radius: 1px;"></span>
+          S1M: z<span id="val-s1m-min">15</span>-20
+        </span>
+      </div>
+      <div class="dual-slider-container" style="position: relative; height: 20px; width: 100%; margin-top: 4px; margin-bottom: 8px;">
+        <div id="slider-track" style="position: absolute; top: 8px; left: 0; right: 0; height: 4px; border-radius: 2px;"></div>
+        <input type="range" id="ctrl-usgs-min" min="1" max="20" value="11" step="1" style="position: absolute; width: 100%; top: 0; left: 0; height: 20px; margin: 0; -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none; cursor: pointer;">
+        <input type="range" id="ctrl-s1m-min" min="1" max="20" value="15" step="1" style="position: absolute; width: 100%; top: 0; left: 0; height: 20px; margin: 0; -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none; cursor: pointer;">
+      </div>
     </div>
 
     <div style="margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
@@ -300,7 +349,9 @@ const ctrlAltitude = document.getElementById("ctrl-altitude") as HTMLInputElemen
 const ctrlFog = document.getElementById("ctrl-fog") as HTMLInputElement;
 const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInputElement;
 const ctrlExtImagery = document.getElementById("ctrl-extimagery") as HTMLInputElement;
-const ctrlTerrainMin = document.getElementById("ctrl-terrainmin") as HTMLInputElement;
+const ctrlUsgsMin = document.getElementById("ctrl-usgs-min") as HTMLInputElement;
+const ctrlS1mMin = document.getElementById("ctrl-s1m-min") as HTMLInputElement;
+const sliderTrack = document.getElementById("slider-track")!;
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
 const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
@@ -317,7 +368,10 @@ const valAltitude = document.getElementById("val-altitude")!;
 const valFog = document.getElementById("val-fog")!;
 const valExaggeration = document.getElementById("val-exaggeration")!;
 const valExtImagery = document.getElementById("val-extimagery")!;
-const valTerrainMin = document.getElementById("val-terrainmin")!;
+const valMapzenMax = document.getElementById("val-mapzen-max")!;
+const valUsgsMin = document.getElementById("val-usgs-min")!;
+const valUsgsMax = document.getElementById("val-usgs-max")!;
+const valS1mMin = document.getElementById("val-s1m-min")!;
 const valSpeedCtrl = document.getElementById("val-speed-ctrl")!;
 const valLabelSize = document.getElementById("val-label-size")!;
 const valBrightness = document.getElementById("val-brightness")!;
@@ -467,11 +521,43 @@ ctrlExtImagery.addEventListener("input", () => {
   tileManager.setExternalImageryMaxZoom(z);
 });
 
-ctrlTerrainMin.addEventListener("input", () => {
-  const z = parseInt(ctrlTerrainMin.value);
-  valTerrainMin.textContent = z.toString();
-  tileManager.setTerrainMinZoom(z);
+function updateTerrainBands() {
+  const u = parseInt(ctrlUsgsMin.value);
+  const s = parseInt(ctrlS1mMin.value);
+
+  valMapzenMax.textContent = (u - 1).toString();
+  valUsgsMin.textContent = u.toString();
+  valUsgsMax.textContent = (s - 1).toString();
+  valS1mMin.textContent = s.toString();
+
+  const pctU = ((u - 1) / 19) * 100;
+  const pctS = ((s - 1) / 19) * 100;
+  sliderTrack.style.background = `linear-gradient(to right, #64748b 0%, #64748b ${pctU}%, #ff00ff ${pctU}%, #ff00ff ${pctS}%, #00ffff ${pctS}%, #00ffff 100%)`;
+
+  tileManager.setUsgsMinZoom(u);
+  tileManager.setS1mMinZoom(s);
+}
+
+ctrlUsgsMin.addEventListener("input", () => {
+  const usgsVal = parseInt(ctrlUsgsMin.value);
+  const s1mVal = parseInt(ctrlS1mMin.value);
+  if (usgsVal >= s1mVal) {
+    ctrlUsgsMin.value = (s1mVal - 1).toString();
+  }
+  updateTerrainBands();
 });
+
+ctrlS1mMin.addEventListener("input", () => {
+  const usgsVal = parseInt(ctrlUsgsMin.value);
+  const s1mVal = parseInt(ctrlS1mMin.value);
+  if (s1mVal <= usgsVal) {
+    ctrlS1mMin.value = (usgsVal + 1).toString();
+  }
+  updateTerrainBands();
+});
+
+// Initialize slider bands & TileManager
+updateTerrainBands();
 
 ctrlSpeedCtrl.addEventListener("input", () => {
   baseSpeedKnots = parseInt(ctrlSpeedCtrl.value);
