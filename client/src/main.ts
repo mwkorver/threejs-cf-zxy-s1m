@@ -769,6 +769,7 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  tileManager.setViewportSize(window.innerWidth, window.innerHeight);
 });
 
 // 6. Running frame render and flight controller loop
