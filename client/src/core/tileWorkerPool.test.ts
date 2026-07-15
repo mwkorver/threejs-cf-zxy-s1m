@@ -168,15 +168,15 @@ describe("TileWorkerPool worker dispatch (mocked Worker)", () => {
       (c) => c.msg.tile && c.msg.tile.x === 2048 && c.msg.tile.y === 2048,
     );
     expect(dispatched).toBeDefined();
-    expect(dispatched.msg.tile).toEqual({ z: 12, x: 2048, y: 2048 });
-    expect(dispatched.msg.baseUrl).toBe("http://test-tiler");
-    expect(dispatched.msg.layer).toBe("test-layer");
-    expect(dispatched.msg.year).toBe(2023);
-    expect(dispatched.msg.imagerySource).toBe("satellite");
-    expect(dispatched.msg.terrainMinZoom).toBe(14);
-    expect(dispatched.msg.gridStep).toBe(8);
-    expect(dispatched.msg.externalImageryMaxZoom).toBe(13);
-    expect(dispatched.msg.requestId).toMatch(/^req_\d+$/);
+    expect(dispatched!.msg.tile).toEqual({ z: 12, x: 2048, y: 2048 });
+    expect(dispatched!.msg.baseUrl).toBe("http://test-tiler");
+    expect(dispatched!.msg.layer).toBe("test-layer");
+    expect(dispatched!.msg.year).toBe(2023);
+    expect(dispatched!.msg.imagerySource).toBe("satellite");
+    expect(dispatched!.msg.terrainMinZoom).toBe(14);
+    expect(dispatched!.msg.gridStep).toBe(8);
+    expect(dispatched!.msg.externalImageryMaxZoom).toBe(13);
+    expect(dispatched!.msg.requestId).toMatch(/^req_\d+$/);
 
     // Clean up to avoid hanging promises
     pool.cancelTile(TILE_12_2048_2048);
@@ -199,7 +199,7 @@ describe("TileWorkerPool worker dispatch (mocked Worker)", () => {
 
     const abortMsg = capturedMessages.find((c) => c.msg.type === "ABORT");
     expect(abortMsg).toBeDefined();
-    expect(abortMsg.msg.requestId).toBeDefined();
+    expect(abortMsg!.msg.requestId).toBeDefined();
 
     await rejectPromise;
   });
@@ -232,7 +232,7 @@ describe("TileWorkerPool worker dispatch (mocked Worker)", () => {
       (c) => c.msg.tile && c.msg.tile.x === 2048,
     );
     expect(dispatched).toBeDefined();
-    const requestId = dispatched.msg.requestId;
+    const requestId = dispatched!.msg.requestId;
 
     // Simulate a SUCCESS response from the worker
     const positions = new Float32Array(12);
@@ -249,8 +249,8 @@ describe("TileWorkerPool worker dispatch (mocked Worker)", () => {
     };
 
     // Fire the worker's onmessage handler with a SUCCESS payload
-    const worker = dispatched.worker;
-    expect(worker.onmessage).not.toBeNull();
+    const worker = dispatched!.worker;
+    expect(worker!.onmessage).not.toBeNull();
     worker.onmessage!(new MessageEvent("message", {
       data: {
         type: "SUCCESS",
@@ -276,8 +276,8 @@ describe("TileWorkerPool worker dispatch (mocked Worker)", () => {
       (c) => c.msg.tile && c.msg.tile.x === 2048,
     );
     expect(dispatched).toBeDefined();
-    const requestId = dispatched.msg.requestId;
-    const worker = dispatched.worker;
+    const requestId = dispatched!.msg.requestId;
+    const worker = dispatched!.worker;
 
     // Simulate an ERROR response
     worker.onmessage!(new MessageEvent("message", {

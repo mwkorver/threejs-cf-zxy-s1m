@@ -60,7 +60,7 @@ ctx.onmessage = async (e: MessageEvent) => {
   // and post a spurious ERROR for the aborted requestId.
   if (e.data.type === "ABORT") return;
 
-  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom } = e.data;
+  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, usgsMinZoom, s1mMinZoom, gridStep, externalImageryMaxZoom } = e.data;
   
   const abortController = new AbortController();
   const signal = abortController.signal;
@@ -82,8 +82,14 @@ ctx.onmessage = async (e: MessageEvent) => {
         return { heights: null, demSource: "flat" };
       }
       try {
+        let url = `${baseUrl}/terrain/${tile.z}/${tile.x}/${tile.y}.webp`;
+        const params = [];
+        if (usgsMinZoom !== undefined && usgsMinZoom !== null) params.push(`usgs_min_zoom=${usgsMinZoom}`);
+        if (s1mMinZoom !== undefined && s1mMinZoom !== null) params.push(`s1m_min_zoom=${s1mMinZoom}`);
+        if (params.length > 0) url += `?${params.join("&")}`;
+
         const res = await fetchTile(
-          `${baseUrl}/terrain/${tile.z}/${tile.x}/${tile.y}.webp`,
+          url,
           `terrain ${tile.z}/${tile.x}/${tile.y}`,
           5,
           signal

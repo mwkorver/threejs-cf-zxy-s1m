@@ -55,8 +55,19 @@ export interface DecodedTerrain {
 }
 
 /** Decoded terrain elevations (true meters), row-major, north-first, plus the source DEM. */
-export async function loadTerrain(baseUrl: string, t: TileId): Promise<DecodedTerrain> {
-  const res = await fetchTile(`${baseUrl}/terrain/${t.z}/${t.x}/${t.y}.webp`, `terrain ${t.z}/${t.x}/${t.y}`);
+export async function loadTerrain(
+  baseUrl: string,
+  t: TileId,
+  usgsMinZoom?: number,
+  s1mMinZoom?: number
+): Promise<DecodedTerrain> {
+  let url = `${baseUrl}/terrain/${t.z}/${t.x}/${t.y}.webp`;
+  const params = [];
+  if (usgsMinZoom !== undefined && usgsMinZoom !== null) params.push(`usgs_min_zoom=${usgsMinZoom}`);
+  if (s1mMinZoom !== undefined && s1mMinZoom !== null) params.push(`s1m_min_zoom=${s1mMinZoom}`);
+  if (params.length > 0) url += `?${params.join("&")}`;
+
+  const res = await fetchTile(url, `terrain ${t.z}/${t.x}/${t.y}`);
   const demSource = res.headers.get("X-DEM-Source") || "farfield";
   const bmp = await createImageBitmap(await res.blob());
   const { rgba, w, h } = await bitmapToRgba(bmp);
