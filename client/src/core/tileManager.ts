@@ -44,7 +44,7 @@ export class TileManager {
   // Grid step for terrain mesh density (e.g. vertices every N source pixels)
   public gridStep = 8;
   // Vertical exaggeration factor
-  public verticalExaggeration = 4;
+  public verticalExaggeration = 2;
   // Toggle for footprints visibility
   public showFootprints = false;
   // Toggle for Z/X/Y tile labels visibility
@@ -432,9 +432,17 @@ export class TileManager {
     return false; // in view
   }
 
-  /** Mark a node and its whole descendant subtree invisible (kept loaded/cached). */
+  /**
+   * Mark a node and its whole descendant subtree invisible but retained. The
+   * keys are still pinned as active so BundleCache won't evict + dispose their
+   * geometry: a frustum-culled subtree is kept so rotating back is gap-free,
+   * but if its bundle were disposed the retained mesh would render blank and
+   * never reload (triggerLoad early-returns on loaded). Pinning is bounded by
+   * the root grid — once a root is evicted the whole subtree drops out.
+   */
   private hideSubtree(node: TileNode): void {
     node.visible = false;
+    this.activeKeys.add(node.key);
     if (node.children) {
       for (const child of node.children) {
         this.hideSubtree(child);
@@ -692,6 +700,13 @@ export class TileManager {
         contrast: this.globalUniforms.contrast,
         saturation: this.globalUniforms.saturation,
         demSourceType: { value: demSourceVal },
+        // Per-tile Mercator vertical scale: vertex Z is elevation * sec(lat),
+        // so the shader divides by this to recover true metres for hypsometric
+        // tinting (whose bounds are in true metres).
+        uZScale: { value: mercatorScale(mercatorToLonLat(
+          (node.bounds.west + node.bounds.east) / 2,
+          (node.bounds.north + node.bounds.south) / 2
+        )[1]) },
         ...THREE.UniformsLib.fog
       },
       vertexShader: TerrainShader.vertexShader,

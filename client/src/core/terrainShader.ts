@@ -31,6 +31,7 @@ export const TerrainShader = {
     uniform float useLocalHypso;    // 0.0 = global, 1.0 = local to viewport
     uniform float localMinElev;
     uniform float localMaxElev;
+    uniform float uZScale; // vertex Z = trueElevation * sec(lat); divide to recover metres
     uniform float brightness;
     uniform float contrast;
     uniform float saturation;
@@ -68,8 +69,10 @@ export const TerrainShader = {
     void main() {
       vec4 baseColor;
       if (shadingMode > 1.5) {
-        // Hypsometric tinting blended with imagery
-        vec3 hypCol = getHypsometricColor(vElevation);
+        // Hypsometric tinting blended with imagery. vElevation is Mercator-
+        // scaled (elevation * sec(lat)); divide by uZScale for true metres so
+        // it matches the true-metre elevation bounds.
+        vec3 hypCol = getHypsometricColor(vElevation / max(uZScale, 0.0001));
         vec3 satCol = useTexture ? texture2D(map, vUv).rgb : fallbackColor;
         
         // Pre-apply color adjustments to the satellite part before blending
