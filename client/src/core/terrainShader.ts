@@ -4,11 +4,13 @@ export const TerrainShader = {
   vertexShader: `
     varying vec2 vUv;
     varying vec3 vWorldNormal;
+    varying float vElevation;
     #include <fog_pars_vertex>
 
     void main() {
       vUv = uv;
       vWorldNormal = normal;
+      vElevation = position.z;
       
       vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
       gl_Position = projectionMatrix * mvPosition;
@@ -23,19 +25,58 @@ export const TerrainShader = {
     uniform float hillshadeIntensity;
     uniform vec3 sunDirection;
     uniform bool showOutlines;
-    uniform bool showDemColors;
     uniform float demSourceType; // 0.0=farfield, 1.0=usgs13, 2.0=s1m, 3.0=flat
+    uniform float shadingMode;   // 0.0=satellite, 1.0=DEM, 2.0=hypsometric
+    uniform float hypsometricBlend; // 0.0 to 1.0
     uniform float brightness;
     uniform float contrast;
     uniform float saturation;
 
     varying vec2 vUv;
     varying vec3 vWorldNormal;
+    varying float vElevation;
     #include <fog_pars_fragment>
+
+    vec3 getHypsometricColor(float height) {
+      // Clamp height between 0 and 4000 meters (fits CONUS elevations)
+      float h = clamp(height, 0.0, 4000.0);
+      
+      vec3 c0 = vec3(0.12, 0.45, 0.15); // dark green (low)
+      vec3 c1 = vec3(0.56, 0.73, 0.35); // light green
+      vec3 c2 = vec3(0.92, 0.85, 0.55); // yellow/tan
+      vec3 c3 = vec3(0.65, 0.42, 0.25); // brown
+      vec3 c4 = vec3(0.95, 0.95, 0.95); // white/peak
+      
+      if (h < 200.0) {
+        return mix(c0, c1, h / 200.0);
+      } else if (h < 1000.0) {
+        return mix(c1, c2, (h - 200.0) / 800.0);
+      } else if (h < 2500.0) {
+        return mix(c2, c3, (h - 1000.0) / 1500.0);
+      } else {
+        return mix(c3, c4, (h - 2500.0) / 1500.0);
+      }
+    }
 
     void main() {
       vec4 baseColor;
-      if (showDemColors) {
+      if (shadingMode > 1.5) {
+        // Hypsometric tinting blended with imagery
+        vec3 hypCol = getHypsometricColor(vElevation);
+        vec3 satCol = useTexture ? texture2D(map, vUv).rgb : fallbackColor;
+        
+        // Pre-apply color adjustments to the satellite part before blending
+        if (useTexture) {
+          satCol *= brightness;
+          satCol = (satCol - 0.5) * contrast + 0.5;
+          float luma = dot(satCol, vec3(0.299, 0.587, 0.114));
+          satCol = mix(vec3(luma), satCol, saturation);
+          satCol = clamp(satCol, 0.0, 1.0);
+        }
+        
+        baseColor = vec4(mix(satCol, hypCol, hypsometricBlend), 1.0);
+      } else if (shadingMode > 0.5) {
+        // DEM Shading (DEM Colors)
         vec3 col = vec3(0.4, 0.4, 0.4); // farfield dark gray
         if (demSourceType > 2.5) {
           col = vec3(0.8, 0.7, 0.0); // flat (no DEM) yellow
@@ -46,6 +87,7 @@ export const TerrainShader = {
         }
         baseColor = vec4(col, 1.0);
       } else {
+        // Satellite / normal imagery
         baseColor = useTexture ? texture2D(map, vUv) : vec4(fallbackColor, 1.0);
       }
       
@@ -58,8 +100,8 @@ export const TerrainShader = {
       
       vec3 rgb = baseColor.rgb * shade;
       
-      // Apply brightness, contrast, and saturation adjustments to textures
-      if (!showDemColors && useTexture) {
+      // Apply brightness, contrast, and saturation adjustments to textures ONLY in satellite mode
+      if (shadingMode < 0.5 && useTexture) {
         // Brightness
         rgb *= brightness;
 

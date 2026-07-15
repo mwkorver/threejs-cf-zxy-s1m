@@ -460,6 +460,26 @@ describe("TileManager setting changes", () => {
     expect(cache.size()).toBe(0);
     expect(tm.s1mMinZoom).toBe(16);
   });
+
+  it("setShadingMode updates uniforms", () => {
+    const tm = makeManager();
+    tm.setShadingMode(2.0);
+    expect(tm.shadingMode).toBe(2.0);
+    expect(tm.globalUniforms.shadingMode.value).toBe(2.0);
+    expect(tm.globalUniforms.showDemColors.value).toBe(false);
+
+    tm.setShadingMode(1.0);
+    expect(tm.shadingMode).toBe(1.0);
+    expect(tm.globalUniforms.shadingMode.value).toBe(1.0);
+    expect(tm.globalUniforms.showDemColors.value).toBe(true);
+  });
+
+  it("setHypsometricBlend updates uniform", () => {
+    const tm = makeManager();
+    tm.setHypsometricBlend(0.85);
+    expect(tm.hypsometricBlend).toBe(0.85);
+    expect(tm.globalUniforms.hypsometricBlend.value).toBe(0.85);
+  });
 });
 
 // ---- Vertical exaggeration ----

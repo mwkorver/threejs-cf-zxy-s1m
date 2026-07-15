@@ -57,6 +57,10 @@ export class TileManager {
   public usgsMinZoom = 11;
   // Zoom at/above which S1M is used instead of USGS 1/3" DEM.
   public s1mMinZoom = 15;
+  // Shading mode (0.0 = Satellite, 1.0 = DEM, 2.0 = Hypsometric)
+  public shadingMode = 0.0;
+  // Blend factor for hypsometric tinting (0.0 to 1.0)
+  public hypsometricBlend = 0.5;
   // Selected imagery source layer type
   public imagerySource: "satellite" | "osm" = "satellite";
   // Toggle for showing DEM source colors
@@ -84,6 +88,8 @@ export class TileManager {
     fallbackColor: { value: new THREE.Color(0x556655) },
     showOutlines: { value: false },
     showDemColors: { value: false },
+    shadingMode: { value: 0.0 },
+    hypsometricBlend: { value: 0.5 },
     brightness: { value: 1.15 },
     contrast: { value: 1.10 },
     saturation: { value: 1.15 }
@@ -640,6 +646,8 @@ export class TileManager {
         sunDirection: this.globalUniforms.sunDirection,
         showOutlines: this.globalUniforms.showOutlines,
         showDemColors: this.globalUniforms.showDemColors,
+        shadingMode: this.globalUniforms.shadingMode,
+        hypsometricBlend: this.globalUniforms.hypsometricBlend,
         brightness: this.globalUniforms.brightness,
         contrast: this.globalUniforms.contrast,
         saturation: this.globalUniforms.saturation,
@@ -951,6 +959,20 @@ export class TileManager {
   setShowDemColors(show: boolean): void {
     this.showDemColors = show;
     this.globalUniforms.showDemColors.value = show;
+    this.setShadingMode(show ? 1.0 : 0.0);
+  }
+
+  setShadingMode(mode: number): void {
+    if (mode === this.shadingMode) return;
+    this.shadingMode = mode;
+    this.globalUniforms.shadingMode.value = mode;
+    this.globalUniforms.showDemColors.value = (mode === 1.0);
+  }
+
+  setHypsometricBlend(blend: number): void {
+    if (blend === this.hypsometricBlend) return;
+    this.hypsometricBlend = blend;
+    this.globalUniforms.hypsometricBlend.value = blend;
   }
 
   /**
