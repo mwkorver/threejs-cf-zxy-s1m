@@ -298,29 +298,54 @@ hud.innerHTML = `
       <input type="range" id="ctrl-label-size" min="0.5" max="3.0" step="0.1" value="1.0" style="width: calc(100% - 22px); margin-left: 22px; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
-    <div style="margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <input type="checkbox" id="ctrl-dem-colors" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
-        <label for="ctrl-dem-colors" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW DEM COLORS</label>
+    <div style="margin-top: 8px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 10px; color: #94a3b8; margin-bottom: 2px;">SHADING MODE</span>
+      
+      <div style="display: flex; flex-direction: column; gap: 4px; margin-left: 2px;">
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">
+          <input type="radio" name="ctrl-shading-mode" value="0" checked style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+          Satellite / Imagery
+        </label>
+        
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">
+          <input type="radio" name="ctrl-shading-mode" value="1" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+          DEM Shading (DEM Colors)
+        </label>
+        
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">
+          <input type="radio" name="ctrl-shading-mode" value="2" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+          Hypsometric Tinting
+        </label>
       </div>
-      <div style="display: flex; gap: 12px; font-size: 9px; color: #94a3b8; margin-left: 22px;">
-        <span style="display: flex; align-items: center; gap: 4px;">
-          <span style="display: inline-block; width: 8px; height: 8px; background: #00cccc; border-radius: 2px;"></span>
-          S1M (1m)
-        </span>
-        <span style="display: flex; align-items: center; gap: 4px;">
-          <span style="display: inline-block; width: 8px; height: 8px; background: #cc00cc; border-radius: 2px;"></span>
-          USGS 1/3" (10m)
-        </span>
-        <span style="display: flex; align-items: center; gap: 4px;">
-          <span style="display: inline-block; width: 8px; height: 8px; background: #666666; border-radius: 2px;"></span>
-          Far-field
-        </span>
-        <span style="display: flex; align-items: center; gap: 4px;">
-          <span style="display: inline-block; width: 8px; height: 8px; background: #ccb300; border-radius: 2px;"></span>
-          Flat
-        </span>
+    </div>
+
+    <!-- DEM Shading Legend (visible only when DEM Shading is active) -->
+    <div id="container-dem-legend" style="display: none; gap: 10px; font-size: 9px; color: #94a3b8; margin-left: 22px; margin-bottom: 6px; flex-wrap: wrap;">
+      <span style="display: flex; align-items: center; gap: 4px;">
+        <span style="display: inline-block; width: 8px; height: 8px; background: #00cccc; border-radius: 2px;"></span>
+        S1M (1m)
+      </span>
+      <span style="display: flex; align-items: center; gap: 4px;">
+        <span style="display: inline-block; width: 8px; height: 8px; background: #cc00cc; border-radius: 2px;"></span>
+        USGS 1/3" (10m)
+      </span>
+      <span style="display: flex; align-items: center; gap: 4px;">
+        <span style="display: inline-block; width: 8px; height: 8px; background: #666666; border-radius: 2px;"></span>
+        Far-field
+      </span>
+      <span style="display: flex; align-items: center; gap: 4px;">
+        <span style="display: inline-block; width: 8px; height: 8px; background: #ccb300; border-radius: 2px;"></span>
+        Flat
+      </span>
+    </div>
+
+    <!-- Hypsometric Blend slider (visible only when Hypsometric Tinting is active) -->
+    <div id="container-hypsometric" style="display: none; margin-bottom: 8px; margin-left: 22px;">
+      <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; margin-bottom: 2px;">
+        <span>TINT BLEND</span>
+        <span id="val-hypblend">50%</span>
       </div>
+      <input type="range" id="ctrl-hypblend" min="0" max="1" step="0.05" value="0.5" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
   </div>
 
@@ -355,7 +380,11 @@ const sliderTrack = document.getElementById("slider-track")!;
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
 const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
-const ctrlDemColors = document.getElementById("ctrl-dem-colors") as HTMLInputElement;
+const ctrlShadingModes = document.getElementsByName("ctrl-shading-mode") as NodeListOf<HTMLInputElement>;
+const containerDemLegend = document.getElementById("container-dem-legend") as HTMLDivElement;
+const containerHypsometric = document.getElementById("container-hypsometric") as HTMLDivElement;
+const ctrlHypBlend = document.getElementById("ctrl-hypblend") as HTMLInputElement;
+const valHypBlend = document.getElementById("val-hypblend")!;
 const containerLabelSize = document.getElementById("container-label-size") as HTMLDivElement;
 const ctrlLabelSize = document.getElementById("ctrl-label-size") as HTMLInputElement;
 const ctrlBrightness = document.getElementById("ctrl-brightness") as HTMLInputElement;
@@ -577,8 +606,23 @@ ctrlLabelSize.addEventListener("input", () => {
   tileManager.setLabelScale(scale);
 });
 
-ctrlDemColors.addEventListener("change", () => {
-  tileManager.setShowDemColors(ctrlDemColors.checked);
+ctrlShadingModes.forEach((radio) => {
+  radio.addEventListener("change", () => {
+    if (radio.checked) {
+      const mode = parseFloat(radio.value);
+      tileManager.setShadingMode(mode);
+      
+      // Toggle Legend/Blend containers visibility
+      containerDemLegend.style.display = (mode === 1.0) ? "flex" : "none";
+      containerHypsometric.style.display = (mode === 2.0) ? "block" : "none";
+    }
+  });
+});
+
+ctrlHypBlend.addEventListener("input", () => {
+  const val = parseFloat(ctrlHypBlend.value);
+  valHypBlend.textContent = `${Math.round(val * 100)}%`;
+  tileManager.setHypsometricBlend(val);
 });
 
 ctrlImagerySource.addEventListener("change", () => {
