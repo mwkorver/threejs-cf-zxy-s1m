@@ -27,6 +27,8 @@ export interface TileNode {
   labelSprite?: THREE.Sprite;
   centerElevation?: number;
   demSource?: string;
+  minElevation?: number;
+  maxElevation?: number;
   children?: TileNode[];
   loading: boolean;
   loaded: boolean;
@@ -75,6 +77,7 @@ export class TileManager {
   private footprintsMaterial?: LineMaterial;
   private loadedFootprintsBBox?: { west: number; south: number; east: number; north: number };
   private isFetchingFootprints = false;
+  private visibleNodesList: TileNode[] = [];
   // Keep old root nodes rendering smoothly until new base level roots are fully loaded
   private transitionNodes = new Map<string, TileNode>();
   private workerPool = new TileWorkerPool();
@@ -95,6 +98,9 @@ export class TileManager {
     showDemColors: { value: false },
     shadingMode: { value: 0.0 },
     hypsometricBlend: { value: 0.5 },
+    useLocalHypso: { value: 0.0 },
+    localMinElev: { value: 0.0 },
+    localMaxElev: { value: 4000.0 },
     brightness: { value: 1.15 },
     contrast: { value: 1.10 },
     saturation: { value: 1.15 }
@@ -119,6 +125,7 @@ export class TileManager {
    * @param camera Optional Three.js Camera to build view frustum for view culling.
    */
   update(localCameraPos: THREE.Vector3, camera?: THREE.Camera): void {
+    this.visibleNodesList = [];
     if (camera) {
       this.isPerspective = true;
       this.currentLookDir.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
@@ -287,6 +294,26 @@ export class TileManager {
 
     // 8. Update viewport-wide footprints
     this.updateViewportFootprints();
+
+    // 9. Calculate local viewport min/max elevations if using local hypsometric tinting
+    let viewMin = Infinity;
+    let viewMax = -Infinity;
+    let hasElevations = false;
+    for (const node of this.visibleNodesList) {
+      if (node.loaded && node.minElevation !== undefined && node.maxElevation !== undefined && node.demSource !== "flat") {
+        if (node.minElevation < viewMin) viewMin = node.minElevation;
+        if (node.maxElevation > viewMax) viewMax = node.maxElevation;
+        hasElevations = true;
+      }
+    }
+
+    if (hasElevations && viewMin < viewMax) {
+      this.globalUniforms.localMinElev.value = viewMin;
+      this.globalUniforms.localMaxElev.value = viewMax;
+    } else {
+      this.globalUniforms.localMinElev.value = 0.0;
+      this.globalUniforms.localMaxElev.value = 4000.0;
+    }
   }
 
   /**
@@ -398,6 +425,7 @@ export class TileManager {
 
     if (node.visible) {
       this.activeVisibleKeys.add(node.key);
+      this.visibleNodesList.push(node);
     }
 
     return false; // in view
@@ -472,6 +500,8 @@ export class TileManager {
     if (cached) {
       node.centerElevation = cached.centerElevation;
       node.demSource = cached.demSource;
+      node.minElevation = cached.minElevation;
+      node.maxElevation = cached.maxElevation;
       if (!node.labelSprite) {
         node.labelSprite = this.buildLabelSprite(node.tile, tileBoundsMercator(node.tile), cached.centerElevation ?? 0);
       }
@@ -501,7 +531,7 @@ export class TileManager {
           return;
         }
 
-        const { demSource, centerElevation, meshData, imageBitmap } = res;
+        const { demSource, centerElevation, meshData, imageBitmap, minElevation, maxElevation } = res;
 
         // Build Three.js geometry from worker-returned typed arrays
         const geom = new THREE.BufferGeometry();
@@ -526,13 +556,15 @@ export class TileManager {
 
         node.centerElevation = centerElevation;
         node.demSource = demSource;
+        node.minElevation = minElevation;
+        node.maxElevation = maxElevation;
 
         const bounds = tileBoundsMercator(node.tile);
         if (!node.labelSprite) {
           node.labelSprite = this.buildLabelSprite(node.tile, bounds, centerElevation);
         }
 
-        const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation, demSource };
+        const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation, demSource, minElevation, maxElevation };
         this.bundleCache.put(bundle, this.activeKeys);
 
         this.createMeshFromBundle(node, geom, texture);
@@ -652,6 +684,9 @@ export class TileManager {
         showDemColors: this.globalUniforms.showDemColors,
         shadingMode: this.globalUniforms.shadingMode,
         hypsometricBlend: this.globalUniforms.hypsometricBlend,
+        useLocalHypso: this.globalUniforms.useLocalHypso,
+        localMinElev: this.globalUniforms.localMinElev,
+        localMaxElev: this.globalUniforms.localMaxElev,
         brightness: this.globalUniforms.brightness,
         contrast: this.globalUniforms.contrast,
         saturation: this.globalUniforms.saturation,
@@ -984,6 +1019,10 @@ export class TileManager {
     if (blend === this.hypsometricBlend) return;
     this.hypsometricBlend = blend;
     this.globalUniforms.hypsometricBlend.value = blend;
+  }
+
+  setUseLocalHypso(useLocal: boolean): void {
+    this.globalUniforms.useLocalHypso.value = useLocal ? 1.0 : 0.0;
   }
 
   /**
