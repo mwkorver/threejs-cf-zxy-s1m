@@ -758,9 +758,9 @@ window.addEventListener("dblclick", (e) => {
       offset.multiplyScalar(0.5);
       const newPosition = new THREE.Vector3().addVectors(point, offset);
 
-      // Smoothly relocate camera and center gaze on the clicked point
+      // Smoothly relocate camera without changing its orientation.
+      // This keeps the clicked point exactly under the cursor and prevents disorienting yaw/pitch/roll rotations.
       camera.position.copy(newPosition);
-      camera.lookAt(point);
     }
   }
 });
