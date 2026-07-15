@@ -271,6 +271,25 @@ describe("TileManager dynamic base zoom", () => {
     // (different zoom = different keys, so none are reclaimed)
     expect(transitionNodes.size).toBeGreaterThan(0);
   });
+
+  it("cancels loading tasks in transition node subtrees", () => {
+    const tm = makeManager({ maxZoom: 18 });
+
+    // Initial base zoom 12 roots: start loading
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    const { rootNodes } = internals(tm);
+    for (const node of rootNodes.values()) {
+      node.loading = true; // simulate active loading
+    }
+
+    // Zoom out to change base zoom to 6: roots should move to transitionNodes and have their loading aborted
+    tm.update(new THREE.Vector3(0, 0, 170000));
+    const { transitionNodes } = internals(tm);
+    expect(transitionNodes.size).toBeGreaterThan(0);
+    for (const node of transitionNodes.values()) {
+      expect(node.loading).toBe(false); // verified aborted
+    }
+  });
 });
 
 // ---- Frustum culling ----
