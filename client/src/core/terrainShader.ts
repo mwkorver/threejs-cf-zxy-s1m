@@ -28,6 +28,9 @@ export const TerrainShader = {
     uniform float demSourceType; // 0.0=farfield, 1.0=usgs13, 2.0=s1m, 3.0=flat
     uniform float shadingMode;   // 0.0=satellite, 1.0=DEM, 2.0=hypsometric
     uniform float hypsometricBlend; // 0.0 to 1.0
+    uniform float useLocalHypso;    // 0.0 = global, 1.0 = local to viewport
+    uniform float localMinElev;
+    uniform float localMaxElev;
     uniform float brightness;
     uniform float contrast;
     uniform float saturation;
@@ -38,8 +41,12 @@ export const TerrainShader = {
     #include <fog_pars_fragment>
 
     vec3 getHypsometricColor(float height) {
-      // Clamp height between 0 and 4000 meters (fits CONUS elevations)
-      float h = clamp(height, 0.0, 4000.0);
+      float minE = useLocalHypso > 0.5 ? localMinElev : 0.0;
+      float maxE = useLocalHypso > 0.5 ? localMaxElev : 4000.0;
+      
+      float h = clamp(height, minE, maxE);
+      float range = max(1.0, maxE - minE);
+      float t = (h - minE) / range;
       
       vec3 c0 = vec3(0.12, 0.45, 0.15); // dark green (low)
       vec3 c1 = vec3(0.56, 0.73, 0.35); // light green
@@ -47,14 +54,14 @@ export const TerrainShader = {
       vec3 c3 = vec3(0.65, 0.42, 0.25); // brown
       vec3 c4 = vec3(0.95, 0.95, 0.95); // white/peak
       
-      if (h < 200.0) {
-        return mix(c0, c1, h / 200.0);
-      } else if (h < 1000.0) {
-        return mix(c1, c2, (h - 200.0) / 800.0);
-      } else if (h < 2500.0) {
-        return mix(c2, c3, (h - 1000.0) / 1500.0);
+      if (t < 0.05) {
+        return mix(c0, c1, t / 0.05);
+      } else if (t < 0.25) {
+        return mix(c1, c2, (t - 0.05) / 0.20);
+      } else if (t < 0.625) {
+        return mix(c2, c3, (t - 0.25) / 0.375);
       } else {
-        return mix(c3, c4, (h - 2500.0) / 1500.0);
+        return mix(c3, c4, (t - 0.625) / 0.375);
       }
     }
 

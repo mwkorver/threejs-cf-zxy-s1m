@@ -188,7 +188,7 @@ export class TileWorkerPool {
   }
 
   private handleWorkerMessage(data: any): void {
-    const { type, requestId, error, demSource, centerElevation, meshData, imageBitmap } = data;
+    const { type, requestId, error, demSource, centerElevation, meshData, imageBitmap, minElevation, maxElevation } = data;
 
     const task = this.tasksByRequestId.get(requestId);
     if (!task) {
@@ -219,7 +219,9 @@ export class TileWorkerPool {
         demSource,
         centerElevation,
         meshData,
-        imageBitmap
+        imageBitmap,
+        minElevation,
+        maxElevation
       });
     } else if (type === "ERROR") {
       task.reject(new Error(error));
@@ -274,11 +276,27 @@ export class TileWorkerPool {
       ? buildTerrainMesh(heights, tile, options.gridStep)
       : buildFlatMesh(tile);
 
+    let minElevation = 0;
+    let maxElevation = 0;
+    if (heights) {
+      minElevation = Infinity;
+      maxElevation = -Infinity;
+      for (let i = 0; i < heights.length; i++) {
+        const h = heights[i];
+        if (h !== undefined) {
+          if (h < minElevation) minElevation = h;
+          if (h > maxElevation) maxElevation = h;
+        }
+      }
+    }
+
     return {
       demSource,
       centerElevation: heights ? (heights[256 * 512 + 256] ?? 0) : 0,
       meshData,
-      imageBitmap
+      imageBitmap,
+      minElevation,
+      maxElevation
     };
   }
 

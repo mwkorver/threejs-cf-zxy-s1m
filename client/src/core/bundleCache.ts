@@ -8,6 +8,8 @@ export interface Bundle {
   footprints?: THREE.LineSegments;
   centerElevation?: number;
   demSource?: string;
+  minElevation?: number;
+  maxElevation?: number;
 }
 
 export class BundleCache {

@@ -166,6 +166,20 @@ ctx.onmessage = async (e: MessageEvent) => {
     const { heights, demSource } = terrainSettled.value;
     const imageBitmap = imagerySettled.value;
 
+    let minElevation = 0;
+    let maxElevation = 0;
+    if (heights) {
+      minElevation = Infinity;
+      maxElevation = -Infinity;
+      for (let i = 0; i < heights.length; i++) {
+        const h = heights[i];
+        if (h !== undefined) {
+          if (h < minElevation) minElevation = h;
+          if (h > maxElevation) maxElevation = h;
+        }
+      }
+    }
+
     // 3. Build the mesh geometry on the background thread
     const meshData = heights
       ? buildTerrainMesh(heights, tile, gridStep)
@@ -196,7 +210,9 @@ ctx.onmessage = async (e: MessageEvent) => {
         anchor: meshData.anchor,
         gridSize: meshData.gridSize
       },
-      imageBitmap
+      imageBitmap,
+      minElevation,
+      maxElevation
     }, transferList);
 
   } catch (err: any) {

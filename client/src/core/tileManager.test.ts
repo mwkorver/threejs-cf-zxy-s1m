@@ -480,6 +480,36 @@ describe("TileManager setting changes", () => {
     expect(tm.hypsometricBlend).toBe(0.85);
     expect(tm.globalUniforms.hypsometricBlend.value).toBe(0.85);
   });
+
+  it("setUseLocalHypso updates uniforms", () => {
+    const tm = makeManager();
+    tm.setUseLocalHypso(true);
+    expect(tm.globalUniforms.useLocalHypso.value).toBe(1.0);
+
+    tm.setUseLocalHypso(false);
+    expect(tm.globalUniforms.useLocalHypso.value).toBe(0.0);
+  });
+
+  it("update calculates local visible elevations", () => {
+    const tm = makeManager();
+    tm.update(new THREE.Vector3(0, 0, 100));
+
+    const { rootNodes } = internals(tm);
+    let count = 0;
+    for (const node of rootNodes.values()) {
+      node.loaded = true;
+      node.minElevation = 100 + count * 50;
+      node.maxElevation = 200 + count * 50;
+      node.demSource = "s1m";
+      node.visible = true;
+      count++;
+    }
+
+    tm.update(new THREE.Vector3(0, 0, 100));
+
+    expect(tm.globalUniforms.localMinElev.value).toBe(100);
+    expect(tm.globalUniforms.localMaxElev.value).toBe(600);
+  });
 });
 
 // ---- Vertical exaggeration ----

@@ -341,6 +341,17 @@ hud.innerHTML = `
 
     <!-- Hypsometric Blend slider (visible only when Hypsometric Tinting is active) -->
     <div id="container-hypsometric" style="display: none; margin-bottom: 8px; margin-left: 22px;">
+      <!-- Hypsometric bounds mode (Global vs Local) -->
+      <div style="display: flex; gap: 12px; margin-bottom: 6px; font-size: 9px; color: #cbd5e1;">
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none;">
+          <input type="radio" name="ctrl-hyp-bounds" value="global" checked style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
+          Global
+        </label>
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none;">
+          <input type="radio" name="ctrl-hyp-bounds" value="local" style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
+          Local to Viewport
+        </label>
+      </div>
       <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; margin-bottom: 2px;">
         <span>TINT BLEND</span>
         <span id="val-hypblend">50%</span>
@@ -385,6 +396,7 @@ const containerDemLegend = document.getElementById("container-dem-legend") as HT
 const containerHypsometric = document.getElementById("container-hypsometric") as HTMLDivElement;
 const ctrlHypBlend = document.getElementById("ctrl-hypblend") as HTMLInputElement;
 const valHypBlend = document.getElementById("val-hypblend")!;
+const ctrlHypBounds = document.getElementsByName("ctrl-hyp-bounds") as NodeListOf<HTMLInputElement>;
 const containerLabelSize = document.getElementById("container-label-size") as HTMLDivElement;
 const ctrlLabelSize = document.getElementById("ctrl-label-size") as HTMLInputElement;
 const ctrlBrightness = document.getElementById("ctrl-brightness") as HTMLInputElement;
@@ -623,6 +635,14 @@ ctrlHypBlend.addEventListener("input", () => {
   const val = parseFloat(ctrlHypBlend.value);
   valHypBlend.textContent = `${Math.round(val * 100)}%`;
   tileManager.setHypsometricBlend(val);
+});
+
+ctrlHypBounds.forEach((radio) => {
+  radio.addEventListener("change", () => {
+    if (radio.checked) {
+      tileManager.setUseLocalHypso(radio.value === "local");
+    }
+  });
 });
 
 ctrlImagerySource.addEventListener("change", () => {
