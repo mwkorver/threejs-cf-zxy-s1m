@@ -12,7 +12,11 @@ import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM, loadView
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import { TerrainShader } from "./terrainShader";
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { TileWorkerPool } from "./tileWorkerPool";
+
 
 export interface TileNode {
   key: string;
@@ -67,7 +71,8 @@ export class TileManager {
   public showDemColors = false;
 
   // Viewport footprint global mesh & cache box
-  private footprintsMesh?: THREE.LineSegments;
+  private footprintsMesh?: LineSegments2;
+  private footprintsMaterial?: LineMaterial;
   private loadedFootprintsBBox?: { west: number; south: number; east: number; north: number };
   private isFetchingFootprints = false;
   // Keep old root nodes rendering smoothly until new base level roots are fully loaded
@@ -548,7 +553,7 @@ export class TileManager {
 
   private buildViewportFootprintsMesh(
     footprints: FootprintCollection
-  ): THREE.LineSegments | undefined {
+  ): LineSegments2 | undefined {
     if (!footprints.features || footprints.features.length === 0) {
       return undefined;
     }
@@ -603,22 +608,21 @@ export class TileManager {
 
     if (vertices.length === 0) return undefined;
 
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
-    geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    const geom = new LineSegmentsGeometry();
+    geom.setPositions(vertices);
+    geom.setColors(colors);
 
-    geom.computeBoundingSphere();
-    geom.computeBoundingBox();
-
-    const mat = new THREE.LineBasicMaterial({
+    const mat = new LineMaterial({
+      linewidth: 3, // 3px wide lines
       vertexColors: true,
+      depthTest: false,
       transparent: true,
-      opacity: 0.8,
-      linewidth: 2, // Double thickness (note: WebGL may clamp to 1.0 depending on GPU/driver support)
-      depthTest: false // Render on top of everything!
+      opacity: 0.8
     });
+    mat.resolution.set(window.innerWidth, window.innerHeight);
+    this.footprintsMaterial = mat;
 
-    const lines = new THREE.LineSegments(geom, mat);
+    const lines = new LineSegments2(geom, mat);
     lines.frustumCulled = false;
     return lines;
   }
@@ -906,7 +910,14 @@ export class TileManager {
       this.footprintsMesh.geometry.dispose();
       (this.footprintsMesh.material as THREE.Material).dispose();
       this.footprintsMesh = undefined;
+      this.footprintsMaterial = undefined;
       this.loadedFootprintsBBox = undefined;
+    }
+  }
+
+  setViewportSize(width: number, height: number): void {
+    if (this.footprintsMaterial) {
+      this.footprintsMaterial.resolution.set(width, height);
     }
   }
 
