@@ -174,6 +174,7 @@ export class TileManager {
       for (const [key, node] of this.rootNodes.entries()) {
         this.transitionNodes.set(key, node);
         this.applyPolygonOffset(node, true);
+        this.cancelLoadingSubtree(node);
       }
       this.rootNodes.clear();
       this.baseZoom = computedBaseZoom;
@@ -779,6 +780,21 @@ export class TileManager {
         this.pruneNode(child);
       }
       delete node.children;
+    }
+  }
+
+  /**
+   * Recursively cancel any active worker load requests in a transition node's subtree.
+   */
+  private cancelLoadingSubtree(node: TileNode): void {
+    if (node.loading) {
+      this.workerPool.cancelTile(node.tile);
+      node.loading = false;
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        this.cancelLoadingSubtree(child);
+      }
     }
   }
 
