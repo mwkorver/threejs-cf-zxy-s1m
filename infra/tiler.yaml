@@ -29,6 +29,14 @@ Resources:
         Variables:
           TILER_LAKE_PATH: "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index"
           TILER_S1M_INDEX_PATH: "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index/s1m/S1M_Products.parquet"
+          # Frequently-tweaked knobs — pydantic reads TILER_* (settings.py). These
+          # are function config, so they can be changed with a fast config-only
+          # `sam deploy` (no image rebuild) or `aws lambda update-function-configuration`
+          # (instant). Note: already-cached CloudFront tiles are immutable, so an
+          # invalidation is needed to see a change on previously-served tiles.
+          TILER_USGS_MIN_ZOOM: "11"
+          TILER_S1M_MIN_ZOOM: "15"
+          TILER_TILE_SIZE: "512"
       Policies:
         - Statement:
             # Signed source reads (plan §2 row 10, §7). Requester-pays is scoped
