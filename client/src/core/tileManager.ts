@@ -1183,8 +1183,18 @@ export class TileManager {
     ctx.fillText(`${tile.z}/${tile.x}/${tile.y}`, w / 2, h / 2);
 
     const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    // depthTest off + high renderOrder so the label draws on top of terrain
+    // instead of being occluded by relief between the camera and the tile
+    // center (labels are a debug overlay — always readable, like the
+    // footprints overlay which does the same).
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
     const sprite = new THREE.Sprite(material);
+    sprite.renderOrder = 999;
 
     // Calculate dynamic proportional width and height relative to tile size
     const tileW = bounds.east - bounds.west;
