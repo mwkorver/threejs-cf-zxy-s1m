@@ -371,6 +371,39 @@ hud.innerHTML = `
 `;
 appDiv.appendChild(hud);
 
+// North compass (top-right): the rose rotates to show where north is relative
+// to the current heading; clicking it yaws the view back to north-up.
+const compass = document.createElement("div");
+compass.id = "compass";
+compass.title = "Face north (north-up)";
+compass.style.cssText =
+  "position:absolute; top:20px; right:20px; width:56px; height:56px; border-radius:50%;" +
+  "background:rgba(15,23,42,0.85); border:1px solid #475569; box-shadow:0 2px 8px rgba(0,0,0,0.4);" +
+  "cursor:pointer; display:flex; align-items:center; justify-content:center; user-select:none; z-index:10;";
+compass.innerHTML = `
+  <div id="compass-rose" style="width:100%; height:100%;">
+    <svg viewBox="0 0 56 56" width="56" height="56">
+      <polygon points="28,7 22,29 34,29" fill="#ef4444"></polygon>
+      <polygon points="28,49 22,29 34,29" fill="#cbd5e1"></polygon>
+      <circle cx="28" cy="29" r="2.5" fill="#0f172a" stroke="#94a3b8" stroke-width="1"></circle>
+      <text x="28" y="17.5" text-anchor="middle" font-family="monospace" font-size="9" font-weight="bold" fill="#ffffff">N</text>
+    </svg>
+  </div>`;
+appDiv.appendChild(compass);
+const compassRose = document.getElementById("compass-rose") as HTMLDivElement;
+const compassFwd = new THREE.Vector3();
+const worldUp = new THREE.Vector3(0, 0, 1);
+
+// Swallow mousedown so a compass click doesn't start a world look-drag.
+compass.addEventListener("mousedown", (e) => e.stopPropagation());
+compass.addEventListener("click", () => {
+  compassFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  const bearing = Math.atan2(compassFwd.x, compassFwd.y); // 0 = +Y (north)
+  // Yaw about world Z to null the bearing — resets heading to north while
+  // preserving pitch and position.
+  camera.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(worldUp, bearing));
+});
+
 const hudPos = document.getElementById("hud-pos")!;
 const hudAlt = document.getElementById("hud-alt")!;
 const hudSpeed = document.getElementById("hud-speed")!;
@@ -853,6 +886,11 @@ function frameLoop() {
   hudSpeed.textContent = direction.lengthSq() > 0 ? speedKnots.toString() : "0";
   hudTiles.textContent = tileManager.getActiveKeys().size.toString();
   hudCache.textContent = (bundleCache.bytesUsed() / (1024 * 1024)).toFixed(2);
+
+  // Rotate the compass rose so the red N points to where north is on screen.
+  compassFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  const bearingDeg = (Math.atan2(compassFwd.x, compassFwd.y) * 180) / Math.PI;
+  compassRose.style.transform = `rotate(${-bearingDeg}deg)`;
 }
 
 // Start visual frame loop
