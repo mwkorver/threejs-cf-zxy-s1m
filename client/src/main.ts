@@ -362,11 +362,11 @@ hud.innerHTML = `
 
   <div style="margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; font-size: 11px; color: #94a3b8; line-height: 1.4;">
     Controls:<br>
-    • [W / S] Fly Forward / Backward<br>
-    • [A / D] Strafe Left / Right<br>
-    • [Q / E] Fly Down / Up<br>
-    • [Shift] Boost Speed<br>
-    • Drag mouse outside HUD to look
+    • Drag — Pan<br>
+    • Right-drag — Rotate / Tilt<br>
+    • Scroll — Zoom to cursor<br>
+    • Double-click — Zoom in<br>
+    • [W/A/S/D] Fly · [Q/E] Up/Down · [Shift] Boost
   </div>
 `;
 appDiv.appendChild(hud);
@@ -718,111 +718,129 @@ window.addEventListener("contextmenu", (e) => {
   }
 });
 
-// Mouse rotation and panning controls
+// ---- Globe-style navigation (GIS default) --------------------------------
+// Left-drag = pan (grab the ground under the cursor), right-drag = orbit/tilt
+// around the screen-centre ground point, wheel = zoom toward the cursor point.
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const tmpV = new THREE.Vector3();
+
+/** Ground point (world/offset coords) under a screen pixel, or null on a miss. */
+function pickGround(clientX: number, clientY: number): THREE.Vector3 | null {
+  ndc.x = (clientX / window.innerWidth) * 2 - 1;
+  ndc.y = -(clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster
+    .intersectObjects(scene.children, true)
+    .filter((h) => (h.object as THREE.Mesh).isMesh);
+  return hits.length ? hits[0]!.point.clone() : null;
+}
+
+/** Where the ray through a screen pixel meets the horizontal plane z=planeZ. */
+function rayToPlane(clientX: number, clientY: number, planeZ: number): THREE.Vector3 | null {
+  ndc.x = (clientX / window.innerWidth) * 2 - 1;
+  ndc.y = -(clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  const o = raycaster.ray.origin;
+  const d = raycaster.ray.direction;
+  if (Math.abs(d.z) < 1e-6) return null;
+  const t = (planeZ - o.z) / d.z;
+  if (t <= 0) return null;
+  return tmpV.copy(d).multiplyScalar(t).add(o).clone();
+}
+
+let dragMode: "pan" | "orbit" | null = null;
+const panAnchor = new THREE.Vector3(); // fixed world point kept under the cursor while panning
+let panPlaneZ = 0;
+const orbitTarget = new THREE.Vector3(); // fixed pivot while orbiting
+
 window.addEventListener("mousedown", (e) => {
   if (hud.contains(e.target as Node)) {
     isInteractingWithHud = true;
-    return; // Don't drag camera when interacting with HUD!
+    return;
   }
   isInteractingWithHud = false;
+  dragMode = null;
   previousMousePosition = { x: e.clientX, y: e.clientY };
+
+  if (e.button === 0) {
+    // Pan: anchor the ground point under the cursor (fall back to a flat plane).
+    const g = pickGround(e.clientX, e.clientY);
+    panPlaneZ = g ? g.z : 0;
+    const anchor = g ?? rayToPlane(e.clientX, e.clientY, panPlaneZ);
+    if (anchor) {
+      panAnchor.copy(anchor);
+      dragMode = "pan";
+    }
+  } else if (e.button === 2) {
+    // Orbit/tilt about the ground point at screen centre.
+    const t =
+      pickGround(window.innerWidth / 2, window.innerHeight / 2) ??
+      pickGround(e.clientX, e.clientY) ??
+      rayToPlane(window.innerWidth / 2, window.innerHeight / 2, 0);
+    if (t) {
+      orbitTarget.copy(t);
+      dragMode = "orbit";
+    }
+  }
 });
 
 window.addEventListener("mousemove", (e) => {
-  if (isInteractingWithHud || e.buttons === 0) return;
-
-  const deltaX = e.clientX - previousMousePosition.x;
-  const deltaY = e.clientY - previousMousePosition.y;
-
-  if (e.ctrlKey || e.buttons === 3) {
-    // Ctrl key held OR both left and right buttons: change heading (yaw) only
-    const euler = new THREE.Euler(0, 0, 0, "ZXY");
-    euler.setFromQuaternion(camera.quaternion);
-    euler.z -= deltaX * 0.003; // yaw (heading)
-    euler.y = 0; // force roll to 0
-    camera.quaternion.setFromEuler(euler);
-  } else if (e.buttons === 1) {
-    // Left button: rotate yaw (heading) and pitch
-    const euler = new THREE.Euler(0, 0, 0, "ZXY");
-    euler.setFromQuaternion(camera.quaternion);
-
-    euler.z -= deltaX * 0.003; // yaw (heading)
-    euler.x -= deltaY * 0.003; // pitch
-    euler.y = 0; // force roll to 0
-
-    // Limit pitch to avoid flipping upside down (-85 to 85 degrees)
-    const maxPitch = Math.PI / 2 - 0.05;
-    euler.x = Math.max(-maxPitch, Math.min(maxPitch, euler.x));
-
-    camera.quaternion.setFromEuler(euler);
-  } else if (e.buttons === 2) {
-    // Right button: pan camera
-    const panScale = Math.max(10, camera.position.z) * 0.0015;
-
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-
-    // Translate position along camera local axes
-    camera.position.addScaledVector(right, -deltaX * panScale);
-    camera.position.addScaledVector(up, deltaY * panScale);
-  }
-
+  if (dragMode === null || e.buttons === 0) return;
+  const dx = e.clientX - previousMousePosition.x;
+  const dy = e.clientY - previousMousePosition.y;
   previousMousePosition = { x: e.clientX, y: e.clientY };
+
+  if (dragMode === "pan") {
+    // Translate so the anchored ground point stays under the cursor.
+    const q = rayToPlane(e.clientX, e.clientY, panPlaneZ);
+    if (q) camera.position.add(tmpV.copy(panAnchor).sub(q));
+  } else if (dragMode === "orbit") {
+    // Spherical offset about the pivot: dx -> azimuth (bearing), dy -> polar (tilt).
+    const off = tmpV.copy(camera.position).sub(orbitTarget);
+    const r = off.length();
+    let az = Math.atan2(off.y, off.x);
+    let po = Math.acos(Math.min(1, Math.max(-1, off.z / r))); // 0 = top-down, PI/2 = horizon
+    az -= dx * 0.005;
+    po -= dy * 0.005; // drag down -> tilt toward top-down
+    po = Math.max(0.05, Math.min(1.45, po)); // ~3deg .. ~83deg from vertical (stay above ground)
+    off.set(r * Math.sin(po) * Math.cos(az), r * Math.sin(po) * Math.sin(az), r * Math.cos(po));
+    camera.position.copy(orbitTarget).add(off);
+    camera.up.set(0, 0, 1);
+    camera.lookAt(orbitTarget);
+  }
 });
 
 window.addEventListener("mouseup", () => {
+  dragMode = null;
   isInteractingWithHud = false;
 });
 
-// Dynamic mouse wheel zoom (dolly) along the camera's viewing axis
+// Wheel = zoom toward the ground point under the cursor (keeps it under the cursor).
 window.addEventListener("wheel", (e) => {
-  if (hud.contains(e.target as Node)) {
-    return; // Do not zoom when scrolling inside the HUD panel
+  if (hud.contains(e.target as Node)) return;
+  e.preventDefault();
+
+  const target = pickGround(e.clientX, e.clientY);
+  if (target) {
+    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15; // out : in
+    const off = tmpV.copy(camera.position).sub(target).multiplyScalar(factor);
+    const dist = off.length();
+    if (dist > 20 && dist < 8_000_000) camera.position.copy(target).add(off);
+  } else {
+    // Miss (aiming at sky): fall back to dolly along the view axis.
+    const zoomScale = Math.max(50, camera.position.z) * 0.12;
+    const fwd = tmpV.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    camera.position.addScaledVector(fwd, e.deltaY > 0 ? -zoomScale : zoomScale);
   }
-  e.preventDefault(); // Prevent page scrolling
-
-  // Proportional zoom speed based on current height to keep interaction fluid at all scales
-  const zoomScale = Math.max(50, camera.position.z) * 0.12;
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-  const direction = e.deltaY > 0 ? -1 : 1;
-
-  camera.position.addScaledVector(forward, direction * zoomScale);
 }, { passive: false });
 
-// Mouse double click to center view and zoom in by 2x at the clicked terrain point
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
-
+// Double-click = zoom in 2x on the clicked point (orientation unchanged, so
+// the point stays under the cursor).
 window.addEventListener("dblclick", (e) => {
-  if (hud.contains(e.target as Node)) {
-    return; // Ignore double clicks inside the HUD controls
-  }
-
-  // Calculate mouse position in normalized device coordinates (-1 to +1)
-  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-
-  raycaster.setFromCamera(mouse, camera);
-
-  // Intersect with active terrain mesh objects in the scene
-  const intersects = raycaster.intersectObjects(scene.children, true)
-    .filter(hit => hit.object.type === "Mesh");
-
-  if (intersects.length > 0) {
-    const firstHit = intersects[0];
-    if (firstHit) {
-      const point = firstHit.point;
-
-      // Zoom in by 2x (halve the distance between camera and target point)
-      const offset = new THREE.Vector3().subVectors(camera.position, point);
-      offset.multiplyScalar(0.5);
-      const newPosition = new THREE.Vector3().addVectors(point, offset);
-
-      // Smoothly relocate camera without changing its orientation.
-      // This keeps the clicked point exactly under the cursor and prevents disorienting yaw/pitch/roll rotations.
-      camera.position.copy(newPosition);
-    }
-  }
+  if (hud.contains(e.target as Node)) return;
+  const point = pickGround(e.clientX, e.clientY);
+  if (point) camera.position.lerp(point, 0.5); // halve the distance to the point
 });
 
 window.addEventListener("resize", () => {
