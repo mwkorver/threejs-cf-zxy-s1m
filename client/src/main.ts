@@ -727,6 +727,7 @@ const tmpV = new THREE.Vector3();
 
 /** Ground point (world/offset coords) under a screen pixel, or null on a miss. */
 function pickGround(clientX: number, clientY: number): THREE.Vector3 | null {
+  camera.updateMatrixWorld(); // pan moves the camera between renders; refresh so the ray uses the current position
   ndc.x = (clientX / window.innerWidth) * 2 - 1;
   ndc.y = -(clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(ndc, camera);
@@ -738,6 +739,7 @@ function pickGround(clientX: number, clientY: number): THREE.Vector3 | null {
 
 /** Where the ray through a screen pixel meets the horizontal plane z=planeZ. */
 function rayToPlane(clientX: number, clientY: number, planeZ: number): THREE.Vector3 | null {
+  camera.updateMatrixWorld(); // ensure the ray reflects the latest camera position (moved since last render)
   ndc.x = (clientX / window.innerWidth) * 2 - 1;
   ndc.y = -(clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(ndc, camera);
