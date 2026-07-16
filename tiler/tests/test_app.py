@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from tiler.basemap import BASEMAP_MAX_ZOOM, TransientBasemapError
 from tiler import app as app_module
 from tiler.resolver import CogAsset
 
@@ -18,9 +19,11 @@ def no_real_resolver():
     """Resolvers are lru_cached and open DuckDB/S3 — never in unit tests."""
     app_module.get_resolver.cache_clear()
     app_module.get_s1m_resolver.cache_clear()
+    app_module.get_usgs13_resolver.cache_clear()
     yield
     app_module.get_resolver.cache_clear()
     app_module.get_s1m_resolver.cache_clear()
+    app_module.get_usgs13_resolver.cache_clear()
 
 
 def test_unknown_layer_404():
@@ -71,7 +74,7 @@ def test_terrain_nearfield_uses_s1m():
         patch.object(app_module, "render_farfield_tile") as farfield,
     ):
         s1m.return_value.resolve.return_value = ["s3://prd-tnm/x.tif"]
-        r = client.get("/terrain/14/4804/6172.webp")
+        r = client.get("/terrain/15/4804/6172.webp")
     assert r.status_code == 200
     assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
     render.assert_called_once()
@@ -104,6 +107,39 @@ def test_terrain_no_coverage_404():
 
 def test_terrain_out_of_range_404():
     assert client.get("/terrain/3/8/0.webp").status_code == 404
+
+
+# --- basemap endpoint ---
+
+def test_basemap_happy_path_headers():
+    with patch.object(app_module, "render_basemap_tile", return_value=b"RIFFwebp") as render:
+        r = client.get("/basemap/8/75/96.webp")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/webp"
+    assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert r.content == b"RIFFwebp"
+
+
+def test_basemap_no_coverage_404():
+    with patch.object(app_module, "render_basemap_tile", return_value=None):
+        assert client.get("/basemap/8/75/96.webp").status_code == 404
+
+
+def test_basemap_transient_503():
+    with patch.object(app_module, "render_basemap_tile", side_effect=TransientBasemapError("upstream down")):
+        r = client.get("/basemap/8/75/96.webp")
+    assert r.status_code == 503
+    assert r.headers.get("retry-after") == "2"
+
+
+def test_basemap_beyond_maxzoom_404_without_rendering():
+    with patch.object(app_module, "render_basemap_tile") as render:
+        assert client.get(f"/basemap/{BASEMAP_MAX_ZOOM + 1}/0/0.webp").status_code == 404
+        render.assert_not_called()
+
+
+def test_basemap_out_of_range_404():
+    assert client.get("/basemap/3/8/0.webp").status_code == 404  # x >= 2^3
 
 
 # --- footprints endpoint ---
