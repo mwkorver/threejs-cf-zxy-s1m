@@ -614,10 +614,10 @@ export class TileManager {
         const localX = mx - this.worldAnchor[0];
         const localY = my - this.worldAnchor[1];
 
-        // Draw at flat sea level (Z = 20.0) to avoid terrain sampling complexity.
-        // We will disable depth testing on the material so the lines draw directly
-        // on top of the terrain like a clean wireframe overlay.
-        const localZ = 20.0; 
+        // Align Z with the terrain height under this coordinate to prevent perspective parallax shift,
+        // adding a small offset (+5.0m) to keep lines cleanly visible on top of the terrain mesh.
+        const elevation = this.getElevationAt(mx, my);
+        const localZ = elevation * this.verticalExaggeration + 5.0; 
 
         localCoords.push([localX, localY, localZ]);
       }
@@ -666,6 +666,37 @@ export class TileManager {
     const lines = new LineSegments2(geom, mat);
     lines.frustumCulled = false;
     return lines;
+  }
+
+  /**
+   * Find the elevation at a given global Mercator coordinate (mx, my) by looking
+   * up the finest loaded tile that covers the coordinate.
+   */
+  private getElevationAt(mx: number, my: number): number {
+    let bestNode: TileNode | undefined;
+    const checkNode = (node: TileNode) => {
+      if (!node.loaded) return;
+      if (mx >= node.bounds.west && mx <= node.bounds.east &&
+          my >= node.bounds.south && my <= node.bounds.north) {
+        if (!bestNode || node.tile.z > bestNode.tile.z) {
+          bestNode = node;
+        }
+        if (node.children) {
+          for (const child of node.children) {
+            checkNode(child);
+          }
+        }
+      }
+    };
+
+    for (const node of this.rootNodes.values()) {
+      checkNode(node);
+    }
+    for (const node of this.transitionNodes.values()) {
+      checkNode(node);
+    }
+
+    return (bestNode && bestNode.centerElevation !== undefined) ? bestNode.centerElevation : 0;
   }
 
   private createMeshFromBundle(
@@ -962,6 +993,8 @@ export class TileManager {
     for (const node of this.rootNodes.values()) {
       updateScale(node);
     }
+    // Clear footprints cache BBox to force them to rebuild at the new Z scale on next update
+    this.loadedFootprintsBBox = undefined;
   }
 
   /**
