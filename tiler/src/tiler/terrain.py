@@ -11,6 +11,8 @@ Two regimes behind one endpoint so the client speaks one terrain contract:
   elevation decode/re-encode, no conversion bugs at the boundary (plan §10.5).
 """
 
+from collections.abc import Callable
+
 import numpy as np
 import rasterio
 from rasterio.errors import RasterioIOError
@@ -36,26 +38,49 @@ def _s1m_tile(href: str, x: int, y: int, z: int, tilesize: int) -> "object":
         return src.tile(x, y, z, tilesize=tilesize, indexes=(1,))
 
 
-def render_terrain_tile(
-    s1m_hrefs: list[str], z: int, x: int, y: int, tilesize: int
-) -> bytes | None:
-    """Near-field S1M terrain tile as lossless-WebP Terrarium, or None."""
-    if not s1m_hrefs:
+def _mosaic_elev(hrefs: list[str], z: int, x: int, y: int, tilesize: int) -> "np.ndarray | None":
+    """Mosaic DEM COGs into a float elevation array (NaN for void/uncovered), or None."""
+    if not hrefs:
         return None
     try:
         img, _used = mosaic_reader(
-            s1m_hrefs, _s1m_tile, x, y, z,
+            hrefs, _s1m_tile, x, y, z,
             tilesize=tilesize,
             allowed_exceptions=(TileOutsideBounds,),
         )
     except Exception:
         return None
-
-    # Masked (void) samples -> NaN so encode_terrarium writes them as 0 m
-    # (plan §4.2 defers void-fill vs transparent; 0 m is the placeholder).
     elev = img.data[0].astype(np.float64)
     if img.mask is not None:
         elev = np.where(img.mask[0] == 0, np.nan, elev)
+    return elev
+
+
+def render_terrain_tile(
+    s1m_hrefs: list[str],
+    z: int,
+    x: int,
+    y: int,
+    tilesize: int,
+    fill_hrefs: "Callable[[], list[str]] | None" = None,
+) -> bytes | None:
+    """Near-field S1M terrain tile as lossless-WebP Terrarium, or None.
+
+    S1M coverage is not seamless, so a tile straddling its edge has void pixels.
+    Left as 0 m they form a huge cliff in relief. `fill_hrefs`, if given, is a
+    lazy resolver (called only when voids exist) whose DEM — usgs13 — fills those
+    pixels with real elevation, so the S1M edge blends instead of cliffing.
+    """
+    elev = _mosaic_elev(s1m_hrefs, z, x, y, tilesize)
+    if elev is None:
+        return None
+
+    if fill_hrefs is not None:
+        voids = np.isnan(elev)
+        if voids.any():
+            fill = _mosaic_elev(fill_hrefs(), z, x, y, tilesize)
+            if fill is not None:
+                elev = np.where(voids, fill, elev)
 
     rgb = encode_terrarium(elev)  # (H, W, 3) uint8
     # rio_tiler.render wants (bands, H, W); lossless WebP for exact elevations.
