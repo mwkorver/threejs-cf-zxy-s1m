@@ -195,33 +195,6 @@ def terrain_footprints(z: int, x: int, y: int) -> JSONResponse:
     return JSONResponse(fc, headers={"Cache-Control": IMMUTABLE})
 
 
-@app.get("/terrain-footprints/viewport/{west}/{south}/{east}/{north}")
-def terrain_footprints_viewport(west: float, south: float, east: float, north: float) -> JSONResponse:
-    """GeoJSON FeatureCollection of S1M and USGS 1/3 arc-second footprints intersecting a bounding box."""
-    features = []
-    
-    # 1. Get S1M (1m) footprints
-    try:
-        s1m_fc = get_s1m_resolver().resolve_viewport_footprints(west, south, east, north, dataset_type="s1m")
-        features.extend(s1m_fc.get("features", []))
-    except Exception:
-        pass
-
-    # 2. Get USGS 1/3 Arc-Second footprints
-    try:
-        usgs13_fc = get_usgs13_resolver().resolve_viewport_footprints(west, south, east, north, dataset_type="usgs13")
-        features.extend(usgs13_fc.get("features", []))
-    except Exception:
-        pass
-
-    fc = {
-        "type": "FeatureCollection",
-        "features": features
-    }
-    # Short cache for viewport-based queries since the box changes frequently
-    return JSONResponse(fc, headers={"Cache-Control": "public, max-age=60"})
-
-
 @app.get("/healthz")
 def healthz() -> dict:
     return {"ok": True, "region": settings.aws_region}

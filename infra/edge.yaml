@@ -12,6 +12,13 @@ Parameters:
   TilerFunctionArn:
     Type: String
     Description: Tiler Lambda ARN (for the invoke permission)
+  StaticBucketName:
+    Type: String
+    Default: deckgl-cf-xyz-s1m-us-west-2
+    Description: >
+      Bucket holding pre-genned static assets served straight from S3 (no
+      Lambda) under /footprints/* — e.g. footprints/{s1m,usgs13}.json built by
+      tiler/scripts/build_footprints.py.
 
 Resources:
   # Path-only cache keys: no query strings, no cookies, no headers
@@ -57,6 +64,39 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
+  # OAC for the static-asset S3 origin. SigV4-signs origin requests so the
+  # bucket stays private (public access block on) and only this distribution
+  # can read footprints/*.
+  StaticOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: flight-sim-static-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Scoped read for CloudFront's OAC: only footprints/*, only from this
+  # distribution. Not a "public" policy (service principal + SourceArn), so it's
+  # allowed despite the bucket's BlockPublicPolicy. The bucket has no other
+  # policy, so this stack owns it outright.
+  StaticBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StaticBucketName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontOACReadFootprints
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${StaticBucketName}/footprints/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
   # Lets CloudFront (and only this distribution) invoke the IAM-auth Function
   # URL. AWS requires BOTH InvokeFunctionUrl and InvokeFunction for OAC —
   # granting only the former returns 403 Forbidden at the Function URL.
@@ -96,6 +136,13 @@ Resources:
             OriginShield:
               Enabled: true
               OriginShieldRegion: us-west-2
+          # Static footprint files, served straight from S3 (no Lambda). The
+          # regional REST endpoint is required for SigV4/OAC signing.
+          - Id: static
+            DomainName: !Sub "${StaticBucketName}.s3.${AWS::Region}.amazonaws.com"
+            OriginAccessControlId: !GetAtt StaticOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
         DefaultCacheBehavior: # covers all tiler paths: /imagery/*, /terrain/*, /basemap/*
           TargetOriginId: tiler
           ViewerProtocolPolicy: https-only
@@ -103,6 +150,17 @@ Resources:
           ResponseHeadersPolicyId: !Ref TileCorsPolicy
           AllowedMethods: [GET, HEAD]
           Compress: false
+        CacheBehaviors:
+          # /footprints/*.json -> S3 origin. Objects are stored pre-gzipped with
+          # Content-Encoding: gzip and immutable Cache-Control, so the same
+          # path-only cache policy applies and Compress stays off.
+          - PathPattern: /footprints/*
+            TargetOriginId: static
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: !Ref TileCachePolicy
+            ResponseHeadersPolicyId: !Ref TileCorsPolicy
+            AllowedMethods: [GET, HEAD]
+            Compress: false
 
 Outputs:
   DistributionDomain:
