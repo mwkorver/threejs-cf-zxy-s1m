@@ -43,6 +43,30 @@ def test_s1m_encodes_elevation_losslessly():
     assert np.allclose(out[:10, :10], 0.0)  # void -> 0 m
 
 
+def test_s1m_tile_folds_pixel_nodata_into_mask():
+    # COGs that store nodata as a pixel value (declared in metadata, absent
+    # from the mask) must have those pixels masked per-asset BEFORE mosaicking:
+    # the mosaic then prefers other assets there, and a custom attribute would
+    # not survive mosaic_reader (it builds a new ImageData).
+    from rio_tiler.models import ImageData
+
+    data = np.full((1, 8, 8), 300.0, dtype=np.float32)
+    data[0, :2, :2] = -9999.0  # pixel-value nodata, NOT masked
+    img = ImageData(np.ma.MaskedArray(data, mask=np.zeros(data.shape, bool)))
+
+    src = MagicMock()
+    src.tile.return_value = img
+    src.dataset.nodata = -9999.0
+    src.__enter__.return_value = src
+    src.__exit__.return_value = False
+
+    with patch.object(terrain, "Reader", return_value=src), patch.object(terrain.rasterio, "Env"):
+        out = terrain._s1m_tile("s3://prd-tnm/x.tif", 0, 0, 15, 8)
+
+    assert out.array.mask[0, :2, :2].all()       # nodata pixels folded into mask
+    assert not out.array.mask[0, 2:, 2:].any()   # valid pixels untouched
+
+
 def test_s1m_voids_filled_from_usgs13():
     # S1M with a void corner; the usgs13 fill provides real elevation there so
     # the coverage edge blends instead of dropping to a 0 m cliff.
