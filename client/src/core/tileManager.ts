@@ -147,6 +147,9 @@ export class TileManager {
     }
 
     // 0. Compute dynamic base zoom from camera altitude
+    // Roots are the 3x3 grid that covers the visible area; they must stay
+    // coarse (large tiles) so the grid spans to the horizon. Fine detail is
+    // the LOD subdivision system's job — it refines roots down to maxZoom.
     const altitude = localCameraPos.z;
     let computedBaseZoom = 12;
     if (altitude > 1280000) {
@@ -187,10 +190,12 @@ export class TileManager {
     // 2. Determine center tile at base zoom level
     const centerTile = mercatorToTile(cx, cy, this.baseZoom);
 
-    // 3. Generate a 3x3 grid of root tiles around the camera center tile
+    // 3. Generate a 5x5 grid of root tiles around the camera center tile.
+    // 5x5 (not 3x3) so the horizon extends ~2 tiles in every direction;
+    // distant roots stay coarse (cheap), only near-camera tiles subdivide.
     const newRootKeys = new Set<string>();
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -2; dy <= 2; dy++) {
         const tx = centerTile.x + dx;
         const ty = centerTile.y + dy;
         // Simple range check for Web Mercator tile index boundaries
@@ -228,11 +233,11 @@ export class TileManager {
       }
     }
 
-    // 4. Evict root nodes that are too far from the camera (Chebyshev distance > 2)
+    // 4. Evict root nodes that are too far from the camera (Chebyshev distance > 3)
     for (const [key, node] of this.rootNodes.entries()) {
       const dx = Math.abs(node.tile.x - centerTile.x);
       const dy = Math.abs(node.tile.y - centerTile.y);
-      if (dx > 2 || dy > 2) {
+      if (dx > 3 || dy > 3) {
         this.pruneNode(node);
         this.rootNodes.delete(key);
       }
@@ -608,23 +613,23 @@ export class TileManager {
       // S1M (1m) = Cyan (0, 1, 1), USGS 1/3 Arc-Second (10m) = Magenta (1, 0, 1)
       const colorRGB = isS1M ? [0.0, 1.0, 1.0] : [1.0, 0.0, 1.0];
 
-      const localCoords: [number, number, number][] = [];
-      for (const [lon, lat] of ring) {
+      // Per-ring-point local coords, or null where no terrain is loaded (so
+      // segments there are skipped instead of floating over absent terrain).
+      const localCoords: ([number, number, number] | null)[] = ring.map(([lon, lat]) => {
+        const elevation = this.getElevationAt(...lonLatToMercator(lon, lat));
+        if (elevation === null) return null;
         const [mx, my] = lonLatToMercator(lon, lat);
-        const localX = mx - this.worldAnchor[0];
-        const localY = my - this.worldAnchor[1];
-
-        // Align Z with the terrain height under this coordinate to prevent perspective parallax shift,
-        // adding a small offset (+5.0m) to keep lines cleanly visible on top of the terrain mesh.
-        const elevation = this.getElevationAt(mx, my);
-        const localZ = elevation * this.verticalExaggeration + 5.0; 
-
-        localCoords.push([localX, localY, localZ]);
-      }
+        // Match the terrain's world Z exactly to kill perspective parallax:
+        // terrain z = elevation * mercatorScale(lat) * verticalExaggeration
+        // (terrainMesh scales h by mercatorScale, then mesh.scale.z = exag).
+        const localZ = elevation * mercatorScale(lat) * this.verticalExaggeration + 5.0;
+        return [mx - this.worldAnchor[0], my - this.worldAnchor[1], localZ];
+      });
 
       for (let i = 0; i < localCoords.length - 1; i++) {
         const p0 = localCoords[i]!;
         const p1 = localCoords[i + 1]!;
+        if (!p0 || !p1) continue; // skip segments touching a no-terrain vertex
         vertices.push(...p0, ...p1);
         colors.push(...colorRGB, ...colorRGB);
       }
@@ -669,10 +674,11 @@ export class TileManager {
   }
 
   /**
-   * Find the elevation at a given global Mercator coordinate (mx, my) by looking
-   * up the finest loaded tile that covers the coordinate.
+   * Elevation (true metres) at a global Mercator coordinate, from the finest
+   * loaded tile covering it, or null if no loaded tile covers it (so callers
+   * can skip drawing over absent terrain instead of floating at z=0).
    */
-  private getElevationAt(mx: number, my: number): number {
+  private getElevationAt(mx: number, my: number): number | null {
     let bestNode: TileNode | undefined;
     const checkNode = (node: TileNode) => {
       if (!node.loaded) return;
@@ -696,7 +702,7 @@ export class TileManager {
       checkNode(node);
     }
 
-    return (bestNode && bestNode.centerElevation !== undefined) ? bestNode.centerElevation : 0;
+    return bestNode && bestNode.centerElevation !== undefined ? bestNode.centerElevation : null;
   }
 
   private createMeshFromBundle(
@@ -982,7 +988,9 @@ export class TileManager {
         node.mesh.scale.z = val;
       }
       if (node.labelSprite && node.centerElevation !== undefined) {
-        node.labelSprite.position.z = node.centerElevation * val + 150;
+        const [cx, cy] = node.centerMercator;
+        const lat = mercatorToLonLat(cx, cy)[1];
+        node.labelSprite.position.z = node.centerElevation * mercatorScale(lat) * val + 150;
       }
       if (node.children) {
         for (const child of node.children) {
@@ -1235,10 +1243,14 @@ export class TileManager {
     const spriteH = spriteW * (96 / 384);
     sprite.scale.set(spriteW, spriteH, 1);
 
-    // Position sprite at tile center, offset by buffer above terrain height
-    const localX = (bounds.west + bounds.east) / 2 - this.worldAnchor[0];
-    const localY = (bounds.north + bounds.south) / 2 - this.worldAnchor[1];
-    const localZ = centerElevation * this.verticalExaggeration + 150;
+    // Position sprite at tile center, offset by buffer above terrain height.
+    const centerMx = (bounds.west + bounds.east) / 2;
+    const centerMy = (bounds.north + bounds.south) / 2;
+    const localX = centerMx - this.worldAnchor[0];
+    const localY = centerMy - this.worldAnchor[1];
+    // Match terrain world Z (elevation * mercatorScale(lat) * exaggeration).
+    const centerLat = mercatorToLonLat(centerMx, centerMy)[1];
+    const localZ = centerElevation * mercatorScale(centerLat) * this.verticalExaggeration + 150;
     sprite.position.set(localX, localY, localZ);
 
     return sprite;

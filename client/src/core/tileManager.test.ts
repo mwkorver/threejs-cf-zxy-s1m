@@ -69,12 +69,12 @@ function makeManager(
 // ---- Root node initialization ----
 
 describe("TileManager root initialization", () => {
-  it("creates a 3x3 grid of root nodes at base zoom", () => {
+  it("creates a 5x5 grid of root nodes at base zoom", () => {
     const tm = makeManager({ maxZoom: 12 });
     tm.update(new THREE.Vector3(0, 0, 1000));
 
     const { rootNodes } = internals(tm);
-    expect(rootNodes.size).toBe(9); // 3x3
+    expect(rootNodes.size).toBe(25); // 5x5
 
     // All roots are at base zoom
     for (const node of rootNodes.values()) {
@@ -82,10 +82,10 @@ describe("TileManager root initialization", () => {
     }
   });
 
-  it("active keys include all 9 root tiles", () => {
+  it("active keys include all 25 root tiles", () => {
     const tm = makeManager({ maxZoom: 12 });
     tm.update(new THREE.Vector3(0, 0, 1000));
-    expect(tm.getActiveKeys().size).toBe(9);
+    expect(tm.getActiveKeys().size).toBe(25);
   });
 
   it("all root nodes are initialized with correct bounds", () => {
@@ -119,28 +119,36 @@ describe("TileManager root initialization", () => {
 // ---- Eviction at distance ----
 
 describe("TileManager root eviction", () => {
-  it("evicts root nodes beyond Chebyshev distance 2 from center", () => {
+  it("retains roots within hysteresis band, evicts beyond it", () => {
+    // The 5x5 grid spans offsets -2..2 (radius 2). The eviction threshold is >3,
+    // giving 1 tile of hysteresis: roots at distance 3 survive as a buffer to
+    // prevent thrashing when the camera crosses tile boundaries. Roots at
+    // distance 4+ are evicted.
     const tm = makeManager({ maxZoom: 12 });
     tm.update(new THREE.Vector3(0, 0, 1000));
-
     const { rootNodes: before } = internals(tm);
+    expect(before.size).toBe(25);
     const keysBefore = new Set(before.keys());
 
-    // Move camera 3+ tiles away
-    tm.update(new THREE.Vector3(500000, 500000, 1000));
+    // Move 1 tile east: roots at distance 3 survive as hysteresis buffer
+    // → more than 25 total (25 new + 5 old at the far edge)
+    tm.update(new THREE.Vector3(10000, 0, 1000));
+    const { rootNodes: after1 } = internals(tm);
+    expect(after1.size).toBeGreaterThan(25); // hysteresis roots
+    expect(after1.size).toBeLessThan(50);    // not double
 
-    const { rootNodes: after } = internals(tm);
-    // Should still have exactly 9 roots around the new center
-    expect(after.size).toBe(9);
-    // Most old keys should be gone
-    let overlap = 0;
+    // Move very far (50+ tiles): all old roots well beyond threshold → evicted
+    tm.update(new THREE.Vector3(500000, 500000, 1000));
+    const { rootNodes: afterFar } = internals(tm);
+    expect(afterFar.size).toBe(25);
+    let surviving = 0;
     for (const key of keysBefore) {
-      if (after.has(key)) overlap++;
+      if (afterFar.has(key)) surviving++;
     }
-    expect(overlap).toBeLessThan(keysBefore.size);
+    expect(surviving).toBe(0);
   });
 
-  it("removes mesh from scene when node is evicted", () => {
+  it("removes mesh from scene when node is evicted", async () => {
     const scene = new THREE.Scene();
     const cache = new BundleCache(64 * 1024 * 1024);
     const tm = new TileManager(
@@ -149,6 +157,9 @@ describe("TileManager root eviction", () => {
     );
 
     tm.update(new THREE.Vector3(0, 0, 1000));
+    // Let the main-thread fallback microtasks settle so triggerLoad's .then()
+    // doesn't overwrite the injected mesh after we set it.
+    await new Promise((r) => setTimeout(r, 0));
 
     const { rootNodes } = internals(tm);
     // Force-add a mesh to one node to verify scene cleanup
@@ -163,7 +174,9 @@ describe("TileManager root eviction", () => {
     // Move far away to trigger eviction
     tm.update(new THREE.Vector3(2000000, 2000000, 1000));
 
-    // The old mesh should have been removed from the scene
+    // The old mesh should have been removed from the scene by pruneNode.
+    // Also verify the node's mesh was disposed and cleared.
+    expect(node.mesh).toBeUndefined();
     expect(scene.children).not.toContain(mesh);
   });
 });
@@ -221,10 +234,9 @@ describe("TileManager LOD subdivision", () => {
   });
 
   it("does not subdivide roots when camera is far from tiles (low lodFactor)", () => {
-    const tm = makeManager({ maxZoom: 14, lodFactor: 0.01 });
-    // Very low lodFactor: camera must be within 0.01 * tileWidth to subdivide.
-    // At altitude 100m with z12 tiles (~9.8km wide), 0.01 * 9800 = 98m.
-    // Camera at 100m altitude with horizontal offset means distance >> 98m.
+    const tm = makeManager({ maxZoom: 14, lodFactor: 0.001 });
+    // Extremely low lodFactor: camera must be within 0.001 * tileWidth to subdivide.
+    // At z12 (~9.8km tiles), 0.001 * 9800 = 9.8m. Camera at 100m altitude is far beyond.
     tm.update(new THREE.Vector3(0, 0, 100));
 
     const { rootNodes } = internals(tm);
@@ -255,14 +267,14 @@ describe("TileManager dynamic base zoom", () => {
     // z12 roots
     tm.update(new THREE.Vector3(0, 0, 1000));
     const { rootNodes: z12roots } = internals(tm);
-    expect(z12roots.size).toBe(9);
+    expect(z12roots.size).toBe(25);
 
     // Drop to z3 altitude — old roots should move to transitionNodes
     tm.update(new THREE.Vector3(0, 0, 1300000));
     const { rootNodes: z3roots, transitionNodes } = internals(tm);
 
     // New roots at z3
-    expect(z3roots.size).toBe(9);
+    expect(z3roots.size).toBe(25);
     for (const node of z3roots.values()) {
       expect(node.tile.z).toBe(3);
     }
@@ -303,7 +315,7 @@ describe("TileManager frustum culling", () => {
       [0, 0], 12, 12, 2.2, true, // cullTiles = true
     );
 
-    // Camera looking straight down at (0, 0, 1000) with narrow FOV
+    // Camera looking straight down at (0, 0, 3000) with narrow FOV
     const camera = new THREE.PerspectiveCamera(30, 1, 1, 10000);
     camera.position.set(0, 0, 1000);
     camera.lookAt(0, 0, 0);
@@ -319,14 +331,14 @@ describe("TileManager frustum culling", () => {
     for (const node of rootNodes.values()) {
       if (node.visible) visibleRoots++;
     }
-    expect(visibleRoots).toBeLessThan(9);
+    expect(visibleRoots).toBeLessThan(25);
     expect(visibleRoots).toBeGreaterThan(0);
   });
 
   it("does not cull when cullTiles is false", () => {
     const tm = makeManager({ maxZoom: 12, cullTiles: false });
     tm.update(new THREE.Vector3(0, 0, 1000));
-    expect(tm.getActiveKeys().size).toBe(9);
+    expect(tm.getActiveKeys().size).toBe(25);
   });
 
   it("retains children structure for culled nodes and only hides them when camera rotates away", () => {
@@ -337,7 +349,7 @@ describe("TileManager frustum culling", () => {
       [0, 0], 12, 14, 2.2, true, // baseZoom = 12, maxZoom = 14, cullTiles = true
     );
 
-    // 1. Position camera looking down at (0, 0, 1000) to force subdivision of roots
+    // 1. Position camera looking down at (0, 0, 3000) to force subdivision of roots
     const camera = new THREE.PerspectiveCamera(30, 1, 1, 10000);
     camera.position.set(0, 0, 1000);
     camera.lookAt(0, 0, 0);
@@ -388,7 +400,7 @@ describe("TileManager clear", () => {
     );
 
     tm.update(new THREE.Vector3(0, 0, 1000));
-    expect(tm.getActiveKeys().size).toBe(9);
+    expect(tm.getActiveKeys().size).toBe(25);
 
     tm.clear();
 
@@ -533,7 +545,8 @@ describe("TileManager setting changes", () => {
     tm.update(new THREE.Vector3(0, 0, 100));
 
     expect(tm.globalUniforms.localMinElev.value).toBe(100);
-    expect(tm.globalUniforms.localMaxElev.value).toBe(600);
+    // 25 roots: last node has maxElevation = 200 + 24*50 = 1400
+    expect(tm.globalUniforms.localMaxElev.value).toBe(1400);
   });
 });
 
@@ -583,12 +596,12 @@ describe("TileManager active keys", () => {
     const tm = makeManager({ maxZoom: 12 });
     tm.update(new THREE.Vector3(0, 0, 1000));
     const keys1 = new Set(tm.getActiveKeys());
-    expect(keys1.size).toBe(9);
+    expect(keys1.size).toBe(25);
 
-    // Move far enough to shift the 3x3 center
+    // Move far enough to shift the 5x5 center
     tm.update(new THREE.Vector3(2000000, 2000000, 1000));
     const keys2 = new Set(tm.getActiveKeys());
-    expect(keys2.size).toBe(9);
+    expect(keys2.size).toBe(25);
 
     // Completely different tiles at the new position (no overlap at z12)
     let overlap = 0;
