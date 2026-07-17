@@ -132,16 +132,22 @@ export async function loadFootprints(baseUrl: string, t: TileId): Promise<Footpr
   return res.json();
 }
 
-export async function loadViewportFootprints(
-  baseUrl: string,
-  west: number,
-  south: number,
-  east: number,
-  north: number
-): Promise<FootprintCollection> {
-  const res = await fetchTile(
-    `${baseUrl}/terrain-footprints/viewport/${west}/${south}/${east}/${north}`,
-    `viewport footprints`
-  );
-  return res.json();
+/**
+ * Fetch the two static, immutable footprint files (s1m + usgs13) and merge them.
+ *
+ * The whole CONUS dataset is ~360 KB gzipped, so rather than tile the footprints
+ * or run a per-viewport query on every camera move, the client pulls both files
+ * once and clips client-side. They're served straight from S3 via CloudFront
+ * (path-only, immutable) — see tiler/scripts/build_footprints.py. Kept as two
+ * files because usgs13 is static while s1m grows.
+ */
+export async function loadStaticFootprints(baseUrl: string): Promise<FootprintCollection> {
+  const [s1m, usgs13] = await Promise.all([
+    fetchTile(`${baseUrl}/footprints/s1m.json`, "footprints s1m").then((r) => r.json()),
+    fetchTile(`${baseUrl}/footprints/usgs13.json`, "footprints usgs13").then((r) => r.json()),
+  ]);
+  return {
+    type: "FeatureCollection",
+    features: [...(s1m.features ?? []), ...(usgs13.features ?? [])],
+  };
 }

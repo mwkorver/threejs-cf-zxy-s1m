@@ -48,6 +48,28 @@ aws cloudformation deploy --template-file infra/edge.yaml --stack-name flight-si
 Then tiles are public over unsigned HTTPS at
 `https://<DistributionDomain>/terrain/{z}/{x}/{y}.webp` etc.
 
+## Static footprints (`/footprints/*`)
+
+DEM footprints are scale-free vectors and the whole CONUS set is tiny
+(~360 KB gzipped), so they aren't tiled or queried per-viewport. Two static,
+immutable files are pre-genned and served straight from S3 (no Lambda) via the
+edge's `/footprints/*` behavior (S3 origin + OAC, `edge.yaml`):
+
+| File | Features | Gzipped | Rebuild |
+|---|---|---|---|
+| `footprints/s1m.json` | ~10.3k | ~327 KB | when new S1M COGs are indexed |
+| `footprints/usgs13.json` | ~1.4k | ~30 KB | ≈ never (static) |
+
+The client fetches both once and clips client-side. Regenerate + bust the CDN:
+
+```sh
+cd tiler
+# after new S1M coverage lands (rebuilds just s1m.json and invalidates it):
+.venv/bin/python scripts/build_footprints.py --which s1m --invalidate
+# first-time / full run:
+.venv/bin/python scripts/build_footprints.py --which both --invalidate
+```
+
 OAC gotcha (cost an afternoon): CloudFront OAC → an `AWS_IAM` Function URL needs
 the role granted **both** `lambda:InvokeFunctionUrl` **and** `lambda:InvokeFunction`
 for `cloudfront.amazonaws.com`. With only the former, every request 403s

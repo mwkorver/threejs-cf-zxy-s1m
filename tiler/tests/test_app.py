@@ -170,14 +170,8 @@ def test_footprints_out_of_range_404():
     assert client.get("/terrain-footprints/3/8/0.json").status_code == 404
 
 
-def test_footprints_viewport():
-    with patch.object(app_module, "get_s1m_resolver") as s1m, patch.object(app_module, "get_usgs13_resolver") as usgs13:
-        mock_geojson = {"type": "FeatureCollection", "features": []}
-        s1m.return_value.resolve_viewport_footprints.return_value = mock_geojson
-        usgs13.return_value.resolve_viewport_footprints.return_value = mock_geojson
-        r = client.get("/terrain-footprints/viewport/-74.5/40.0/-74.0/41.0")
-    assert r.status_code == 200
-    assert r.json() == mock_geojson
-    s1m.return_value.resolve_viewport_footprints.assert_called_once_with(-74.5, 40.0, -74.0, 41.0, dataset_type="s1m")
-    usgs13.return_value.resolve_viewport_footprints.assert_called_once_with(-74.5, 40.0, -74.0, 41.0, dataset_type="usgs13")
+def test_footprints_viewport_endpoint_removed():
+    # The bbox viewport endpoint was replaced by static /footprints/*.json files
+    # served from S3 (tiler/scripts/build_footprints.py); it must be gone.
+    assert client.get("/terrain-footprints/viewport/-74.5/40.0/-74.0/41.0").status_code == 404
 

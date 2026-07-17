@@ -27,7 +27,7 @@ vi.mock("./tileLoader", () => ({
   loadFootprints: vi.fn(() =>
     Promise.resolve({ type: "FeatureCollection", features: [] }),
   ),
-  loadViewportFootprints: vi.fn(() =>
+  loadStaticFootprints: vi.fn(() =>
     Promise.resolve({ type: "FeatureCollection", features: [] }),
   ),
 }));

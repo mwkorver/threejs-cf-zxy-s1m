@@ -8,7 +8,7 @@ import {
   mercatorScale,
   mercatorToLonLat
 } from "./mercator";
-import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM, loadViewportFootprints, type FootprintCollection } from "./tileLoader";
+import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM, loadStaticFootprints, type FootprintCollection, type FootprintFeature } from "./tileLoader";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import { TerrainShader } from "./terrainShader";
@@ -17,6 +17,31 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { TileWorkerPool } from "./tileWorkerPool";
 
+
+/** Does a footprint feature's bbox overlap the lon/lat query box? Cheap prune
+ *  for clipping the in-memory footprint set to the viewport (no geometry ops). */
+function featureIntersectsBBox(
+  feat: FootprintFeature,
+  west: number,
+  south: number,
+  east: number,
+  north: number
+): boolean {
+  let fw = Infinity, fe = -Infinity, fs = Infinity, fn = -Infinity;
+  const visit = (c: unknown): void => {
+    if (Array.isArray(c) && typeof c[0] === "number") {
+      const lon = c[0] as number, lat = c[1] as number;
+      if (lon < fw) fw = lon;
+      if (lon > fe) fe = lon;
+      if (lat < fs) fs = lat;
+      if (lat > fn) fn = lat;
+    } else if (Array.isArray(c)) {
+      for (const x of c) visit(x);
+    }
+  };
+  visit(feat.geometry.coordinates);
+  return !(fw > east || fe < west || fs > north || fn < south);
+}
 
 export interface TileNode {
   key: string;
@@ -72,10 +97,14 @@ export class TileManager {
   // Toggle for showing DEM source colors
   public showDemColors = false;
 
-  // Viewport footprint global mesh & cache box
+  // Footprint overlay. The full S1M+usgs13 set (~360 KB gzipped) is fetched once
+  // from the static /footprints/*.json files and held in memory; the mesh is
+  // (re)built by clipping that set to the current viewport, so panning/zooming
+  // never touches the network.
   private footprintsMesh?: LineSegments2;
   private footprintsMaterial?: LineMaterial;
   private loadedFootprintsBBox?: { west: number; south: number; east: number; north: number };
+  private allFootprints?: FootprintFeature[];
   private isFetchingFootprints = false;
   private visibleNodesList: TileNode[] = [];
   // Keep old root nodes rendering smoothly until new base level roots are fully loaded
@@ -1287,52 +1316,58 @@ export class TileManager {
       southLat >= this.loadedFootprintsBBox.south &&
       northLat <= this.loadedFootprintsBBox.north;
 
-    if (isContained || this.isFetchingFootprints) {
+    if (isContained) {
       return;
     }
 
-    // 3. Query viewport-based footprints with a 50% buffer padding
-    this.isFetchingFootprints = true;
+    // 3. Ensure the full footprint set is loaded (once). Until it arrives there's
+    //    nothing to clip; the next update() rebuilds when it's in memory.
+    if (!this.allFootprints) {
+      if (this.isFetchingFootprints) return;
+      this.isFetchingFootprints = true;
+      loadStaticFootprints(this.baseUrl)
+        .then((fc) => {
+          this.allFootprints = fc.features ?? [];
+          this.isFetchingFootprints = false;
+          this.loadedFootprintsBBox = undefined; // force a rebuild now that data exists
+        })
+        .catch((err) => {
+          console.warn(`Failed to load footprints: ${err.message}`);
+          this.isFetchingFootprints = false;
+        });
+      return;
+    }
+
+    // 4. Clip the in-memory set to the viewport (+50% buffer) and rebuild. This
+    //    is a pure in-memory pass — no network — so it's cheap to redo on pan.
     const dw = eastLon - westLon;
     const dh = northLat - southLat;
-
     const qWest = westLon - 0.5 * dw;
     const qEast = eastLon + 0.5 * dw;
     const qSouth = southLat - 0.5 * dh;
     const qNorth = northLat + 0.5 * dh;
 
-    loadViewportFootprints(this.baseUrl, qWest, qSouth, qEast, qNorth)
-      .then((footprints) => {
-        if (!this.showFootprints) {
-          this.isFetchingFootprints = false;
-          return;
-        }
+    const clipped = this.allFootprints.filter((f) =>
+      featureIntersectsBBox(f, qWest, qSouth, qEast, qNorth)
+    );
+    const lines = this.buildViewportFootprintsMesh({ type: "FeatureCollection", features: clipped });
 
-        const lines = this.buildViewportFootprintsMesh(footprints);
+    if (this.footprintsMesh) {
+      if (this.footprintsMesh.parent === this.scene) {
+        this.scene.remove(this.footprintsMesh);
+      }
+      this.footprintsMesh.geometry.dispose();
+      (this.footprintsMesh.material as THREE.Material).dispose();
+    }
 
-        // Replace the old mesh in the scene
-        if (this.footprintsMesh) {
-          if (this.footprintsMesh.parent === this.scene) {
-            this.scene.remove(this.footprintsMesh);
-          }
-          this.footprintsMesh.geometry.dispose();
-          (this.footprintsMesh.material as THREE.Material).dispose();
-        }
+    if (lines) {
+      this.footprintsMesh = lines;
+      this.scene.add(this.footprintsMesh);
+    } else {
+      this.footprintsMesh = undefined;
+    }
 
-        if (lines) {
-          this.footprintsMesh = lines;
-          this.scene.add(this.footprintsMesh);
-        } else {
-          this.footprintsMesh = undefined;
-        }
-
-        this.loadedFootprintsBBox = { west: qWest, south: qSouth, east: qEast, north: qNorth };
-        this.isFetchingFootprints = false;
-      })
-      .catch((err) => {
-        console.warn(`Failed to load viewport footprints: ${err.message}`);
-        this.isFetchingFootprints = false;
-      });
+    this.loadedFootprintsBBox = { west: qWest, south: qSouth, east: qEast, north: qNorth };
   }
 
   /**
