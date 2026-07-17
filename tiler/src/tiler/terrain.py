@@ -21,7 +21,7 @@ from rio_tiler.io import Reader
 from rio_tiler.mosaic import mosaic_reader
 from rio_tiler.utils import render
 
-from .encoding import encode_terrarium
+from .encoding import encode_terrarium, S1M_NODATA
 
 # elevation-tiles-prod is public and in us-east-1. Read it signed (Lambda role),
 # like every other bucket. A signed request still needs the endpoint AND signing
@@ -35,7 +35,20 @@ _FARFIELD_ENV = {"AWS_S3_ENDPOINT": "s3.us-east-1.amazonaws.com", "AWS_REGION": 
 def _s1m_tile(href: str, x: int, y: int, z: int, tilesize: int) -> "object":
     with rasterio.Env(AWS_REQUEST_PAYER="requester"), Reader(href) as src:
         # Band 1 only; keep native float elevation (no rescale/expression).
-        return src.tile(x, y, z, tilesize=tilesize, indexes=(1,))
+        img = src.tile(x, y, z, tilesize=tilesize, indexes=(1,))
+        # Some S1M COGs store nodata as a pixel value (e.g. -9999) without it
+        # being reflected in the mask. Fold declared nodata + the S1M sentinel
+        # into the mask HERE, per asset — mosaic_reader's pixel selection then
+        # prefers the next asset's real data over a nodata pixel, and the merged
+        # mask reaches _mosaic_elev (a custom attribute would not survive the
+        # mosaic, which builds a new ImageData).
+        data = img.array.data[0]
+        invalid = data == S1M_NODATA
+        if src.dataset.nodata is not None:
+            invalid |= data == src.dataset.nodata
+        if invalid.any():
+            img.array.mask = np.logical_or(img.array.mask, invalid[np.newaxis, :, :])
+        return img
 
 
 def _mosaic_elev(hrefs: list[str], z: int, x: int, y: int, tilesize: int) -> "np.ndarray | None":
@@ -51,8 +64,13 @@ def _mosaic_elev(hrefs: list[str], z: int, x: int, y: int, tilesize: int) -> "np
     except Exception:
         return None
     elev = img.data[0].astype(np.float64)
+    # Void detection: mask convention is 0=masked, 255=valid. Per-COG declared
+    # nodata and the S1M sentinel are already folded into this mask by
+    # _s1m_tile, so the mask is the single source of truth post-mosaic.
     if img.mask is not None:
         elev = np.where(img.mask[0] == 0, np.nan, elev)
+    # Belt-and-suspenders: the sentinel is always invalid even if unmasked.
+    elev = np.where(elev == S1M_NODATA, np.nan, elev)
     return elev
 
 
