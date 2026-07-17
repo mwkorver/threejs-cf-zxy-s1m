@@ -82,12 +82,18 @@ export class TileManager {
   private transitionNodes = new Map<string, TileNode>();
   private workerPool = new TileWorkerPool();
 
-  // Camera orientation properties cached between frames to avoid garbage collection inside LOD loop
-  private isPerspective = false;
-  private currentLookDir = new THREE.Vector3(0, 0, -1);
-  private currentTilt = 1.0;
-  private currentCameraPos = new THREE.Vector3();
+  // Screen-space-error projection factor: (viewportH/2) * cot(fovY/2), i.e.
+  // pixels per radian of vertical view angle. Recomputed each update() from
+  // the camera's projection matrix; fallback for cameraless (test) updates.
+  private sseFactor = 900;
   private activeVisibleKeys = new Set<string>();
+
+  /** Refine while a tile's geometric error projects to more than this many px. */
+  private get sseThreshold(): number {
+    // Derived from lodFactor so the existing constructor knob keeps meaning:
+    // higher lodFactor -> lower pixel tolerance -> more subdivision.
+    return 16 / this.lodFactor;
+  }
 
   public globalUniforms = {
     // matches the midday preset + HUD slider default (main.ts applyPreset)
@@ -126,24 +132,13 @@ export class TileManager {
    */
   update(localCameraPos: THREE.Vector3, camera?: THREE.Camera): void {
     this.visibleNodesList = [];
-    if (camera) {
-      this.isPerspective = true;
-      this.currentLookDir.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-      this.currentTilt = Math.abs(this.currentLookDir.z);
-      this.currentCameraPos.set(
-        camera.position.x + this.worldAnchor[0],
-        camera.position.y + this.worldAnchor[1],
-        camera.position.z
-      );
-    } else {
-      this.isPerspective = false;
-      this.currentLookDir.set(0, 0, -1);
-      this.currentTilt = 1.0;
-      this.currentCameraPos.set(
-        localCameraPos.x + this.worldAnchor[0],
-        localCameraPos.y + this.worldAnchor[1],
-        localCameraPos.z
-      );
+    // Projection factor for SSE: projectionMatrix[5] is cot(fovY/2) for a
+    // perspective camera, so (viewportH/2) * m[5] converts a (metres/metre)
+    // angular error into on-screen pixels.
+    if (camera && (camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
+      const cotHalfFov = camera.projectionMatrix.elements[5]!;
+      const viewportH = typeof window !== "undefined" ? window.innerHeight : 1024;
+      this.sseFactor = (viewportH / 2) * cotHalfFov;
     }
 
     // 0. Compute dynamic base zoom from camera altitude
@@ -348,52 +343,44 @@ export class TileManager {
     }
 
     const tileW = node.bounds.east - node.bounds.west;
-    const tileCenter = new THREE.Vector3(node.centerMercator[0], node.centerMercator[1], 0);
 
     const clampX = Math.max(node.bounds.west, Math.min(node.bounds.east, cameraPosGlobal.x));
     const clampY = Math.max(node.bounds.south, Math.min(node.bounds.north, cameraPosGlobal.y));
     const closestPoint = new THREE.Vector3(clampX, clampY, node.centerElevation ?? 0);
-    const dist = cameraPosGlobal.distanceTo(closestPoint);
+    const dist = Math.max(1, cameraPosGlobal.distanceTo(closestPoint));
 
     // Pin this key as active
     this.activeKeys.add(node.key);
 
-    let dynamicLodFactor = this.lodFactor;
-    if (this.isPerspective) {
-      // Compute direction vector from camera to tile center (global space)
-      const toTile = new THREE.Vector3()
-        .subVectors(tileCenter, this.currentCameraPos)
-        .normalize();
-
-      // Cosine of the angle between camera look direction and direction to tile
-      const cosAngle = Math.max(0.1, this.currentLookDir.dot(toTile));
-
-      // Perspective scale factor: tilt = 1 looking straight down, 0 at horizon
-      const perspectiveScale = (0.4 + 0.6 * this.currentTilt) * cosAngle;
-
-      // Distance-weighted transition: 0 (no LOD reduction) when camera is close,
-      // transitioning to 1 (full perspective optimization) for distant tiles.
-      const ratio = dist / tileW;
-      const weight = Math.max(0.0, Math.min(1.0, (ratio - 1.0) / 2.0));
-      const finalMultiplier = THREE.MathUtils.lerp(1.0, perspectiveScale, weight);
-
-      dynamicLodFactor = this.lodFactor * finalMultiplier;
-    }
-
-    const shouldSubdivide = dist < tileW * dynamicLodFactor && node.tile.z < this.maxZoom;
+    // Screen-space-error subdivision (Cesium-style): refine while the tile's
+    // geometric error projects to more than sseThreshold pixels on screen.
+    //   ssePx = (geometricError / dist) * (viewportH/2) * cot(fovY/2)
+    // Monotonic in distance, so LOD rings can NEVER invert: highest z is
+    // always nearest the camera, decreasing with distance. View direction
+    // deliberately plays no part here — an earlier angle-based heuristic
+    // collapsed the threshold for the tile directly below a horizon-facing
+    // camera, leaving coarse tiles near and fine tiles far. Direction is
+    // frustum culling's job (behind-camera tiles are culled, never loaded).
+    const geometricError = tileW / 64; // mesh cell size (512px / gridStep 8)
+    const ssePx = (geometricError / dist) * this.sseFactor;
+    const shouldSubdivide = ssePx > this.sseThreshold && node.tile.z < this.maxZoom;
 
     if (shouldSubdivide) {
       if (!node.children) {
         node.children = this.createChildren(node.tile);
       }
 
-      // Recursively update children. A frustum-culled child renders nothing
-      // on screen, so it must not block the parent->children swap — otherwise
-      // any partially-off-screen parent keeps its coarse mesh forever.
+      // Recursively update children. A child must not block the parent->child
+      // swap when it is frustum-culled (renders nothing) OR recursively
+      // covered (loaded, or subdivided with every descendant culled/loaded).
+      // Checking child.loaded alone deadlocks at the frustum edge: an in-view
+      // child that subdivides and has ALL its children culled hides itself
+      // without ever loading, so the parent would wait forever and a coarse
+      // tile would sit next to the camera permanently.
       let allChildrenLoaded = true;
       for (const child of node.children) {
         const culled = this.updateNode(child, cameraPosGlobal, frustum);
-        if (!culled && !child.loaded) {
+        if (!culled && !this.isCovered(child, frustum)) {
           allChildrenLoaded = false;
         }
       }
