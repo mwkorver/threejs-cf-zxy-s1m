@@ -122,11 +122,19 @@ def terrain_tile(
     body = None
     dem_source = "farfield"
     
-    # 1. Try high-resolution S1M terrain first if zoom is high enough
+    # 1. Try high-resolution S1M terrain first if zoom is high enough. S1M
+    #    coverage isn't seamless, so fill any void pixels at its edge with the
+    #    usgs13 DEM (real 10m elevation) instead of a 0m cliff. The fill resolver
+    #    is lazy -- only tiles that actually have voids pay the extra query/read.
     if z >= resolved_s1m_min_zoom:
         s1m_hrefs = get_s1m_resolver().resolve(z, x, y)
         if s1m_hrefs:
-            body = render_terrain_tile(s1m_hrefs, z, x, y, tilesize=settings.tile_size)
+            fill = (
+                (lambda: get_usgs13_resolver().resolve(z, x, y))
+                if z >= resolved_usgs_min_zoom
+                else None
+            )
+            body = render_terrain_tile(s1m_hrefs, z, x, y, tilesize=settings.tile_size, fill_hrefs=fill)
             if body is not None:
                 dem_source = "s1m"
 

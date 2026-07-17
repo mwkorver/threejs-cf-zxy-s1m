@@ -43,6 +43,45 @@ def test_s1m_encodes_elevation_losslessly():
     assert np.allclose(out[:10, :10], 0.0)  # void -> 0 m
 
 
+def test_s1m_voids_filled_from_usgs13():
+    # S1M with a void corner; the usgs13 fill provides real elevation there so
+    # the coverage edge blends instead of dropping to a 0 m cliff.
+    s1m = np.full((512, 512), 400.0)
+    s1m[:20, :20] = np.nan  # void patch (uncovered by S1M)
+    usgs = np.full((512, 512), 250.0)  # seamless usgs13 fill
+
+    seen = []
+
+    def fake_mosaic(hrefs, z, x, y, tilesize):
+        seen.append(hrefs)
+        return (s1m.copy() if len(seen) == 1 else usgs.copy())
+
+    with patch.object(terrain, "_mosaic_elev", side_effect=fake_mosaic):
+        body = terrain.render_terrain_tile(
+            ["s3://prd-tnm/s1m.tif"], 15, 0, 0, 512,
+            fill_hrefs=lambda: ["s3://prd-tnm/usgs13.tif"],
+        )
+
+    out = decode_terrarium(_decode_webp(body))
+    assert np.allclose(out[:20, :20], 250.0, atol=1 / 256)     # void filled from usgs13, not 0 m
+    assert np.allclose(out[100:, 100:], 400.0, atol=1 / 256)   # S1M kept where it has data
+    assert len(seen) == 2                                       # fill resolver invoked (voids present)
+
+
+def test_s1m_no_voids_skips_fill_resolver():
+    # A fully-covered S1M tile must not pay the usgs13 query/read.
+    s1m = np.full((512, 512), 400.0)  # no NaN
+    fill_called = []
+
+    with patch.object(terrain, "_mosaic_elev", side_effect=lambda *a: s1m.copy()):
+        terrain.render_terrain_tile(
+            ["s3://prd-tnm/s1m.tif"], 15, 0, 0, 512,
+            fill_hrefs=lambda: (fill_called.append(1), ["x"])[1],
+        )
+
+    assert fill_called == []  # lazy: no voids -> fill resolver never called
+
+
 def test_farfield_assembles_2x2_children():
     # Each child is a solid 256px Terrarium tile at a distinct elevation, so a
     # correct 2x2 layout produces four quadrants with those exact heights.
