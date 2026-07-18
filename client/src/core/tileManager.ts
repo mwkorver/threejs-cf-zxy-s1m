@@ -6,7 +6,8 @@ import {
   mercatorToTile,
   lonLatToMercator,
   mercatorScale,
-  mercatorToLonLat
+  mercatorToLonLat,
+  EARTH_CIRCUMFERENCE
 } from "./mercator";
 import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM, loadStaticFootprints, type FootprintCollection, type FootprintFeature } from "./tileLoader";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
@@ -190,8 +191,20 @@ export class TileManager {
     const cx = localCameraPos.x + this.worldAnchor[0];
     const cy = localCameraPos.y + this.worldAnchor[1];
 
-    // 2. Determine center tile at base zoom level
-    const centerTile = mercatorToTile(cx, cy, this.baseZoom);
+    // 2. Determine the root-grid center tile. Bias it forward along the
+    // horizontal component of the view direction: flying level, the frustum
+    // sees several tiles ahead and none behind, so a position-centered grid
+    // wastes half its budget on culled tiles behind the camera and the thin
+    // leading edge is outrun at flight speed. The horizontal component
+    // vanishes looking straight down, so top-down views keep a centered grid.
+    let gx = cx, gy = cy;
+    if (camera) {
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const tileW = EARTH_CIRCUMFERENCE / 2 ** this.baseZoom;
+      gx += fwd.x * 1.5 * tileW;
+      gy += fwd.y * 1.5 * tileW;
+    }
+    const centerTile = mercatorToTile(gx, gy, this.baseZoom);
 
     // 3. Generate a 5x5 grid of root tiles around the camera center tile.
     // 5x5 (not 3x3) so the horizon extends ~2 tiles in every direction;
