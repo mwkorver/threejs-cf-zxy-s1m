@@ -142,36 +142,12 @@ def test_basemap_out_of_range_404():
     assert client.get("/basemap/3/8/0.webp").status_code == 404  # x >= 2^3
 
 
-# --- footprints endpoint ---
+# --- footprints endpoints (removed) ---
 
-def test_footprints_nearfield():
-    with patch.object(app_module, "get_s1m_resolver") as s1m, patch.object(app_module, "get_usgs13_resolver") as usgs13:
-        mock_geojson = {"type": "FeatureCollection", "features": []}
-        s1m.return_value.resolve_footprints.return_value = mock_geojson
-        usgs13.return_value.resolve_footprints.return_value = mock_geojson
-        r = client.get("/terrain-footprints/16/4804/6172.json")
-    assert r.status_code == 200
-    assert r.json() == mock_geojson
-    s1m.return_value.resolve_footprints.assert_called_once_with(16, 4804, 6172, dataset_type="s1m")
-    usgs13.return_value.resolve_footprints.assert_called_once_with(16, 4804, 6172, dataset_type="usgs13")
-
-
-def test_footprints_farfield():
-    # z < min_zoom (11) returns empty FeatureCollection immediately without querying S1M
-    with patch.object(app_module, "get_s1m_resolver") as s1m, patch.object(app_module, "get_usgs13_resolver") as usgs13:
-        r = client.get("/terrain-footprints/8/75/96.json")
-    assert r.status_code == 200
-    assert r.json() == {"type": "FeatureCollection", "features": []}
-    s1m.assert_not_called()
-    usgs13.assert_not_called()
-
-
-def test_footprints_out_of_range_404():
-    assert client.get("/terrain-footprints/3/8/0.json").status_code == 404
-
-
-def test_footprints_viewport_endpoint_removed():
-    # The bbox viewport endpoint was replaced by static /footprints/*.json files
-    # served from S3 (tiler/scripts/build_footprints.py); it must be gone.
+def test_footprint_endpoints_removed():
+    # Both dynamic footprint endpoints were replaced by static
+    # /footprints/{s1m,usgs13}.json files served from S3 via CloudFront
+    # (tiler/scripts/build_footprints.py); the tiler must not serve them.
+    assert client.get("/terrain-footprints/16/4804/6172.json").status_code == 404
     assert client.get("/terrain-footprints/viewport/-74.5/40.0/-74.0/41.0").status_code == 404
 

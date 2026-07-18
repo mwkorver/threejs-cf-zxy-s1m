@@ -124,14 +124,6 @@ export interface FootprintCollection {
   features: FootprintFeature[];
 }
 
-export async function loadFootprints(baseUrl: string, t: TileId): Promise<FootprintCollection> {
-  const res = await fetchTile(
-    `${baseUrl}/terrain-footprints/${t.z}/${t.x}/${t.y}.json`,
-    `footprints ${t.z}/${t.x}/${t.y}`
-  );
-  return res.json();
-}
-
 /**
  * Fetch the two static, immutable footprint files (s1m + usgs13) and merge them.
  *

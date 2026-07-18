@@ -63,7 +63,8 @@ def _round_coords(coords):
 
 def build_geojson(index_path: str, dataset_type: str, region: str, conus_only: bool = True) -> dict:
     """Read a DEM index (Albers EPSG:6350), reproject to WGS84, return a GeoJSON
-    FeatureCollection whose feature properties match resolve_footprints()."""
+    FeatureCollection with the {dataset, href, type} properties the client
+    overlay colors/filters by."""
     from pyproj import Transformer
     from shapely import from_wkb
     from shapely.geometry import mapping
