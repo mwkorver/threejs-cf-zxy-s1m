@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as THREE from "three";
 import { TileManager, type TileNode } from "./tileManager";
 import { BundleCache, type Bundle } from "./bundleCache";
+import { mercatorToTile } from "./mercator";
 
 // Suppress noisy console output from tile loading warnings
 let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -110,6 +111,41 @@ describe("TileManager root initialization", () => {
       // and triggerLoad sets node.loading = true before the async resolution.
       // The node will be loaded on the next microtask tick.
     }
+  });
+});
+
+// ---- Forward grid bias ----
+
+describe("TileManager forward grid bias", () => {
+  // Level flight looking north: forward (0,0,-1) rotated to (0,+1,0) in the
+  // Z-up Mercator world. North = decreasing tile row.
+  const northCamera = () => {
+    const cam = new THREE.PerspectiveCamera(60, 1, 1, 1e8);
+    cam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0));
+    return cam;
+  };
+
+  it("shifts the root grid ahead of a level camera instead of centering on it", () => {
+    const tm = makeManager({ maxZoom: 12 });
+    tm.update(new THREE.Vector3(100, 100, 1000), northCamera());
+
+    const camTile = mercatorToTile(100, 100, 12);
+    const rows = [...internals(tm).rootNodes.values()].map((n) => n.tile.y);
+    // The 5-row window must lead the camera: reach beyond the unbiased front
+    // edge (camTile.y - 2) and give up the deep trailing edge (camTile.y + 2).
+    expect(Math.min(...rows)).toBeLessThan(camTile.y - 2);
+    expect(Math.max(...rows)).toBeLessThan(camTile.y + 2);
+  });
+
+  it("keeps the grid centered when looking straight down", () => {
+    const tm = makeManager({ maxZoom: 12 });
+    const cam = new THREE.PerspectiveCamera(60, 1, 1, 1e8); // default: looking down -Z
+    tm.update(new THREE.Vector3(100, 100, 1000), cam);
+
+    const camTile = mercatorToTile(100, 100, 12);
+    const rows = [...internals(tm).rootNodes.values()].map((n) => n.tile.y);
+    expect(Math.min(...rows)).toBe(camTile.y - 2);
+    expect(Math.max(...rows)).toBe(camTile.y + 2);
   });
 });
 
