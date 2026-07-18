@@ -8,7 +8,6 @@ from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from .basemap import BASEMAP_MAX_ZOOM, TransientBasemapError, render_basemap_tile
 from .imagery import render_imagery_tile
@@ -162,37 +161,6 @@ def terrain_tile(
             "Access-Control-Expose-Headers": "X-DEM-Source"
         }
     )
-
-
-@app.get("/terrain-footprints/{z}/{x}/{y}.json")
-def terrain_footprints(z: int, x: int, y: int) -> JSONResponse:
-    """COG footprints intersecting tile z/x/y as GeoJSON. Returns S1M (1m) boundaries if active, otherwise falls back to USGS 1/3 arc-second (10m) boundaries."""
-    n = 2**z
-    if not (0 <= z and 0 <= x < n and 0 <= y < n):
-        raise HTTPException(404, "tile out of range")
-
-    features = []
-    # 1. Try S1M (1m) footprints first if zoom is high enough
-    if z >= settings.s1m_min_zoom:
-        try:
-            s1m_fc = get_s1m_resolver().resolve_footprints(z, x, y, dataset_type="s1m")
-            features = s1m_fc.get("features", [])
-        except Exception:
-            pass
-
-    # 2. If no S1M footprints found, check and return USGS 1/3 Arc-Second footprints if zoom is high enough
-    if not features and z >= settings.usgs_min_zoom:
-        try:
-            usgs13_fc = get_usgs13_resolver().resolve_footprints(z, x, y, dataset_type="usgs13")
-            features = usgs13_fc.get("features", [])
-        except Exception:
-            pass
-
-    fc = {
-        "type": "FeatureCollection",
-        "features": features
-    }
-    return JSONResponse(fc, headers={"Cache-Control": IMMUTABLE})
 
 
 @app.get("/healthz")

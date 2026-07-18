@@ -823,17 +823,22 @@ window.addEventListener("wheel", (e) => {
   if (hud.contains(e.target as Node)) return;
   e.preventDefault();
 
+  // Exponential in deltaY (MapLibre-style), not a flat step per event: one
+  // mouse notch (deltaY~100) ≈ ×1.2, a trackpad's small deltas zoom smoothly,
+  // and fast flicks/coalesced events compound (capped ~×2 per event) instead
+  // of collapsing to a single notch — street level to CONUS in a few flicks.
+  const factor = Math.exp(THREE.MathUtils.clamp(e.deltaY, -400, 400) * 0.0018);
+
   const target = pickGround(e.clientX, e.clientY);
   if (target) {
-    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15; // out : in
     const off = tmpV.copy(camera.position).sub(target).multiplyScalar(factor);
     const dist = off.length();
     if (dist > 20 && dist < 8_000_000) camera.position.copy(target).add(off);
   } else {
     // Miss (aiming at sky): fall back to dolly along the view axis.
-    const zoomScale = Math.max(50, camera.position.z) * 0.12;
+    const step = Math.max(50, camera.position.z) * (factor - 1);
     const fwd = tmpV.set(0, 0, -1).applyQuaternion(camera.quaternion);
-    camera.position.addScaledVector(fwd, e.deltaY > 0 ? -zoomScale : zoomScale);
+    camera.position.addScaledVector(fwd, -step);
   }
 }, { passive: false });
 
