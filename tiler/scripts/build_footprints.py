@@ -43,6 +43,12 @@ USGS13_INDEX = Path(__file__).resolve().parent.parent / "src" / "tiler" / "data"
 
 COORD_DP = 5  # ~1 m at these latitudes; footprint edges don't need more.
 
+# The app is CONUS-only (NAIP imagery doesn't cover Alaska, and the DEM indexes
+# carry AK/HI/Pacific-territory tiles with no matching imagery). Drop footprints
+# whose centroid falls outside this box so the overlay isn't cluttered with
+# unreachable coverage. West, South, East, North.
+CONUS_BBOX = (-125.0, 24.0, -66.5, 49.5)
+
 
 def _bucket_from_lake_path(lake_path: str) -> str:
     # "s3://<bucket>/manifest-index" -> "<bucket>"
@@ -55,7 +61,7 @@ def _round_coords(coords):
     return [_round_coords(c) for c in coords]
 
 
-def build_geojson(index_path: str, dataset_type: str, region: str) -> dict:
+def build_geojson(index_path: str, dataset_type: str, region: str, conus_only: bool = True) -> dict:
     """Read a DEM index (Albers EPSG:6350), reproject to WGS84, return a GeoJSON
     FeatureCollection whose feature properties match resolve_footprints()."""
     from pyproj import Transformer
@@ -64,6 +70,7 @@ def build_geojson(index_path: str, dataset_type: str, region: str) -> dict:
     from shapely.ops import transform as shp_transform
 
     to_latlon = Transformer.from_crs(S1M_EPSG, 4326, always_xy=True).transform
+    w, s, e, n = CONUS_BBOX
 
     con = duck.connect(region)
     escaped = index_path.replace("'", "''")
@@ -72,8 +79,14 @@ def build_geojson(index_path: str, dataset_type: str, region: str) -> dict:
     ).fetchall()
 
     features = []
+    dropped = 0
     for dataset, wkb in rows:
         geom = shp_transform(to_latlon, from_wkb(bytes(wkb)))
+        if conus_only:
+            c = geom.centroid
+            if not (w <= c.x <= e and s <= c.y <= n):
+                dropped += 1
+                continue
         gj = mapping(geom)
         gj["coordinates"] = _round_coords(gj["coordinates"])
         features.append({
@@ -85,6 +98,8 @@ def build_geojson(index_path: str, dataset_type: str, region: str) -> dict:
             },
             "geometry": gj,
         })
+    if conus_only and dropped:
+        print(f"  dropped {dropped} non-CONUS footprints (no NAIP imagery)")
     return {"type": "FeatureCollection", "features": features}
 
 
@@ -137,6 +152,8 @@ def main() -> None:
     ap.add_argument("--invalidate", action="store_true", help="create a CloudFront invalidation for the uploaded paths")
     ap.add_argument("--distribution-id", default=os.environ.get("EDGE_DISTRIBUTION_ID", "E3LR90GGS3JLHY"))
     ap.add_argument("--dry-run", action="store_true", help="build + report sizes without uploading")
+    ap.add_argument("--no-conus", dest="conus_only", action="store_false",
+                    help="keep footprints outside CONUS (default: drop them — no NAIP there)")
     args = ap.parse_args()
 
     bucket = args.bucket or _bucket_from_lake_path(settings.lake_path)
@@ -151,7 +168,7 @@ def main() -> None:
     for name in targets:
         index_path, dtype = sources[name]
         print(f"[{name}] reading {index_path}")
-        fc = build_geojson(index_path, dtype, settings.aws_region)
+        fc = build_geojson(index_path, dtype, settings.aws_region, conus_only=args.conus_only)
         key = f"{args.prefix}/{name}.json"
         upload(bucket, key, fc, args.dry_run)
         invalidation_paths.append(f"/{key}")

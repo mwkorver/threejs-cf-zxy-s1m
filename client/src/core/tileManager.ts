@@ -18,31 +18,6 @@ import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js
 import { TileWorkerPool } from "./tileWorkerPool";
 
 
-/** Does a footprint feature's bbox overlap the lon/lat query box? Cheap prune
- *  for clipping the in-memory footprint set to the viewport (no geometry ops). */
-function featureIntersectsBBox(
-  feat: FootprintFeature,
-  west: number,
-  south: number,
-  east: number,
-  north: number
-): boolean {
-  let fw = Infinity, fe = -Infinity, fs = Infinity, fn = -Infinity;
-  const visit = (c: unknown): void => {
-    if (Array.isArray(c) && typeof c[0] === "number") {
-      const lon = c[0] as number, lat = c[1] as number;
-      if (lon < fw) fw = lon;
-      if (lon > fe) fe = lon;
-      if (lat < fs) fs = lat;
-      if (lat > fn) fn = lat;
-    } else if (Array.isArray(c)) {
-      for (const x of c) visit(x);
-    }
-  };
-  visit(feat.geometry.coordinates);
-  return !(fw > east || fe < west || fs > north || fn < south);
-}
-
 export interface TileNode {
   key: string;
   tile: TileId;
@@ -103,9 +78,13 @@ export class TileManager {
   // never touches the network.
   private footprintsMesh?: LineSegments2;
   private footprintsMaterial?: LineMaterial;
-  private loadedFootprintsBBox?: { west: number; south: number; east: number; north: number };
   private allFootprints?: FootprintFeature[];
   private isFetchingFootprints = false;
+  // The overlay is rebuilt only when terrain draping changes; this signature
+  // (base zoom + loaded-node count) is compared each update to decide, and a
+  // time throttle caps rebuilds while terrain streams in. "" forces a rebuild.
+  private footprintsDrapeSig = "";
+  private lastFootprintsBuildMs = 0;
   private visibleNodesList: TileNode[] = [];
   // Keep old root nodes rendering smoothly until new base level roots are fully loaded
   private transitionNodes = new Map<string, TileNode>();
@@ -629,24 +608,35 @@ export class TileManager {
       // S1M (1m) = Cyan (0, 1, 1), USGS 1/3 Arc-Second (10m) = Magenta (1, 0, 1)
       const colorRGB = isS1M ? [0.0, 1.0, 1.0] : [1.0, 0.0, 1.0];
 
-      // Per-ring-point local coords, or null where no terrain is loaded (so
-      // segments there are skipped instead of floating over absent terrain).
-      const localCoords: ([number, number, number] | null)[] = ring.map(([lon, lat]) => {
-        const elevation = this.getElevationAt(...lonLatToMercator(lon, lat));
-        if (elevation === null) return null;
+      // Per-vertex anchor-relative XY, latitude, and terrain elevation (null
+      // where no terrain is loaded under the point — e.g. anywhere at a CONUS
+      // overview, where nothing below terrainMinZoom is fetched).
+      const pts = ring.map(([lon, lat]) => {
         const [mx, my] = lonLatToMercator(lon, lat);
-        // Match the terrain's world Z exactly to kill perspective parallax:
-        // terrain z = elevation * mercatorScale(lat) * verticalExaggeration
-        // (terrainMesh scales h by mercatorScale, then mesh.scale.z = exag).
-        const localZ = elevation * mercatorScale(lat) * this.verticalExaggeration + 5.0;
-        return [mx - this.worldAnchor[0], my - this.worldAnchor[1], localZ];
+        return {
+          x: mx - this.worldAnchor[0],
+          y: my - this.worldAnchor[1],
+          lat,
+          elev: this.getElevationAt(mx, my) as number | null,
+        };
       });
 
-      for (let i = 0; i < localCoords.length - 1; i++) {
-        const p0 = localCoords[i]!;
-        const p1 = localCoords[i + 1]!;
-        if (!p0 || !p1) continue; // skip segments touching a no-terrain vertex
-        vertices.push(...p0, ...p1);
+      // Match the terrain's world Z exactly to kill perspective parallax:
+      // terrain z = elevation * mercatorScale(lat) * verticalExaggeration.
+      const zOf = (elev: number, lat: number) =>
+        elev * mercatorScale(lat) * this.verticalExaggeration + 5.0;
+
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i]!, b = pts[i + 1]!;
+        // Resolve missing elevations so every footprint draws: a fully-unloaded
+        // segment (overview) sits flat at sea level; a mixed segment lifts the
+        // null end to its neighbour so the line never plunges to 0 at a loaded-
+        // terrain boundary — the "curtain" that skipping used to avoid (307f109).
+        let ea = a.elev, eb = b.elev;
+        if (ea === null && eb === null) { ea = 0; eb = 0; }
+        else if (ea === null) ea = eb;
+        else if (eb === null) eb = ea;
+        vertices.push(a.x, a.y, zOf(ea!, a.lat), b.x, b.y, zOf(eb!, b.lat));
         colors.push(...colorRGB, ...colorRGB);
       }
     };
@@ -1017,8 +1007,8 @@ export class TileManager {
     for (const node of this.rootNodes.values()) {
       updateScale(node);
     }
-    // Clear footprints cache BBox to force them to rebuild at the new Z scale on next update
-    this.loadedFootprintsBBox = undefined;
+    // Force footprints to rebuild at the new Z scale on next update.
+    this.footprintsDrapeSig = "";
   }
 
   /**
@@ -1034,7 +1024,7 @@ export class TileManager {
       (this.footprintsMesh.material as THREE.Material).dispose();
       this.footprintsMesh = undefined;
       this.footprintsMaterial = undefined;
-      this.loadedFootprintsBBox = undefined;
+      this.footprintsDrapeSig = "";
     }
   }
 
@@ -1272,56 +1262,23 @@ export class TileManager {
     return sprite;
   }
 
+  private countLoadedNodes(): number {
+    let n = 0;
+    const walk = (node: TileNode) => {
+      if (node.loaded) n++;
+      if (node.children) for (const c of node.children) walk(c);
+    };
+    for (const node of this.rootNodes.values()) walk(node);
+    for (const node of this.transitionNodes.values()) walk(node);
+    return n;
+  }
+
   private updateViewportFootprints(): void {
     if (!this.showFootprints) {
       return;
     }
 
-    // 1. Compute current visible bounding box by unioning bounds of active visible nodes
-    let west = Infinity, east = -Infinity, south = Infinity, north = -Infinity;
-    let hasVisible = false;
-
-    const collectBounds = (node: TileNode) => {
-      if (node.visible && node.loaded) {
-        west = Math.min(west, node.bounds.west);
-        east = Math.max(east, node.bounds.east);
-        south = Math.min(south, node.bounds.south);
-        north = Math.max(north, node.bounds.north);
-        hasVisible = true;
-      }
-      if (node.children) {
-        for (const child of node.children) {
-          collectBounds(child);
-        }
-      }
-    };
-
-    for (const node of this.rootNodes.values()) {
-      collectBounds(node);
-    }
-
-    if (!hasVisible) {
-      return;
-    }
-
-    // Convert bounds to lon/lat geographic coordinates
-    const [westLon, southLat] = mercatorToLonLat(west, south);
-    const [eastLon, northLat] = mercatorToLonLat(east, north);
-
-    // 2. Check if the current visible bbox is fully contained in loadedFootprintsBBox
-    const isContained =
-      this.loadedFootprintsBBox &&
-      westLon >= this.loadedFootprintsBBox.west &&
-      eastLon <= this.loadedFootprintsBBox.east &&
-      southLat >= this.loadedFootprintsBBox.south &&
-      northLat <= this.loadedFootprintsBBox.north;
-
-    if (isContained) {
-      return;
-    }
-
-    // 3. Ensure the full footprint set is loaded (once). Until it arrives there's
-    //    nothing to clip; the next update() rebuilds when it's in memory.
+    // 1. Fetch the full S1M+usgs13 set once (~360 KB gzipped, ~12k features).
     if (!this.allFootprints) {
       if (this.isFetchingFootprints) return;
       this.isFetchingFootprints = true;
@@ -1329,7 +1286,7 @@ export class TileManager {
         .then((fc) => {
           this.allFootprints = fc.features ?? [];
           this.isFetchingFootprints = false;
-          this.loadedFootprintsBBox = undefined; // force a rebuild now that data exists
+          this.footprintsDrapeSig = ""; // force a build now that data exists
         })
         .catch((err) => {
           console.warn(`Failed to load footprints: ${err.message}`);
@@ -1338,19 +1295,21 @@ export class TileManager {
       return;
     }
 
-    // 4. Clip the in-memory set to the viewport (+50% buffer) and rebuild. This
-    //    is a pure in-memory pass — no network — so it's cheap to redo on pan.
-    const dw = eastLon - westLon;
-    const dh = northLat - southLat;
-    const qWest = westLon - 0.5 * dw;
-    const qEast = eastLon + 0.5 * dw;
-    const qSouth = southLat - 0.5 * dh;
-    const qNorth = northLat + 0.5 * dh;
+    // 2. Render the WHOLE set (one draw call, ~28 ms to build) rather than clip
+    //    to loaded terrain — that clip is what hid footprints outside the small
+    //    loaded area, e.g. all of CONUS at overview. The mesh only needs
+    //    rebuilding when terrain draping changes, so gate on a cheap signature
+    //    (base zoom + loaded-node count) plus a time throttle so streaming
+    //    terrain doesn't rebuild every frame.
+    const sig = `${this.baseZoom}:${this.countLoadedNodes()}`;
+    if (this.footprintsMesh && sig === this.footprintsDrapeSig) return;
+    const now = performance.now();
+    if (this.footprintsMesh && now - this.lastFootprintsBuildMs < 300) return;
 
-    const clipped = this.allFootprints.filter((f) =>
-      featureIntersectsBBox(f, qWest, qSouth, qEast, qNorth)
-    );
-    const lines = this.buildViewportFootprintsMesh({ type: "FeatureCollection", features: clipped });
+    const lines = this.buildViewportFootprintsMesh({
+      type: "FeatureCollection",
+      features: this.allFootprints,
+    });
 
     if (this.footprintsMesh) {
       if (this.footprintsMesh.parent === this.scene) {
@@ -1360,14 +1319,11 @@ export class TileManager {
       (this.footprintsMesh.material as THREE.Material).dispose();
     }
 
-    if (lines) {
-      this.footprintsMesh = lines;
-      this.scene.add(this.footprintsMesh);
-    } else {
-      this.footprintsMesh = undefined;
-    }
+    this.footprintsMesh = lines ?? undefined;
+    if (lines) this.scene.add(lines);
 
-    this.loadedFootprintsBBox = { west: qWest, south: qSouth, east: qEast, north: qNorth };
+    this.footprintsDrapeSig = sig;
+    this.lastFootprintsBuildMs = now;
   }
 
   /**
@@ -1393,6 +1349,6 @@ export class TileManager {
       (this.footprintsMesh.material as THREE.Material).dispose();
       this.footprintsMesh = undefined;
     }
-    this.loadedFootprintsBBox = undefined;
+    this.footprintsDrapeSig = "";
   }
 }
