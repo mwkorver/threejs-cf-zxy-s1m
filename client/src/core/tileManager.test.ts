@@ -149,6 +149,45 @@ describe("TileManager forward grid bias", () => {
   });
 });
 
+// ---- Relative-height vertical exaggeration ----
+
+describe("TileManager relative-height exaggeration", () => {
+  it("freezes the ground under the camera and offsets meshes so it holds still", async () => {
+    const tm = makeManager({ maxZoom: 12 });
+    tm.update(new THREE.Vector3(0, 0, 1000)); // stashes camera position
+    await new Promise((r) => setTimeout(r, 0));
+
+    const node = internals(tm).rootNodes.values().next().value!;
+    node.mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
+
+    (tm as any).getElevationAt = () => 500; // ground under camera = 500 m
+    tm.setVerticalExaggeration(3);
+
+    expect((tm as any).exagReference).toBe(500);
+    expect(node.mesh!.scale.z).toBe(3);
+    // Affine map z' = (h-500)*3+500: a sea-level vertex (local z=0) must land
+    // at -1000 m (mercatorScale ~= 1 at the equator), so ground at 500 m stays
+    // at 500: 500(local)*3 + (-1000) = 500.
+    expect(node.mesh!.position.z).toBeCloseTo(-1000, 0);
+  });
+
+  it("keeps classic sea-level anchoring while no reference has been frozen", async () => {
+    const tm = makeManager({ maxZoom: 12 });
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const node = internals(tm).rootNodes.values().next().value!;
+    node.mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
+
+    (tm as any).getElevationAt = () => null; // nothing loaded under camera
+    tm.setVerticalExaggeration(3);
+
+    expect((tm as any).exagReference).toBe(0);
+    expect(node.mesh!.scale.z).toBe(3);
+    expect(node.mesh!.position.z).toBe(0); // exagZ(0) with ref 0 stays 0
+  });
+});
+
 // ---- Eviction at distance ----
 
 describe("TileManager root eviction", () => {
