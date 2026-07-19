@@ -58,6 +58,9 @@ export class TileManager {
   public showFootprints = false;
   // Toggle for Z/X/Y tile labels visibility
   public showLabels = false;
+  // Toggle for baking an imagery-source letter into each tile texture:
+  // U = USDA ImageServer basemap stitch, N = NAIP COG mosaic (DuckDB lookup).
+  public showSourceLabels = false;
   // Dynamic scaling factor for Z/X/Y labels
   public labelScale = 1.0;
   // Imagery zoom threshold: tiles at z <= this load from the USDA NAIP
@@ -574,7 +577,29 @@ export class TileManager {
         // Create texture if imagery loaded successfully
         let texture: THREE.Texture | undefined;
         if (imageBitmap) {
-          texture = new THREE.CanvasTexture(imageBitmap as unknown as HTMLCanvasElement);
+          const brand = this.showSourceLabels ? this.imagerySourceLetter(node.tile.z) : null;
+          if (brand) {
+            // Bake the source letter into the tile's SE corner: canvas row 0 is
+            // the tile's north edge, so canvas bottom-right = SE on screen.
+            const c = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+            const ctx = c.getContext("2d")!;
+            ctx.drawImage(imageBitmap, 0, 0);
+            ctx.font = "bold 100px sans-serif";
+            ctx.textAlign = "right";
+            ctx.lineWidth = 8;
+            ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+            ctx.fillStyle = brand.color;
+            ctx.strokeText(brand.ch, c.width - 14, c.height - 14);
+            ctx.fillText(brand.ch, c.width - 14, c.height - 14);
+            imageBitmap.close();
+            // Hand back an ImageBitmap, not the canvas: WebGL ignores flipY for
+            // ImageBitmap uploads but honors it for canvas uploads, so texturing
+            // the canvas directly would render this tile vertically flipped
+            // relative to every unbranded tile (and mirror the letter).
+            texture = new THREE.CanvasTexture(c.transferToImageBitmap() as unknown as HTMLCanvasElement);
+          } else {
+            texture = new THREE.CanvasTexture(imageBitmap as unknown as HTMLCanvasElement);
+          }
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.anisotropy = 4;
         }
@@ -1123,6 +1148,30 @@ export class TileManager {
   setS1mMinZoom(z: number): void {
     if (z === this.s1mMinZoom) return;
     this.s1mMinZoom = z;
+    this.bundleCache.clear();
+    this.clear(); // reset nodes; next update() rebuilds + refetches
+  }
+
+  /**
+   * Which source letter a tile's imagery gets: the worker routes z <=
+   * externalImageryMaxZoom to the USDA basemap stitch (U, yellow) and deeper
+   * zooms to the NAIP COG mosaic resolved via DuckDB (N, cyan). OSM gets none.
+   */
+  private imagerySourceLetter(z: number): { ch: string; color: string } | null {
+    if (this.imagerySource === "osm") return null;
+    return z <= this.externalImageryMaxZoom
+      ? { ch: "U", color: "#ffd400" }
+      : { ch: "N", color: "#00e5ff" };
+  }
+
+  /**
+   * Toggle the baked-in imagery source letters. The letters live in the tile
+   * textures, so flipping requires a refetch (same pattern as the DEM-band
+   * sliders); tiles are CDN-warm so the reload is cheap.
+   */
+  setShowSourceLabels(show: boolean): void {
+    if (show === this.showSourceLabels) return;
+    this.showSourceLabels = show;
     this.bundleCache.clear();
     this.clear(); // reset nodes; next update() rebuilds + refetches
   }
