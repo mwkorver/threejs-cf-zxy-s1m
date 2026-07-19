@@ -1157,12 +1157,14 @@ export class TileManager {
   }
 
   /**
-   * Toggle the baked-in imagery source letters. The letters live in the tile
-   * textures, so flipping requires a refetch (same pattern as the DEM-band
-   * sliders); tiles are CDN-warm so the reload is cheap.
+   * Toggle both baked-in tile annotations at once — "z/x/y - N". They share
+   * one compositing pass into the tile texture, so they're set together and
+   * cost a single cache clear + refetch (tiles are CDN-warm, so it's cheap).
+   * Setting them separately would run that refetch twice.
    */
-  setShowSourceLabels(show: boolean): void {
-    if (show === this.showSourceLabels) return;
+  setShowTileLabels(show: boolean): void {
+    if (show === this.showLabels && show === this.showSourceLabels) return;
+    this.showLabels = show;
     this.showSourceLabels = show;
     this.bundleCache.clear();
     this.clear(); // reset nodes; next update() rebuilds + refetches
@@ -1192,18 +1194,6 @@ export class TileManager {
 
   setUseLocalHypso(useLocal: boolean): void {
     this.globalUniforms.useLocalHypso.value = useLocal ? 1.0 : 0.0;
-  }
-
-  /**
-   * Toggle the baked-in Z/X/Y tile labels. Like the source letters, labels
-   * live in the tile textures, so flipping requires a cache clear + refetch
-   * (tiles are CDN-warm, so the reload is cheap).
-   */
-  setShowLabels(show: boolean): void {
-    if (show === this.showLabels) return;
-    this.showLabels = show;
-    this.bundleCache.clear();
-    this.clear(); // reset nodes; next update() rebuilds + refetches
   }
 
   /** Change dynamic imagery base layer source and force refresh active tiles. */
