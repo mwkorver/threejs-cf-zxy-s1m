@@ -25,7 +25,6 @@ export interface TileNode {
   bounds: { west: number; south: number; east: number; north: number };
   centerMercator: [number, number];
   mesh?: THREE.Mesh;
-  labelSprite?: THREE.Sprite;
   centerElevation?: number;
   demSource?: string;
   minElevation?: number;
@@ -61,8 +60,6 @@ export class TileManager {
   // Toggle for baking an imagery-source letter into each tile texture:
   // U = USDA ImageServer basemap stitch, N = NAIP COG mosaic (DuckDB lookup).
   public showSourceLabels = false;
-  // Dynamic scaling factor for Z/X/Y labels
-  public labelScale = 1.0;
   // Imagery zoom threshold: tiles at z <= this load from the USDA NAIP
   // ImageServer instead of the COG tiler (which is slow/coverage-capped at low
   // zoom). Set to maxZoom to route everything external.
@@ -536,9 +533,6 @@ export class TileManager {
       node.demSource = cached.demSource;
       node.minElevation = cached.minElevation;
       node.maxElevation = cached.maxElevation;
-      if (!node.labelSprite) {
-        node.labelSprite = this.buildLabelSprite(node.tile, tileBoundsMercator(node.tile), cached.centerElevation ?? 0);
-      }
       this.createMeshFromBundle(node, cached.geometry, cached.texture);
       node.loaded = true;
       node.loading = false;
@@ -577,29 +571,8 @@ export class TileManager {
         // Create texture if imagery loaded successfully
         let texture: THREE.Texture | undefined;
         if (imageBitmap) {
-          const brand = this.showSourceLabels ? this.imagerySourceLetter(node.tile.z) : null;
-          if (brand) {
-            // Bake the source letter into the tile's SE corner: canvas row 0 is
-            // the tile's north edge, so canvas bottom-right = SE on screen.
-            const c = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
-            const ctx = c.getContext("2d")!;
-            ctx.drawImage(imageBitmap, 0, 0);
-            ctx.font = "bold 100px sans-serif";
-            ctx.textAlign = "right";
-            ctx.lineWidth = 8;
-            ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
-            ctx.fillStyle = brand.color;
-            ctx.strokeText(brand.ch, c.width - 14, c.height - 14);
-            ctx.fillText(brand.ch, c.width - 14, c.height - 14);
-            imageBitmap.close();
-            // Hand back an ImageBitmap, not the canvas: WebGL ignores flipY for
-            // ImageBitmap uploads but honors it for canvas uploads, so texturing
-            // the canvas directly would render this tile vertically flipped
-            // relative to every unbranded tile (and mirror the letter).
-            texture = new THREE.CanvasTexture(c.transferToImageBitmap() as unknown as HTMLCanvasElement);
-          } else {
-            texture = new THREE.CanvasTexture(imageBitmap as unknown as HTMLCanvasElement);
-          }
+          const branded = this.bakeTileLabel(imageBitmap, node.tile);
+          texture = new THREE.CanvasTexture(branded as unknown as HTMLCanvasElement);
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.anisotropy = 4;
         }
@@ -614,11 +587,6 @@ export class TileManager {
         node.demSource = demSource;
         node.minElevation = minElevation;
         node.maxElevation = maxElevation;
-
-        const bounds = tileBoundsMercator(node.tile);
-        if (!node.labelSprite) {
-          node.labelSprite = this.buildLabelSprite(node.tile, bounds, centerElevation);
-        }
 
         const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation, demSource, minElevation, maxElevation };
         this.bundleCache.put(bundle, this.activeKeys);
@@ -833,20 +801,9 @@ export class TileManager {
       if (node.mesh.parent !== this.scene) {
         this.scene.add(node.mesh);
       }
-      if (node.labelSprite) {
-        const inScene = node.labelSprite.parent === this.scene;
-        if (this.showLabels && !inScene) {
-          this.scene.add(node.labelSprite);
-        } else if (!this.showLabels && inScene) {
-          this.scene.remove(node.labelSprite);
-        }
-      }
     } else {
       if (node.mesh && node.mesh.parent === this.scene) {
         this.scene.remove(node.mesh);
-      }
-      if (node.labelSprite && node.labelSprite.parent === this.scene) {
-        this.scene.remove(node.labelSprite);
       }
     }
 
@@ -874,16 +831,6 @@ export class TileManager {
       // Dispose the per-mesh ShaderMaterial
       (node.mesh.material as THREE.Material).dispose();
       node.mesh = undefined;
-    }
-    if (node.labelSprite) {
-      if (node.labelSprite.parent === this.scene) {
-        this.scene.remove(node.labelSprite);
-      }
-      if (node.labelSprite.material) {
-        node.labelSprite.material.map?.dispose();
-        node.labelSprite.material.dispose();
-      }
-      node.labelSprite = undefined;
     }
 
     node.loaded = false;
@@ -1061,14 +1008,11 @@ export class TileManager {
     }
     this.verticalExaggeration = val;
     const updateScale = (node: TileNode) => {
-      const [ncx, ncy] = node.centerMercator;
-      const lat = mercatorToLonLat(ncx, ncy)[1];
       if (node.mesh) {
+        const [ncx, ncy] = node.centerMercator;
+        const lat = mercatorToLonLat(ncx, ncy)[1];
         node.mesh.scale.z = val;
         node.mesh.position.z = this.exagZ(0) * mercatorScale(lat);
-      }
-      if (node.labelSprite && node.centerElevation !== undefined) {
-        node.labelSprite.position.z = this.exagZ(node.centerElevation) * mercatorScale(lat) + 150;
       }
       if (node.children) {
         for (const child of node.children) {
@@ -1165,6 +1109,54 @@ export class TileManager {
   }
 
   /**
+   * Bake the debug label into the tile texture's SE corner (canvas row 0 is
+   * the tile's north edge, so canvas bottom-right = SE on screen):
+   * "z/x/y" (showLabels, white) and/or the source letter (showSourceLabels,
+   * colored), combined as "z/x/y - N". Auto-shrinks from 100px to fit the
+   * tile width. Baking replaces the old per-tile label sprites: no extra
+   * draw calls, no occlusion handling, and the text drapes with its tile.
+   *
+   * Returns an ImageBitmap either way — WebGL ignores flipY for ImageBitmap
+   * uploads but honors it for canvas uploads, so returning the canvas itself
+   * would render the branded tile vertically flipped relative to plain ones.
+   */
+  private bakeTileLabel(imageBitmap: ImageBitmap, tile: TileId): ImageBitmap {
+    const brand = this.showSourceLabels ? this.imagerySourceLetter(tile.z) : null;
+    const coords = this.showLabels ? `${tile.z}/${tile.x}/${tile.y}` : "";
+    if (!brand && !coords) return imageBitmap;
+
+    const c = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+    const ctx = c.getContext("2d")!;
+    ctx.drawImage(imageBitmap, 0, 0);
+    imageBitmap.close();
+
+    const head = coords + (coords && brand ? " - " : "");
+    const tail = brand ? brand.ch : "";
+    const margin = 14;
+    let font = 100;
+    ctx.font = `bold ${font}px monospace`;
+    const fullW = () => ctx.measureText(head + tail).width;
+    const avail = c.width - 2 * margin;
+    if (fullW() > avail) {
+      font = Math.max(32, Math.floor((font * avail) / fullW()));
+      ctx.font = `bold ${font}px monospace`;
+    }
+    ctx.lineWidth = Math.max(4, Math.round(font * 0.08));
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+    ctx.textAlign = "left";
+    let x = c.width - margin - fullW();
+    const y = c.height - margin;
+    for (const [text, color] of [[head, "#ffffff"], [tail, brand?.color ?? "#ffffff"]] as const) {
+      if (!text) continue;
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y);
+      x += ctx.measureText(text).width;
+    }
+    return c.transferToImageBitmap();
+  }
+
+  /**
    * Toggle the baked-in imagery source letters. The letters live in the tile
    * textures, so flipping requires a refetch (same pattern as the DEM-band
    * sliders); tiles are CDN-warm so the reload is cheap.
@@ -1203,55 +1195,15 @@ export class TileManager {
   }
 
   /**
-   * Dynamically toggle Z/X/Y labels on all active and future tiles.
+   * Toggle the baked-in Z/X/Y tile labels. Like the source letters, labels
+   * live in the tile textures, so flipping requires a cache clear + refetch
+   * (tiles are CDN-warm, so the reload is cheap).
    */
   setShowLabels(show: boolean): void {
+    if (show === this.showLabels) return;
     this.showLabels = show;
-    // Walk all nodes and update label visibility in the scene
-    const updateVisibility = (node: TileNode) => {
-      if (node.labelSprite) {
-        if (show && node.visible && node.loaded) {
-          if (node.labelSprite.parent !== this.scene) {
-            this.scene.add(node.labelSprite);
-          }
-        } else {
-          if (node.labelSprite.parent === this.scene) {
-            this.scene.remove(node.labelSprite);
-          }
-        }
-      }
-      if (node.children) {
-        for (const child of node.children) {
-          updateVisibility(child);
-        }
-      }
-    };
-    for (const node of this.rootNodes.values()) {
-      updateVisibility(node);
-    }
-  }
-
-  /** Dynamically scale the tile labels on all active and future tiles. */
-  setLabelScale(scale: number): void {
-    this.labelScale = scale;
-    // Walk all nodes and update label scales
-    const updateNodeScale = (node: TileNode) => {
-      if (node.labelSprite) {
-        const bounds = tileBoundsMercator(node.tile);
-        const tileW = bounds.east - bounds.west;
-        const spriteW = tileW * 0.22 * this.labelScale;
-        const spriteH = spriteW * (96 / 384);
-        node.labelSprite.scale.set(spriteW, spriteH, 1);
-      }
-      if (node.children) {
-        for (const child of node.children) {
-          updateNodeScale(child);
-        }
-      }
-    };
-    for (const node of this.rootNodes.values()) {
-      updateNodeScale(node);
-    }
+    this.bundleCache.clear();
+    this.clear(); // reset nodes; next update() rebuilds + refetches
   }
 
   /** Change dynamic imagery base layer source and force refresh active tiles. */
@@ -1279,86 +1231,6 @@ export class TileManager {
     for (const node of this.rootNodes.values()) {
       resetNode(node);
     }
-  }
-
-  /**
-   * Render coordinate label to a texture canvas and create a floating 3D sprite.
-   */
-  private buildLabelSprite(
-    tile: TileId,
-    bounds: { west: number; south: number; east: number; north: number },
-    centerElevation: number
-  ): THREE.Sprite | undefined {
-    if (typeof document === "undefined") {
-      return undefined;
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = 384;
-    canvas.height = 96;
-    const ctx = canvas.getContext("2d")!;
-
-    // Background panel - white with clean black border
-    const r = 12;
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
-    ctx.lineWidth = 4;
-
-    ctx.beginPath();
-    ctx.moveTo(r, 0);
-    ctx.lineTo(w - r, 0);
-    ctx.quadraticCurveTo(w, 0, w, r);
-    ctx.lineTo(w, h - r);
-    ctx.quadraticCurveTo(w, h, w - r, h);
-    ctx.lineTo(r, h);
-    ctx.quadraticCurveTo(0, h, 0, h - r);
-    ctx.lineTo(0, r);
-    ctx.quadraticCurveTo(0, 0, r, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Centered label text - black and 50% larger
-    ctx.fillStyle = "#000000";
-    ctx.font = "bold 30px monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.shadowColor = "transparent";
-    ctx.shadowBlur = 0;
-    ctx.fillText(`${tile.z}/${tile.x}/${tile.y}`, w / 2, h / 2);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    // depthTest off + high renderOrder so the label draws on top of terrain
-    // instead of being occluded by relief between the camera and the tile
-    // center (labels are a debug overlay — always readable, like the
-    // footprints overlay which does the same).
-    const material = new THREE.SpriteMaterial({
-      map: texture,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const sprite = new THREE.Sprite(material);
-    sprite.renderOrder = 999;
-
-    // Calculate dynamic proportional width and height relative to tile size
-    const tileW = bounds.east - bounds.west;
-    const spriteW = tileW * 0.22 * this.labelScale;
-    const spriteH = spriteW * (96 / 384);
-    sprite.scale.set(spriteW, spriteH, 1);
-
-    // Position sprite at tile center, offset by buffer above terrain height.
-    const centerMx = (bounds.west + bounds.east) / 2;
-    const centerMy = (bounds.north + bounds.south) / 2;
-    const localX = centerMx - this.worldAnchor[0];
-    const localY = centerMy - this.worldAnchor[1];
-    // Match terrain world Z (elevation * mercatorScale(lat) * exaggeration).
-    const centerLat = mercatorToLonLat(centerMx, centerMy)[1];
-    const localZ = this.exagZ(centerElevation) * mercatorScale(centerLat) + 150;
-    sprite.position.set(localX, localY, localZ);
-
-    return sprite;
   }
 
   private countLoadedNodes(): number {
