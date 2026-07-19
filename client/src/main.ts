@@ -305,14 +305,6 @@ hud.innerHTML = `
       </div>
     </div>
 
-    <div id="container-label-size" style="margin-top: 6px; margin-bottom: 8px; display: none;">
-      <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; margin-bottom: 2px; margin-left: 22px;">
-        <span>LABEL SIZE</span>
-        <span id="val-label-size">1.0x</span>
-      </div>
-      <input type="range" id="ctrl-label-size" min="0.5" max="3.0" step="0.1" value="1.0" style="width: calc(100% - 22px); margin-left: 22px; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
     <div style="margin-top: 8px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px;">
       <span style="font-size: 10px; color: #94a3b8; margin-bottom: 2px;">SHADING MODE</span>
       
@@ -452,8 +444,6 @@ const containerHypsometric = document.getElementById("container-hypsometric") as
 const ctrlHypBlend = document.getElementById("ctrl-hypblend") as HTMLInputElement;
 const valHypBlend = document.getElementById("val-hypblend")!;
 const ctrlHypBounds = document.getElementsByName("ctrl-hyp-bounds") as NodeListOf<HTMLInputElement>;
-const containerLabelSize = document.getElementById("container-label-size") as HTMLDivElement;
-const ctrlLabelSize = document.getElementById("ctrl-label-size") as HTMLInputElement;
 const ctrlBrightness = document.getElementById("ctrl-brightness") as HTMLInputElement;
 const ctrlContrast = document.getElementById("ctrl-contrast") as HTMLInputElement;
 const ctrlSaturation = document.getElementById("ctrl-saturation") as HTMLInputElement;
@@ -469,7 +459,6 @@ const valUsgsMin = document.getElementById("val-usgs-min")!;
 const valUsgsMax = document.getElementById("val-usgs-max")!;
 const valS1mMin = document.getElementById("val-s1m-min")!;
 const valSpeedCtrl = document.getElementById("val-speed-ctrl")!;
-const valLabelSize = document.getElementById("val-label-size")!;
 const valBrightness = document.getElementById("val-brightness")!;
 const valContrast = document.getElementById("val-contrast")!;
 const valSaturation = document.getElementById("val-saturation")!;
@@ -664,18 +653,11 @@ ctrlOutlines.addEventListener("change", () => {
   const isChecked = ctrlOutlines.checked;
   tileManager.setShowOutlines(isChecked);
   tileManager.setShowLabels(isChecked);
-  containerLabelSize.style.display = isChecked ? "block" : "none";
 });
 
 const ctrlSourceLetters = document.querySelector<HTMLInputElement>("#ctrl-source-letters")!;
 ctrlSourceLetters.addEventListener("change", () => {
   tileManager.setShowSourceLabels(ctrlSourceLetters.checked);
-});
-
-ctrlLabelSize.addEventListener("input", () => {
-  const scale = parseFloat(ctrlLabelSize.value);
-  valLabelSize.textContent = `${scale.toFixed(1)}x`;
-  tileManager.setLabelScale(scale);
 });
 
 ctrlShadingModes.forEach((radio) => {
