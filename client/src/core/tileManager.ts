@@ -46,6 +46,14 @@ export class TileManager {
   public gridStep = 8;
   // Vertical exaggeration factor
   public verticalExaggeration = 2;
+  // Reference height (true metres) exaggeration is anchored to: world height is
+  // (h - ref)·exag + ref, so ground at the reference holds still and relief
+  // amplifies around it (Cesium's terrainExaggerationRelativeHeight idea).
+  // 0 = classic sea-level anchoring; setVerticalExaggeration freezes in the
+  // ground elevation under the camera so the terrain in view doesn't lift.
+  private exagReference = 0;
+  // Camera ground position from the last update(), for freezing exagReference.
+  private lastCameraMercator?: [number, number];
   // Toggle for footprints visibility
   public showFootprints = false;
   // Toggle for Z/X/Y tile labels visibility
@@ -190,6 +198,7 @@ export class TileManager {
     // 1. Convert local offset space to global Mercator meters
     const cx = localCameraPos.x + this.worldAnchor[0];
     const cy = localCameraPos.y + this.worldAnchor[1];
+    this.lastCameraMercator = [cx, cy];
 
     // 2. Determine the root-grid center tile. Bias it forward along the
     // horizontal component of the view direction: flying level, the frustum
@@ -349,8 +358,8 @@ export class TileManager {
   private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): boolean {
     // 1. Perform frustum culling check first
     if (this.cullTiles && frustum) {
-      const tileMinZ = -1000 * this.verticalExaggeration;
-      const tileMaxZ = 9000 * this.verticalExaggeration;
+      const tileMinZ = this.exagZ(-1000);
+      const tileMaxZ = this.exagZ(9000);
       const box = new THREE.Box3(
         new THREE.Vector3(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ),
         new THREE.Vector3(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ)
@@ -635,9 +644,10 @@ export class TileManager {
       });
 
       // Match the terrain's world Z exactly to kill perspective parallax:
-      // terrain z = elevation * mercatorScale(lat) * verticalExaggeration.
+      // terrain z = exagZ(elevation) * mercatorScale(lat) (reference-anchored
+      // exaggeration, same affine map the meshes realise via scale+offset).
       const zOf = (elev: number, lat: number) =>
-        elev * mercatorScale(lat) * this.verticalExaggeration + 5.0;
+        this.exagZ(elev) * mercatorScale(lat) + 5.0;
 
       for (let i = 0; i < pts.length - 1; i++) {
         const a = pts[i]!, b = pts[i + 1]!;
@@ -738,6 +748,13 @@ export class TileManager {
       demSourceVal = 1.0;
     }
 
+    // Per-tile ground->Mercator vertical scale at the tile's center latitude;
+    // matches the zScale baked into the mesh vertices by buildTerrainMesh.
+    const zScale = mercatorScale(mercatorToLonLat(
+      (node.bounds.west + node.bounds.east) / 2,
+      (node.bounds.north + node.bounds.south) / 2
+    )[1]);
+
     const material = new THREE.ShaderMaterial({
       uniforms: {
         map: { value: texture || null },
@@ -759,10 +776,7 @@ export class TileManager {
         // Per-tile Mercator vertical scale: vertex Z is elevation * sec(lat),
         // so the shader divides by this to recover true metres for hypsometric
         // tinting (whose bounds are in true metres).
-        uZScale: { value: mercatorScale(mercatorToLonLat(
-          (node.bounds.west + node.bounds.east) / 2,
-          (node.bounds.north + node.bounds.south) / 2
-        )[1]) },
+        uZScale: { value: zScale },
         ...THREE.UniformsLib.fog
       },
       vertexShader: TerrainShader.vertexShader,
@@ -771,11 +785,14 @@ export class TileManager {
     });
 
     const mesh = new THREE.Mesh(geom, material);
-    // Position NW anchor relative to worldAnchor to maintain float32 coordinate precision
+    // Position NW anchor relative to worldAnchor to maintain float32 coordinate
+    // precision. Z realises the reference-anchored exaggeration: with vertex
+    // z = h·zScale and scale.z = exag, adding exagZ(0)·zScale gives world
+    // z = ((h - ref)·exag + ref)·zScale.
     mesh.position.set(
       node.bounds.west - this.worldAnchor[0],
       node.bounds.north - this.worldAnchor[1],
-      0
+      this.exagZ(0) * zScale
     );
     // Apply vertical exaggeration
     mesh.scale.z = this.verticalExaggeration;
@@ -998,18 +1015,35 @@ export class TileManager {
   }
 
   /**
+   * Exaggerated world height (true metres) of ground elevation h:
+   * z' = (h - ref)·exag + ref. Multiply by mercatorScale(lat) for world Z.
+   * Mesh vertices bake h·mercatorScale, so meshes realise the same affine map
+   * via scale.z = exag and position.z = exagZ(0)·mercatorScale.
+   */
+  private exagZ(h: number): number {
+    return (h - this.exagReference) * this.verticalExaggeration + this.exagReference;
+  }
+
+  /**
    * Dynamically update the vertical exaggeration of all existing meshes and future ones.
    */
   setVerticalExaggeration(val: number): void {
+    // Freeze the reference to the ground under the camera BEFORE applying the
+    // new factor: the terrain being looked at holds still, relief amplifies.
+    if (this.lastCameraMercator) {
+      const h0 = this.getElevationAt(this.lastCameraMercator[0], this.lastCameraMercator[1]);
+      if (h0 !== null) this.exagReference = h0;
+    }
     this.verticalExaggeration = val;
     const updateScale = (node: TileNode) => {
+      const [ncx, ncy] = node.centerMercator;
+      const lat = mercatorToLonLat(ncx, ncy)[1];
       if (node.mesh) {
         node.mesh.scale.z = val;
+        node.mesh.position.z = this.exagZ(0) * mercatorScale(lat);
       }
       if (node.labelSprite && node.centerElevation !== undefined) {
-        const [cx, cy] = node.centerMercator;
-        const lat = mercatorToLonLat(cx, cy)[1];
-        node.labelSprite.position.z = node.centerElevation * mercatorScale(lat) * val + 150;
+        node.labelSprite.position.z = this.exagZ(node.centerElevation) * mercatorScale(lat) + 150;
       }
       if (node.children) {
         for (const child of node.children) {
@@ -1018,6 +1052,9 @@ export class TileManager {
       }
     };
     for (const node of this.rootNodes.values()) {
+      updateScale(node);
+    }
+    for (const node of this.transitionNodes.values()) {
       updateScale(node);
     }
     // Force footprints to rebuild at the new Z scale on next update.
@@ -1269,7 +1306,7 @@ export class TileManager {
     const localY = centerMy - this.worldAnchor[1];
     // Match terrain world Z (elevation * mercatorScale(lat) * exaggeration).
     const centerLat = mercatorToLonLat(centerMx, centerMy)[1];
-    const localZ = centerElevation * mercatorScale(centerLat) * this.verticalExaggeration + 150;
+    const localZ = this.exagZ(centerElevation) * mercatorScale(centerLat) + 150;
     sprite.position.set(localX, localY, localZ);
 
     return sprite;
