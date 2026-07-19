@@ -290,6 +290,21 @@ hud.innerHTML = `
       <label for="ctrl-outlines" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW TMS OUTLINES & LABELS</label>
     </div>
 
+    <div style="margin-top: 8px; margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="ctrl-source-letters" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+        <label for="ctrl-source-letters" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW IMAGERY SOURCE</label>
+      </div>
+      <div style="display: flex; gap: 12px; font-size: 9px; color: #94a3b8; margin-left: 22px;">
+        <span style="display: flex; align-items: center; gap: 4px;">
+          <span style="color: #ffd400; font-weight: bold;">U</span> USDA server
+        </span>
+        <span style="display: flex; align-items: center; gap: 4px;">
+          <span style="color: #00e5ff; font-weight: bold;">N</span> NAIP COG (DuckDB)
+        </span>
+      </div>
+    </div>
+
     <div id="container-label-size" style="margin-top: 6px; margin-bottom: 8px; display: none;">
       <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; margin-bottom: 2px; margin-left: 22px;">
         <span>LABEL SIZE</span>
@@ -650,6 +665,11 @@ ctrlOutlines.addEventListener("change", () => {
   tileManager.setShowOutlines(isChecked);
   tileManager.setShowLabels(isChecked);
   containerLabelSize.style.display = isChecked ? "block" : "none";
+});
+
+const ctrlSourceLetters = document.querySelector<HTMLInputElement>("#ctrl-source-letters")!;
+ctrlSourceLetters.addEventListener("change", () => {
+  tileManager.setShowSourceLabels(ctrlSourceLetters.checked);
 });
 
 ctrlLabelSize.addEventListener("input", () => {
