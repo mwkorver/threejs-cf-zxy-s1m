@@ -17,5 +17,11 @@ client/public/tiles/
 # AWS SAM
 .aws-sam/
 
+# Dev tile access key — single source of truth, mirrored into
+# client/.env.local by infra/deploy-edge.sh. Never commit either.
+.tile-key
+.env.local
+*.local
+
 # OS / editor
 .DS_Store

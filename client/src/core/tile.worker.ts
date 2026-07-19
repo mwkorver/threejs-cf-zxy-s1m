@@ -1,6 +1,7 @@
 import { decodeTerrarium } from "./terrarium";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { type TileId } from "./mercator";
+import { withKey } from "./tileKey";
 
 const ctx: any = self;
 
@@ -89,7 +90,7 @@ ctx.onmessage = async (e: MessageEvent) => {
         if (params.length > 0) url += `?${params.join("&")}`;
 
         const res = await fetchTile(
-          url,
+          withKey(url),
           `terrain ${tile.z}/${tile.x}/${tile.y}`,
           5,
           signal
@@ -120,6 +121,7 @@ ctx.onmessage = async (e: MessageEvent) => {
       try {
         let imgRes: Response;
         if (imagerySource === "osm") {
+          // Third-party server: no withKey() — the key must never leave our CDN.
           imgRes = await fetchTile(
             `https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`,
             `osm ${tile.z}/${tile.x}/${tile.y}`,
@@ -130,14 +132,14 @@ ctx.onmessage = async (e: MessageEvent) => {
           // Low-zoom basemap: the tiler stitches 4 USDA NAIP cache children
           // into a 512px tile, served (and cached) through CloudFront.
           imgRes = await fetchTile(
-            `${baseUrl}/basemap/${tile.z}/${tile.x}/${tile.y}.webp`,
+            withKey(`${baseUrl}/basemap/${tile.z}/${tile.x}/${tile.y}.webp`),
             `basemap ${tile.z}/${tile.x}/${tile.y}`,
             5,
             signal
           );
         } else {
           imgRes = await fetchTile(
-            `${baseUrl}/imagery/${layer}/${year}/${tile.z}/${tile.x}/${tile.y}.webp`,
+            withKey(`${baseUrl}/imagery/${layer}/${year}/${tile.z}/${tile.x}/${tile.y}.webp`),
             `imagery ${tile.z}/${tile.x}/${tile.y}`,
             5,
             signal
