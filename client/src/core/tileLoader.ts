@@ -6,6 +6,7 @@
 
 import { decodeTerrarium } from "./terrarium";
 import { tileBoundsMercator, type TileId } from "./mercator";
+import { withKey } from "./tileKey";
 
 export interface TileManifest {
   layer: string;
@@ -62,7 +63,7 @@ export async function loadTerrain(
   if (s1mMinZoom !== undefined && s1mMinZoom !== null) params.push(`s1m_min_zoom=${s1mMinZoom}`);
   if (params.length > 0) url += `?${params.join("&")}`;
 
-  const res = await fetchTile(url, `terrain ${t.z}/${t.x}/${t.y}`);
+  const res = await fetchTile(withKey(url), `terrain ${t.z}/${t.x}/${t.y}`);
   const demSource = res.headers.get("X-DEM-Source") || "farfield";
   const bmp = await createImageBitmap(await res.blob());
   const { rgba, w, h } = await bitmapToRgba(bmp);
@@ -79,7 +80,7 @@ export async function loadImagery(
   t: TileId,
 ): Promise<ImageBitmap> {
   const res = await fetchTile(
-    `${baseUrl}/imagery/${layer}/${year}/${t.z}/${t.x}/${t.y}.webp`,
+    withKey(`${baseUrl}/imagery/${layer}/${year}/${t.z}/${t.x}/${t.y}.webp`),
     `imagery ${t.z}/${t.x}/${t.y}`,
   );
   return createImageBitmap(await res.blob());
@@ -89,11 +90,12 @@ export async function loadImagery(
  *  Used for low zooms where the COG tiler is slow/coverage-capped. */
 export async function loadImageryExternal(baseUrl: string, t: TileId): Promise<ImageBitmap> {
   // 512px basemap stitched by the tiler from USDA NAIP cache children.
-  const res = await fetchTile(`${baseUrl}/basemap/${t.z}/${t.x}/${t.y}.webp`, `basemap ${t.z}/${t.x}/${t.y}`);
+  const res = await fetchTile(withKey(`${baseUrl}/basemap/${t.z}/${t.x}/${t.y}.webp`), `basemap ${t.z}/${t.x}/${t.y}`);
   return createImageBitmap(await res.blob());
 }
 
-/** Imagery from the official OpenStreetMap tile server. */
+/** Imagery from the official OpenStreetMap tile server. NOTE: no withKey() —
+ *  this is a third-party server, and the key must never leave our CDN. */
 export async function loadImageryOSM(t: TileId): Promise<ImageBitmap> {
   const url = `https://tile.openstreetmap.org/${t.z}/${t.x}/${t.y}.png`;
   const res = await fetchTile(url, `osm ${t.z}/${t.x}/${t.y}`);
@@ -135,8 +137,8 @@ export interface FootprintCollection {
  */
 export async function loadStaticFootprints(baseUrl: string): Promise<FootprintCollection> {
   const [s1m, usgs13] = await Promise.all([
-    fetchTile(`${baseUrl}/footprints/s1m.json`, "footprints s1m").then((r) => r.json()),
-    fetchTile(`${baseUrl}/footprints/usgs13.json`, "footprints usgs13").then((r) => r.json()),
+    fetchTile(withKey(`${baseUrl}/footprints/s1m.json`), "footprints s1m").then((r) => r.json()),
+    fetchTile(withKey(`${baseUrl}/footprints/usgs13.json`), "footprints usgs13").then((r) => r.json()),
   ]);
   return {
     type: "FeatureCollection",

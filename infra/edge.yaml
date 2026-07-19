@@ -12,6 +12,15 @@ Parameters:
   TilerFunctionArn:
     Type: String
     Description: Tiler Lambda ARN (for the invoke permission)
+  TileAccessKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Dev access key. When non-empty, a viewer-request CloudFront Function 403s
+      any request without ?k=<key>. Passed at deploy time (infra/deploy-edge.sh
+      reads the gitignored repo-root .tile-key) so it never lands in the
+      template. Empty = open distribution, no function attached.
   StaticBucketName:
     Type: String
     Default: deckgl-cf-xyz-s1m-us-west-2
@@ -20,7 +29,38 @@ Parameters:
       Lambda) under /footprints/* — e.g. footprints/{s1m,usgs13}.json built by
       tiler/scripts/build_footprints.py.
 
+Conditions:
+  # Attach the gate only when a key was supplied, so a keyless deploy can't
+  # lock the distribution behind a function that rejects everything.
+  KeyEnabled: !Not [!Equals [!Ref TileAccessKey, ""]]
+
 Resources:
+  # Dev gate. MUST run on viewer-request, not at the origin: CloudFront serves
+  # cache hits without ever contacting the Lambda, so origin-side auth would
+  # leave every already-cached tile open. Runs on hits and misses alike.
+  #
+  # The key is read from the query string but the cache policy below keeps
+  # QueryStringBehavior: none, so it never enters the cache key (all viewers
+  # share one cached object) and is never forwarded to the origin. Rotating the
+  # key therefore needs no invalidation.
+  TileAuthFunction:
+    Type: AWS::CloudFront::Function
+    Condition: KeyEnabled
+    Properties:
+      Name: flight-sim-tile-auth
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Require ?k=<key> on every viewer request (dev gate)
+        Runtime: cloudfront-js-2.0
+      FunctionCode: !Sub |
+        function handler(event) {
+          var qs = event.request.querystring;
+          if (!qs.k || qs.k.value !== '${TileAccessKey}') {
+            return { statusCode: 403, statusDescription: 'Forbidden' };
+          }
+          return event.request;
+        }
+
   # Path-only cache keys: no query strings, no cookies, no headers
   # (plan §4.1 — this is why year/layer live in the path).
   TileCachePolicy:
@@ -150,6 +190,11 @@ Resources:
           ResponseHeadersPolicyId: !Ref TileCorsPolicy
           AllowedMethods: [GET, HEAD]
           Compress: false
+          FunctionAssociations: !If
+            - KeyEnabled
+            - - EventType: viewer-request
+                FunctionARN: !GetAtt TileAuthFunction.FunctionMetadata.FunctionARN
+            - !Ref AWS::NoValue
         CacheBehaviors:
           # /footprints/*.json -> S3 origin. Objects are stored pre-gzipped with
           # Content-Encoding: gzip and immutable Cache-Control, so the same
@@ -161,6 +206,13 @@ Resources:
             ResponseHeadersPolicyId: !Ref TileCorsPolicy
             AllowedMethods: [GET, HEAD]
             Compress: false
+            # Same gate as the default behavior — an unguarded behavior would be
+            # an open hole straight to the static bucket.
+            FunctionAssociations: !If
+              - KeyEnabled
+              - - EventType: viewer-request
+                  FunctionARN: !GetAtt TileAuthFunction.FunctionMetadata.FunctionARN
+              - !Ref AWS::NoValue
 
 Outputs:
   DistributionDomain:
