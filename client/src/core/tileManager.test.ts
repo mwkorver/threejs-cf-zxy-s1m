@@ -374,6 +374,30 @@ describe("TileManager dynamic base zoom", () => {
       expect(node.loading).toBe(false); // verified aborted
     }
   });
+
+  it("keeps fresh transition tiles alive while the new base zoom loads", () => {
+    const tm = makeManager({ maxZoom: 14 });
+    tm.update(new THREE.Vector3(0, 0, 1000)); // z12 roots
+    tm.update(new THREE.Vector3(0, 0, 50000)); // -> z8; new roots not loaded yet
+    // Same-frame handoff is well inside the default TTL: cohort must survive
+    // as the hole-free fallback.
+    expect(internals(tm).transitionNodes.size).toBeGreaterThan(0);
+  });
+
+  it("prunes a transition cohort after its TTL even if new roots never load", () => {
+    const tm = makeManager({ maxZoom: 14 });
+    tm.update(new THREE.Vector3(0, 0, 1000)); // z12 roots
+    tm.transitionTtlMs = -1; // everything is instantly past its lifetime
+    tm.update(new THREE.Vector3(0, 0, 50000)); // -> z8; new roots still loading
+    // Without the TTL these stale coarse-vs-fine cohorts pin until the global
+    // swap, which camera motion can defer indefinitely (the "bleeding" bug).
+    const { transitionNodes, rootNodes } = internals(tm);
+    expect(transitionNodes.size).toBe(0);
+    expect(rootNodes.size).toBe(25); // new base grid unaffected
+    for (const node of rootNodes.values()) {
+      expect(node.tile.z).toBe(8);
+    }
+  });
 });
 
 // ---- Frustum culling ----
