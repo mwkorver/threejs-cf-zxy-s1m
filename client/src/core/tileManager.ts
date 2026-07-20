@@ -35,6 +35,8 @@ export interface TileNode {
   visible: boolean;
   /** performance.now() before which triggerLoad is skipped after a failure. */
   retryAfter?: number;
+  /** performance.now() when the node was handed to transitionNodes (stale pool). */
+  transitionSince?: number;
 }
 
 export class TileManager {
@@ -97,6 +99,14 @@ export class TileManager {
   private visibleNodesList: TileNode[] = [];
   // Keep old root nodes rendering smoothly until new base level roots are fully loaded
   private transitionNodes = new Map<string, TileNode>();
+  // Max lifetime (ms) of a stale tile after its base-zoom handoff. Coverage-
+  // based retirement only works zooming OUT (a stale fine tile hides once its
+  // coarser active ancestor renders); zooming IN, a stale coarse tile has no
+  // active ancestor and would pin until the global swap — which camera motion
+  // keeps resetting while each base-zoom step adds another stale cohort. The
+  // TTL bounds that: the global swap prunes everything anyway, so timing a
+  // straggler out just reaches the same steady state sooner.
+  public transitionTtlMs = 5000;
   private workerPool = new TileWorkerPool();
 
   // Screen-space-error projection factor: (viewportH/2) * cot(fovY/2), i.e.
@@ -186,8 +196,10 @@ export class TileManager {
 
     if (computedBaseZoom !== this.baseZoom) {
       // Move current root nodes to transitionNodes to keep them on screen during transition
+      const handoff = performance.now();
       for (const [key, node] of this.rootNodes.entries()) {
         this.transitionNodes.set(key, node);
+        node.transitionSince = handoff; // starts (or restarts) the stale TTL
         this.applyPolygonOffset(node, true);
         this.cancelLoadingSubtree(node);
       }
@@ -236,6 +248,7 @@ export class TileManager {
               const node = this.transitionNodes.get(key)!;
               this.rootNodes.set(key, node);
               this.transitionNodes.delete(key);
+              node.transitionSince = undefined; // active again, no longer stale
               this.applyPolygonOffset(node, false);
             } else {
               const bounds = tileBoundsMercator(t);
@@ -308,7 +321,19 @@ export class TileManager {
         }
         this.transitionNodes.clear();
       } else {
-        // Still loading: keep transition nodes alive and visible
+        // Still loading: keep transition nodes alive and visible — but only
+        // for transitionTtlMs each. Without the TTL, a fast zoom-IN leaves
+        // stale coarse cohorts no coverage check can ever retire, and their
+        // coarsely-sampled DEM surfaces poke through the fine terrain
+        // ("bleeding"). Prune expired nodes individually; survivors keep
+        // rendering as the usual hole-free fallback.
+        const now = performance.now();
+        for (const [key, node] of this.transitionNodes.entries()) {
+          if (now - (node.transitionSince ?? now) > this.transitionTtlMs) {
+            this.pruneNode(node);
+            this.transitionNodes.delete(key);
+          }
+        }
         for (const node of this.transitionNodes.values()) {
           this.updateTransitionNode(node, cameraPosGlobal, frustum);
         }
