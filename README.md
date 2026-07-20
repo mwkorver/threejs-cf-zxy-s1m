@@ -1,4 +1,4 @@
-# deckgl-cf-xyz-s1m
+# threejs-cf-zxy-s1m
 
 CONUS flight-simulator-style streaming viewer: NAIP (and state COG) imagery,
 USGS 3DEP S1M terrain, and Overture buildings, normalized server-side onto a
