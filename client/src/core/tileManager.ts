@@ -9,7 +9,8 @@ import {
   mercatorToLonLat,
   EARTH_CIRCUMFERENCE
 } from "./mercator";
-import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM, loadStaticFootprints, type FootprintCollection, type FootprintFeature } from "./tileLoader";
+import { loadStaticFootprints, type FootprintCollection, type FootprintFeature } from "./tileLoader";
+import { resolveImageryKind } from "./tileUrls";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import { TerrainShader } from "./terrainShader";
@@ -1256,10 +1257,16 @@ export class TileManager {
    * zooms to the NAIP COG mosaic resolved via DuckDB (N, cyan). OSM gets none.
    */
   private imagerySourceLetter(z: number): { ch: string; color: string } | null {
-    if (this.imagerySource === "osm") return null;
-    return z <= this.externalImageryMaxZoom
-      ? { ch: "U", color: "#ffd400" }
-      : { ch: "N", color: "#00e5ff" };
+    // Shares the fetch path's routing rule, so the baked letter can never
+    // claim a source the request didn't actually use.
+    switch (resolveImageryKind(z, this.imagerySource, this.externalImageryMaxZoom)) {
+      case "osm":
+        return null;
+      case "basemap":
+        return { ch: "U", color: "#ffd400" };
+      default:
+        return { ch: "N", color: "#00e5ff" };
+    }
   }
 
   /**

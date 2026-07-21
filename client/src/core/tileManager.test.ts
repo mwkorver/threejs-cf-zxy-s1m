@@ -22,9 +22,7 @@ vi.mock("./tileLoader", () => ({
   loadTerrain: vi.fn(() =>
     Promise.resolve({ heights: new Float32Array(512 * 512), demSource: "farfield" }),
   ),
-  loadImagery: vi.fn(() => Promise.resolve(null)),
-  loadImageryExternal: vi.fn(() => Promise.resolve(null)),
-  loadImageryOSM: vi.fn(() => Promise.resolve(null)),
+  loadImageryFor: vi.fn(() => Promise.resolve(null)),
   loadStaticFootprints: vi.fn(() =>
     Promise.resolve({ type: "FeatureCollection", features: [] }),
   ),
