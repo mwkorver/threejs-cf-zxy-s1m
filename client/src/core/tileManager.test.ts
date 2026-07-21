@@ -707,3 +707,145 @@ describe("TileManager active keys", () => {
     expect(overlap).toBe(0);
   });
 });
+
+// ---- Velocity-vector prefetch ----
+
+describe("TileManager prefetchAhead", () => {
+  /** Inject velocity state directly so tests don't depend on wall-clock timing. */
+  function injectVelocity(
+    tm: TileManager,
+    pos: THREE.Vector3,
+    vx: number,
+    vy: number
+  ) {
+    (tm as any).prefetchPrevPos = pos.clone();
+    (tm as any).prefetchVelocity.set(vx, vy, 0);
+  }
+
+  it("skips when horizontal speed is below the threshold (stationary camera)", () => {
+    const tm = makeManager({ maxZoom: 18, cullTiles: false });
+    const pool = (tm as any).workerPool;
+    const requestSpy = vi
+      .spyOn(pool, "requestTile")
+      .mockReturnValue(new Promise(() => {}));
+
+    const pos = new THREE.Vector3(0, 0, 2000);
+    tm.update(pos);
+    requestSpy.mockClear();
+
+    // Inject zero velocity (stationary)
+    injectVelocity(tm, pos, 0, 0);
+    (tm as any).prefetchAhead();
+
+    const calls = requestSpy.mock.calls as any[][];
+    const prefetchCalls = calls.filter(([, p]) => (p as number) <= -1e7);
+    expect(prefetchCalls.length).toBe(0);
+    expect(tm.getLastPrefetchCount()).toBe(0);
+  });
+
+  it("queues tiles ahead of the flight path when moving fast", () => {
+    // Very high altitude → baseZoom = z5. Prefetch zoom = z7. The 5×5 z5 root
+    // grid spans ≈ ±2.5 M m around the camera. A 2 M m/s velocity places all
+    // 4 look-ahead sample points > 2 M m east, clearly outside that grid.
+    const tm = makeManager({ maxZoom: 18, cullTiles: false });
+    const pool = (tm as any).workerPool;
+    const requestSpy = vi
+      .spyOn(pool, "requestTile")
+      .mockReturnValue(new Promise(() => {}));
+
+    const pos = new THREE.Vector3(0, 0, 400_000); // >320k m → baseZoom z5
+    tm.update(pos);
+    requestSpy.mockClear();
+
+    // 2,000,000 m/s east → look-ahead at 500k–2000k m east, outside the z5 grid
+    injectVelocity(tm, pos, 2_000_000, 0);
+    (tm as any).prefetchAhead();
+
+    // getLastPrefetchCount is the canonical check; requestSpy may or may not
+    // show calls if some look-ahead tiles were already requested by triggerLoad.
+    expect(tm.getLastPrefetchCount()).toBeGreaterThan(0);
+
+    // All look-ahead tiles must be east of the current camera tile.
+    // Prefetch now operates at maxZoom — the only tier where pop-in matters.
+    const maxZoom = (tm as any).maxZoom as number;
+    const currentTile = mercatorToTile(0, 0, maxZoom);
+    const allCalls = requestSpy.mock.calls as any[][];
+    for (const [tile] of allCalls) {
+      expect((tile as { x: number }).x).toBeGreaterThanOrEqual(currentTile.x);
+    }
+  });
+
+  it("skips tiles that are already in the bundle cache", () => {
+    const tm = makeManager({ maxZoom: 18, cullTiles: false });
+    const pool = (tm as any).workerPool;
+    const requestSpy = vi
+      .spyOn(pool, "requestTile")
+      .mockReturnValue(new Promise(() => {}));
+    const cache = (tm as any).bundleCache as BundleCache;
+
+    const pos = new THREE.Vector3(0, 0, 200_000);
+    tm.update(pos);
+    requestSpy.mockClear();
+
+    const baseZoom = (tm as any).baseZoom as number;
+    // Prefetch operates at maxZoom — update the cache with maxZoom tiles.
+    const zoom = (tm as any).maxZoom as number;
+    const lookahead = tm.prefetchLookaheadSec;
+    const samples = tm.prefetchSamples;
+
+    // Pre-populate cache with every tile prefetchAhead would request.
+    for (let s = 1; s <= samples; s++) {
+      const t = (s / samples) * lookahead;
+      const tile = mercatorToTile(5000 * t, 0, zoom);
+      const key = `${tile.z}/${tile.x}/${tile.y}`;
+      cache.put(
+        {
+          key,
+          bytes: 100,
+          geometry: new THREE.BufferGeometry(),
+          centerElevation: 0,
+          demSource: "farfield",
+          minElevation: 0,
+          maxElevation: 0,
+        },
+        new Set()
+      );
+    }
+
+    injectVelocity(tm, pos, 5000, 0);
+    (tm as any).prefetchAhead();
+
+    // All tiles were cached — no new requests should be issued
+    expect(requestSpy).not.toHaveBeenCalled();
+    expect(tm.getLastPrefetchCount()).toBe(0);
+  });
+
+  it("uses lower priority than active tile loads", () => {
+    const tm = makeManager({ maxZoom: 18, cullTiles: false });
+    const pool = (tm as any).workerPool;
+    const requestSpy = vi
+      .spyOn(pool, "requestTile")
+      .mockReturnValue(new Promise(() => {}));
+
+    const pos = new THREE.Vector3(0, 0, 200_000);
+    tm.update(pos);
+
+    // Capture priorities used by triggerLoad for currently-visible tiles
+    const activeCalls = requestSpy.mock.calls as any[][];
+    const activePriorities = activeCalls.map(([, p]) => p as number);
+    const minActivePriority = Math.min(...activePriorities, 0);
+
+    requestSpy.mockClear();
+
+    injectVelocity(tm, pos, 5000, 0);
+    (tm as any).prefetchAhead();
+
+    const allCalls = requestSpy.mock.calls as any[][];
+    for (const [, priority] of allCalls) {
+      expect(priority as number).toBeLessThan(minActivePriority);
+      expect(priority as number).toBeLessThanOrEqual(-1e7);
+    }
+  });
+});
+
+
