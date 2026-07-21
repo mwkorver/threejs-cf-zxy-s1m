@@ -854,7 +854,7 @@ export class TileManager {
    * loaded tile covering it, or null if no loaded tile covers it (so callers
    * can skip drawing over absent terrain instead of floating at z=0).
    */
-  private getElevationAt(mx: number, my: number): number | null {
+  public getElevationAt(mx: number, my: number): number | null {
     let bestNode: TileNode | undefined;
     const checkNode = (node: TileNode) => {
       if (!node.loaded) return;

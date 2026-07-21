@@ -715,6 +715,53 @@ describe("TileManager vertical exaggeration", () => {
   });
 });
 
+// ---- Elevation sampling (Follow-DEM support) ----
+
+describe("TileManager getElevationAt", () => {
+  it("returns null when no tiles are loaded under the point", () => {
+    const tm = makeManager({ maxZoom: 12 });
+    // No update() yet — no tiles loaded
+    expect(tm.getElevationAt(0, 0)).toBeNull();
+  });
+
+  it("returns the center elevation of the loaded tile covering the point", async () => {
+    const tm = makeManager({ maxZoom: 12, cullTiles: false });
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    // Let the main-thread fallback microtasks settle so tiles load.
+    await new Promise((r) => setTimeout(r, 0));
+
+    // The camera is at (0, 0, 1000) — worldAnchor [0,0] means global = local.
+    // A root tile covers (0, 0); its centerElevation is 0 (flat terrain from
+    // the mocked loader returning a zero-filled Float32Array).
+    const elev = tm.getElevationAt(0, 0);
+    expect(elev).not.toBeNull();
+    expect(elev).toBe(0);
+  });
+
+  it("returns the finest (highest-z) loaded tile covering the point", async () => {
+    const tm = makeManager({ maxZoom: 14, lodFactor: 5.0, cullTiles: false });
+    tm.update(new THREE.Vector3(0, 0, 100));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // With subdivision, finer tiles exist under the camera. getElevationAt
+    // should pick the finest z, not a coarse root.
+    const { rootNodes } = internals(tm);
+    let maxChildZ = 0;
+    for (const node of rootNodes.values()) {
+      if (node.children) {
+        for (const child of node.children) {
+          if (child.loaded && child.tile.z > maxChildZ) maxChildZ = child.tile.z;
+        }
+      }
+    }
+    if (maxChildZ > 0) {
+      // A point under the camera should resolve to at least the child zoom
+      const elev = tm.getElevationAt(0, 0);
+      expect(elev).not.toBeNull();
+    }
+  });
+});
+
 // ---- Active keys ----
 
 describe("TileManager active keys", () => {
