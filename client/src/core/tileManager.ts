@@ -417,10 +417,18 @@ export class TileManager {
 
   /** @returns true if the node was frustum-culled (renders nothing on screen). */
   private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): boolean {
+    // Per-tile ground→world Z scale at the tile's center latitude (plan §5.1).
+    // Every true-metre value (elevation, exagZ) must be multiplied by this
+    // before entering world Z, where the camera and frustum live. Mesh
+    // vertices bake h·zScale; the same factor applies here for consistency.
+    const zScale = mercatorScale(mercatorToLonLat(node.centerMercator[0], node.centerMercator[1])[1]);
+
     // 1. Perform frustum culling check first
     if (this.cullTiles && frustum) {
-      const tileMinZ = this.exagZ(-1000);
-      const tileMaxZ = this.exagZ(9000);
+      // Box Z in world (Mercator) metres: exagZ returns true metres, ×zScale
+      // converts to the world Z the frustum is projected in.
+      const tileMinZ = this.exagZ(-1000) * zScale;
+      const tileMaxZ = this.exagZ(9000) * zScale;
       const box = new THREE.Box3(
         new THREE.Vector3(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ),
         new THREE.Vector3(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ)
@@ -437,7 +445,9 @@ export class TileManager {
 
     const clampX = Math.max(node.bounds.west, Math.min(node.bounds.east, cameraPosGlobal.x));
     const clampY = Math.max(node.bounds.south, Math.min(node.bounds.north, cameraPosGlobal.y));
-    const closestPoint = new THREE.Vector3(clampX, clampY, node.centerElevation ?? 0);
+    // closestPoint.z must be in world Z (Mercator metres) to match
+    // cameraPosGlobal.z — both the frustum and the camera live in world space.
+    const closestPoint = new THREE.Vector3(clampX, clampY, this.exagZ(node.centerElevation ?? 0) * zScale);
     const dist = Math.max(1, cameraPosGlobal.distanceTo(closestPoint));
 
     // Pin this key as active
