@@ -182,9 +182,9 @@ hud.innerHTML = `
     <div style="margin-bottom: 8px;">
       <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
         <span>IMAGERY BRIGHTNESS</span>
-        <span id="val-brightness">1.15</span>
+        <span id="val-brightness">1.75</span>
       </div>
-      <input type="range" id="ctrl-brightness" min="0.5" max="2.0" step="0.05" value="1.15" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+      <input type="range" id="ctrl-brightness" min="0.5" max="2.0" step="0.05" value="1.75" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
     <div style="margin-bottom: 8px;">
@@ -346,11 +346,11 @@ hud.innerHTML = `
       <!-- Hypsometric bounds mode (Global vs Local) -->
       <div style="display: flex; gap: 12px; margin-bottom: 6px; font-size: 9px; color: #cbd5e1;">
         <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none;">
-          <input type="radio" name="ctrl-hyp-bounds" value="global" checked style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
+          <input type="radio" name="ctrl-hyp-bounds" value="global" style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
           Global
         </label>
         <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none;">
-          <input type="radio" name="ctrl-hyp-bounds" value="local" style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
+          <input type="radio" name="ctrl-hyp-bounds" value="local" checked style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
           Local to Viewport
         </label>
       </div>
