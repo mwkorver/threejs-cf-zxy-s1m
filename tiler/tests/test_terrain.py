@@ -4,6 +4,7 @@ tile assembly are exercised for real."""
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from tiler import terrain
 from tiler.encoding import decode_terrarium
@@ -144,3 +145,73 @@ def test_farfield_missing_child_fills_sea_level():
     with patch.object(terrain.rasterio, "open", side_effect=fake_open):
         body = terrain.render_farfield_tile(7, 1, 1, 512)
     assert body is None  # all children missing -> no tile
+
+
+def test_farfield_mixed_missing_child_renders_sea_level_quadrant():
+    # One child genuinely absent (GDAL's not-found message) + three present:
+    # the absent quadrant fills sea level, the rest carry their data.
+    from rasterio.errors import RasterioIOError
+    from tiler.encoding import encode_terrarium
+
+    def fake_open(url):
+        parts = url.rstrip(".png").split("/")
+        cx, cy = int(parts[-2]), int(parts[-1])
+        if (cx, cy) == (2, 2):  # NW child of parent (1, 1)
+            raise RasterioIOError(
+                f"'{url}' does not exist in the file system, and is not "
+                "recognized as a supported dataset name."
+            )
+        rgb = encode_terrarium(np.full((256, 256), 40.0))
+        ds = MagicMock()
+        ds.read.return_value = np.transpose(rgb, (2, 0, 1))
+        ds.__enter__.return_value = ds
+        ds.__exit__.return_value = False
+        return ds
+
+    with patch.object(terrain.rasterio, "open", side_effect=fake_open):
+        body = terrain.render_farfield_tile(7, 1, 1, 512)
+
+    out = decode_terrarium(_decode_webp(body))
+    assert np.allclose(out[:256, :256], 0.0)                 # absent -> sea level
+    assert np.allclose(out[256:, 256:], 40.0, atol=1 / 256)  # present children kept
+
+
+def test_farfield_transient_child_fails_tile_after_retry():
+    # A transient failure (network/5xx) must fail the WHOLE tile (-> 503
+    # upstream) rather than bake a sea-level quadrant into an immutable tile —
+    # and must be retried once before giving up.
+    from rasterio.errors import RasterioIOError
+
+    calls = []
+
+    def fake_open(url):
+        calls.append(url)
+        raise RasterioIOError("CURL error: Connection timed out")
+
+    with (
+        patch.object(terrain.rasterio, "open", side_effect=fake_open),
+        patch.object(terrain.time, "sleep"),  # keep the retry backoff instant
+    ):
+        with pytest.raises(terrain.TransientTerrainError):
+            terrain.render_farfield_tile(7, 1, 1, 512)
+    assert len(calls) == terrain._FARFIELD_ATTEMPTS  # first child retried, then raised
+
+
+def test_mosaic_read_errors_propagate():
+    # Real read failures (throttle, expired creds) must surface (-> 5xx), not
+    # become "no coverage": a transient blip must never turn into a cacheable
+    # 404 or a silent fall-through to a coarser DEM.
+    from rasterio.errors import RasterioIOError
+
+    with patch.object(terrain, "mosaic_reader", side_effect=RasterioIOError("503 Slow Down")):
+        with pytest.raises(RasterioIOError):
+            terrain.render_terrain_tile(["s3://prd-tnm/x.tif"], 15, 0, 0, 512)
+
+
+def test_mosaic_empty_returns_none():
+    # Footprint intersected but no pixels covered the tile: genuine
+    # no-coverage -> None (caller falls through to the next DEM / 404s).
+    from rio_tiler.errors import EmptyMosaicError
+
+    with patch.object(terrain, "mosaic_reader", side_effect=EmptyMosaicError()):
+        assert terrain.render_terrain_tile(["s3://prd-tnm/x.tif"], 15, 0, 0, 512) is None
