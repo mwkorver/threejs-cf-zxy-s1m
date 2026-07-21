@@ -23,6 +23,9 @@ const YEAR = Number(params.get("year") ?? 2023);
 const MAX_ZOOM = Number(params.get("maxzoom") ?? 18);
 const LOD_FACTOR = Number(params.get("lod") ?? 2.2);
 const CULL_TILES = params.get("cull") !== "false";
+const PREFETCH_LOOKAHEAD = Number(params.get("lookahead") ?? 4);
+const PREFETCH_SAMPLES = Number(params.get("samples") ?? 4);
+
 
 // NJ flight corridor center
 const startLon = -74.44;
@@ -111,6 +114,9 @@ const tileManager = new TileManager(
   CULL_TILES
 );
 tileManager.terrainMinZoom = 0;
+tileManager.prefetchLookaheadSec = PREFETCH_LOOKAHEAD;
+tileManager.prefetchSamples = PREFETCH_SAMPLES;
+
 // Debug handles for the browser console.
 (window as any).tileManager = tileManager;
 (window as any).camera = camera;
@@ -148,6 +154,8 @@ hud.innerHTML = `
 
   <div style="margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; margin-bottom: 4px;">ACTIVE TILES: <span id="hud-tiles">0</span></div>
   <div>GPU CACHE: <span id="hud-cache">0.00</span> / 256 MB</div>
+  <div>PREFETCH: <span id="hud-prefetch">0</span> tiles ahead</div>
+
   
   <div style="margin-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px;">
     <div style="font-weight: bold; color: #38bdf8; margin-bottom: 8px;">🌅 ATMOSPHERE & LIGHTING</div>
@@ -411,6 +419,8 @@ const hudAlt = document.getElementById("hud-alt")!;
 const hudSpeed = document.getElementById("hud-speed")!;
 const hudTiles = document.getElementById("hud-tiles")!;
 const hudCache = document.getElementById("hud-cache")!;
+const hudPrefetch = document.getElementById("hud-prefetch")!;
+
 
 const ctrlPreset = document.getElementById("ctrl-preset") as HTMLSelectElement;
 const ctrlImagerySource = document.getElementById("ctrl-imagery-source") as HTMLSelectElement;
@@ -905,6 +915,8 @@ function frameLoop() {
   hudSpeed.textContent = direction.lengthSq() > 0 ? speedKnots.toString() : "0";
   hudTiles.textContent = tileManager.getActiveKeys().size.toString();
   hudCache.textContent = (bundleCache.bytesUsed() / (1024 * 1024)).toFixed(2);
+  hudPrefetch.textContent = tileManager.getLastPrefetchCount().toString();
+
 
   // Rotate the compass rose so the red N points to where north is on screen.
   compassFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);

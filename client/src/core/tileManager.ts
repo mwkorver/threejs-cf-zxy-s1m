@@ -109,6 +109,18 @@ export class TileManager {
   public transitionTtlMs = 5000;
   private workerPool = new TileWorkerPool();
 
+  // --- Velocity-vector prefetch (plan §5.3) ---
+  private prefetchPrevPos?: THREE.Vector3;
+  private prefetchPrevTimeMs = 0;
+  private prefetchVelocity = new THREE.Vector3(); // Mercator m/s, local offset space
+  private lastPrefetchCount = 0;
+  /** How far ahead (seconds) to sample along the flight vector. */
+  public prefetchLookaheadSec = 4;
+  /** Number of sample points along the look-ahead ray. */
+  public prefetchSamples = 4;
+  /** Minimum horizontal Mercator m/s before prefetch activates (≈ 100 kt ground). */
+  public prefetchMinSpeedMs = 50;
+
   // Screen-space-error projection factor: (viewportH/2) * cot(fovY/2), i.e.
   // pixels per radian of vertical view angle. Recomputed each update() from
   // the camera's projection matrix; fallback for cameraless (test) updates.
@@ -211,6 +223,22 @@ export class TileManager {
     const cx = localCameraPos.x + this.worldAnchor[0];
     const cy = localCameraPos.y + this.worldAnchor[1];
     this.lastCameraMercator = [cx, cy];
+
+    // Velocity estimate for prefetch (§5.3): finite-difference from prev frame.
+    // Clamped to 200 ms: tabs that go to background then resume would produce a
+    // huge phantom velocity spike from accumulated dt — reset instead.
+    const pfNow = performance.now();
+    const pfDt = pfNow - this.prefetchPrevTimeMs;
+    if (this.prefetchPrevPos && pfDt > 0 && pfDt < 200) {
+      this.prefetchVelocity
+        .subVectors(localCameraPos, this.prefetchPrevPos)
+        .divideScalar(pfDt / 1000);
+    } else if (pfDt >= 200) {
+      // Stale gap (tab hidden, long GC pause, etc.) — reset so we don't lurch.
+      this.prefetchVelocity.set(0, 0, 0);
+    }
+    this.prefetchPrevPos = localCameraPos.clone();
+    this.prefetchPrevTimeMs = pfNow;
 
     // 2. Determine the root-grid center tile. Bias it forward along the
     // horizontal component of the view direction: flying level, the frustum
@@ -370,6 +398,9 @@ export class TileManager {
       this.globalUniforms.localMinElev.value = 0.0;
       this.globalUniforms.localMaxElev.value = 4000.0;
     }
+
+    // 10. Prefetch tiles along the flight vector (§5.3)
+    this.prefetchAhead();
   }
 
   /**
@@ -377,6 +408,11 @@ export class TileManager {
    */
   getActiveKeys(): Set<string> {
     return this.activeKeys;
+  }
+
+  /** Number of prefetch tile requests enqueued in the last update(). */
+  getLastPrefetchCount(): number {
+    return this.lastPrefetchCount;
   }
 
   /** @returns true if the node was frustum-culled (renders nothing on screen). */
@@ -584,39 +620,15 @@ export class TileManager {
           return;
         }
 
-        const { demSource, centerElevation, meshData, imageBitmap, minElevation, maxElevation } = res;
-
-        // Build Three.js geometry from worker-returned typed arrays
-        const geom = new THREE.BufferGeometry();
-        geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
-        geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
-        geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
-        geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
-
-        // Create texture if imagery loaded successfully
-        let texture: THREE.Texture | undefined;
-        if (imageBitmap) {
-          const branded = this.bakeTileLabel(imageBitmap, node.tile);
-          texture = new THREE.CanvasTexture(branded as unknown as HTMLCanvasElement);
-          texture.colorSpace = THREE.SRGBColorSpace;
-          texture.anisotropy = 4;
-        }
-
-        const bytes =
-          meshData.positions.byteLength +
-          meshData.normals.byteLength +
-          meshData.indices.byteLength +
-          (texture ? 512 * 512 * 4 : 0);
-
+        const { demSource, centerElevation, minElevation, maxElevation } = res;
         node.centerElevation = centerElevation;
         node.demSource = demSource;
         node.minElevation = minElevation;
         node.maxElevation = maxElevation;
 
-        const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation, demSource, minElevation, maxElevation };
+        const bundle = this.buildBundleFromResult(key, node.tile, res);
         this.bundleCache.put(bundle, this.activeKeys);
-
-        this.createMeshFromBundle(node, geom, texture);
+        this.createMeshFromBundle(node, bundle.geometry, bundle.texture);
         node.loaded = true;
         node.loading = false;
         node.retryAfter = undefined;
@@ -630,6 +642,113 @@ export class TileManager {
         node.loading = false;
         node.retryAfter = performance.now() + 2000 + Math.random() * 2000;
       });
+  }
+
+  /**
+   * Shared resolution step for triggerLoad and prefetchAhead: convert a worker
+   * result into a Bundle (geometry + texture) without touching any TileNode.
+   * Callers are responsible for putting the bundle into the cache.
+   */
+  private buildBundleFromResult(
+    key: string,
+    tile: TileId,
+    res: {
+      demSource: string;
+      centerElevation: number;
+      meshData: { positions: Float32Array; uvs: Float32Array; normals: Float32Array; indices: Uint32Array };
+      imageBitmap?: ImageBitmap | null;
+      minElevation: number;
+      maxElevation: number;
+    }
+  ): Bundle {
+    const { demSource, centerElevation, meshData, imageBitmap, minElevation, maxElevation } = res;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+    geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
+    geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+    geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+    let texture: THREE.Texture | undefined;
+    if (imageBitmap) {
+      const branded = this.bakeTileLabel(imageBitmap, tile);
+      texture = new THREE.CanvasTexture(branded as unknown as HTMLCanvasElement);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+    }
+
+    const bytes =
+      meshData.positions.byteLength +
+      meshData.normals.byteLength +
+      meshData.indices.byteLength +
+      (texture ? 512 * 512 * 4 : 0);
+
+    return { key, bytes, geometry: geom, texture, centerElevation, demSource, minElevation, maxElevation };
+  }
+
+  /**
+   * Velocity-vector prefetch (plan §5.3): sample look-ahead points along the
+   * horizontal flight vector and pre-warm the bundle cache for tiles the camera
+   * will encounter in prefetchLookaheadSec seconds. Called at the end of update().
+   *
+   * Tiles already in the bundle cache or actively loading are skipped (no-ops).
+   * Prefetch requests use a priority well below visible tiles so the worker pool
+   * never starves the current frame's tile loads.
+   */
+  private prefetchAhead(): void {
+    this.lastPrefetchCount = 0;
+    if (!this.prefetchPrevPos) return;
+
+    const horizSpeedSq =
+      this.prefetchVelocity.x ** 2 + this.prefetchVelocity.y ** 2;
+    if (horizSpeedSq < this.prefetchMinSpeedMs ** 2) return;
+
+    const options = {
+      baseUrl: this.baseUrl,
+      layer: this.layer,
+      year: this.year,
+      imagerySource: this.imagerySource,
+      terrainMinZoom: this.terrainMinZoom,
+      usgsMinZoom: this.usgsMinZoom,
+      s1mMinZoom: this.s1mMinZoom,
+      gridStep: this.gridStep,
+      externalImageryMaxZoom: this.externalImageryMaxZoom,
+    };
+
+    // Prefetch zoom: always at maxZoom (e.g. z15–18) — the tier where cold
+    // misses actually cause pop-in. At coarser zooms tiles are 100s of km
+    // wide; the camera can't outrun them and they're already in the active tree.
+    const zoom = this.maxZoom;
+    const anchorX = this.worldAnchor[0];
+    const anchorY = this.worldAnchor[1];
+
+    for (let s = 1; s <= this.prefetchSamples; s++) {
+      const t = (s / this.prefetchSamples) * this.prefetchLookaheadSec;
+      const fx = (this.prefetchPrevPos.x + anchorX) + this.prefetchVelocity.x * t;
+      const fy = (this.prefetchPrevPos.y + anchorY) + this.prefetchVelocity.y * t;
+
+      const tile = mercatorToTile(fx, fy, zoom);
+      const key = tileKey(tile);
+
+      // Skip if already cached or in the active LOD tree (loads via triggerLoad).
+      if (this.bundleCache.get(key)) continue;
+      if (this.activeKeys.has(key)) continue;
+
+      this.lastPrefetchCount++;
+      // Prefetch priority is well below active tiles. triggerLoad uses negative
+      // camera distances (roughly -1e3 to -1e6); -1e7 ensures prefetch yields.
+      const priority = -1e7 - s;
+      const capturedKey = key;
+      const capturedTile = { ...tile };
+      this.workerPool.requestTile(capturedTile, priority, options)
+        .then((res) => {
+          const bundle = this.buildBundleFromResult(capturedKey, capturedTile, res);
+          this.bundleCache.put(bundle, this.activeKeys);
+        })
+        .catch(() => {
+          // Non-fatal: the LOD tree retries if/when the camera arrives.
+        });
+    }
   }
 
   private buildViewportFootprintsMesh(
