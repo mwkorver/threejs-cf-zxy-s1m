@@ -244,6 +244,18 @@ hud.innerHTML = `
     </div>
 
     <div style="margin-bottom: 8px;">
+      <label style="display: flex; align-items: center; gap: 6px; font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">
+        <input type="checkbox" id="ctrl-follow-dem" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+        FOLLOW TERRAIN (AGL hold)
+      </label>
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-top: 4px; margin-bottom: 2px;">
+        <span>AGL ALTITUDE</span>
+        <span id="val-agl-alt">500 m</span>
+      </div>
+      <input type="range" id="ctrl-agl-alt" min="50" max="5000" step="50" value="500" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 8px;">
       <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
         <span>USDA IMAGERY &le; Z (else COG tiler)</span>
         <span id="val-extimagery">13</span>
@@ -375,7 +387,7 @@ hud.innerHTML = `
     • Drag — Pan<br>
     • Right-drag — Rotate / Tilt<br>
     • Scroll — Zoom to cursor<br>
-    • Double-click — Zoom in<br>
+    • Double-click — Fly to point
     • [W/A/S/D] Fly · [Q/E] Up/Down · [Shift] Boost
   </div>
 `;
@@ -429,6 +441,8 @@ const ctrlAzimuth = document.getElementById("ctrl-azimuth") as HTMLInputElement;
 const ctrlAltitude = document.getElementById("ctrl-altitude") as HTMLInputElement;
 const ctrlFog = document.getElementById("ctrl-fog") as HTMLInputElement;
 const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInputElement;
+const ctrlFollowDem = document.getElementById("ctrl-follow-dem") as HTMLInputElement;
+const ctrlAglAlt = document.getElementById("ctrl-agl-alt") as HTMLInputElement;
 const ctrlExtImagery = document.getElementById("ctrl-extimagery") as HTMLInputElement;
 const ctrlUsgsMin = document.getElementById("ctrl-usgs-min") as HTMLInputElement;
 const ctrlS1mMin = document.getElementById("ctrl-s1m-min") as HTMLInputElement;
@@ -458,6 +472,7 @@ const valAzimuth = document.getElementById("val-azimuth")!;
 const valAltitude = document.getElementById("val-altitude")!;
 const valFog = document.getElementById("val-fog")!;
 const valExaggeration = document.getElementById("val-exaggeration")!;
+const valAglAlt = document.getElementById("val-agl-alt")!;
 const valExtImagery = document.getElementById("val-extimagery")!;
 const valMapzenMax = document.getElementById("val-mapzen-max")!;
 const valUsgsMin = document.getElementById("val-usgs-min")!;
@@ -601,6 +616,92 @@ ctrlExaggeration.addEventListener("input", () => {
   tileManager.setVerticalExaggeration(val);
 });
 
+ctrlAglAlt.addEventListener("input", () => {
+  valAglAlt.textContent = `${parseInt(ctrlAglAlt.value)} m`;
+});
+
+// --- FlyTo animated trajectory (ported from pTolemy3D's flyTo) ---
+// Replaces the instant lerp double-click with a smooth accel/decel path
+// that climbs to a cruise altitude, arcs over, and descends to the target.
+interface FlyToState {
+  startPos: THREE.Vector3;
+  endPos: THREE.Vector3;
+  startQuat: THREE.Quaternion;
+  endQuat: THREE.Quaternion;
+  startTime: number;
+  duration: number;
+  cruiseAlt: number;  // world Z apex along the arc
+}
+let flyToState: FlyToState | null = null;
+
+/** Cancel any in-flight FlyTo trajectory. */
+function cancelFlyTo(): void {
+  flyToState = null;
+}
+
+/**
+ * Smoothstep easing: 0 at t=0, 1 at t=1, with zero velocity at both ends
+ * (accel from rest, decel to rest). Matches pTolemy3D's brake-distance logic
+ * but in a closed form.
+ */
+function smoothstep(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Initiate a smooth FlyTo trajectory to a ground point. The camera climbs
+ * to a cruise altitude (midpoint Z raised by the arc factor), rotates to
+ * look at the target, then descends. Duration scales with distance.
+ */
+function flyTo(targetGround: THREE.Vector3): void {
+  const start = camera.position.clone();
+  const dist = start.distanceTo(targetGround);
+  // Duration scales with distance: ~2s for 1km, ~6s for 100km, capped.
+  const duration = Math.min(8000, Math.max(2000, dist * 0.04));
+  // Cruise altitude: arc above the direct path. Raise the midpoint Z so
+  // the camera climbs then descends, mirroring pTolemy3D's cruise_alt.
+  const cruiseAlt = Math.max(start.z, targetGround.z) + Math.min(dist * 0.15, 5000);
+
+  // End orientation: look straight down at the target from the arrival altitude.
+  const endQuat = new THREE.Quaternion();
+  const lookFrom = targetGround.clone();
+  lookFrom.z = targetGround.z + 500; // arrive 500m above the clicked point
+  const m = new THREE.Matrix4().lookAt(lookFrom, targetGround, new THREE.Vector3(0, 0, 1));
+  endQuat.setFromRotationMatrix(m);
+
+  flyToState = {
+    startPos: start,
+    endPos: lookFrom,
+    startQuat: camera.quaternion.clone(),
+    endQuat,
+    startTime: performance.now(),
+    duration,
+    cruiseAlt,
+  };
+}
+
+/** Advance the FlyTo trajectory by one frame; returns true if active. */
+function updateFlyTo(): boolean {
+  if (!flyToState) return false;
+  const s = flyToState;
+  const elapsed = performance.now() - s.startTime;
+  const t = Math.min(1, elapsed / s.duration);
+  const e = smoothstep(t);
+
+  // Position: lerp start→end, but raise Z along a sine arc for cruise altitude.
+  camera.position.lerpVectors(s.startPos, s.endPos, e);
+  const arcZ = Math.sin(t * Math.PI) * (s.cruiseAlt - Math.max(s.startPos.z, s.endPos.z));
+  camera.position.z += Math.max(0, arcZ);
+
+  // Orientation: slerp from start to end quaternion.
+  camera.quaternion.slerpQuaternions(s.startQuat, s.endQuat, e);
+
+  if (t >= 1) {
+    flyToState = null;
+  }
+  return true;
+}
+
 ctrlFootprints.addEventListener("change", () => {
   tileManager.setShowFootprints(ctrlFootprints.checked);
 });
@@ -711,8 +812,12 @@ let previousMousePosition = { x: 0, y: 0 };
 let baseSpeedKnots = 800; // Customizable flight speed setting in knots
 let speedKnots = 800; // Default active airspeed simulation
 
-// Track keyboard state
-window.addEventListener("keydown", (e) => activeKeys.add(e.code));
+// Track keyboard state — any movement key cancels an in-flight FlyTo trajectory.
+const movementCodes = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ShiftLeft", "ShiftRight"]);
+window.addEventListener("keydown", (e) => {
+  activeKeys.add(e.code);
+  if (movementCodes.has(e.code)) cancelFlyTo();
+});
 window.addEventListener("keyup", (e) => activeKeys.delete(e.code));
 
 // Prevent standard context menu when clicking on the 3D scene (outside HUD)
@@ -793,6 +898,7 @@ window.addEventListener("mousedown", (e) => {
 
 window.addEventListener("mousemove", (e) => {
   if (dragMode === null || e.buttons === 0) return;
+  cancelFlyTo();
   const dx = e.clientX - previousMousePosition.x;
   const dy = e.clientY - previousMousePosition.y;
   previousMousePosition = { x: e.clientX, y: e.clientY };
@@ -846,12 +952,11 @@ window.addEventListener("wheel", (e) => {
   }
 }, { passive: false });
 
-// Double-click = zoom in 2x on the clicked point (orientation unchanged, so
-// the point stays under the cursor).
+// Double-click = FlyTo the clicked ground point (smooth animated trajectory).
 window.addEventListener("dblclick", (e) => {
   if (hud.contains(e.target as Node)) return;
   const point = pickGround(e.clientX, e.clientY);
-  if (point) camera.position.lerp(point, 0.5); // halve the distance to the point
+  if (point) flyTo(point);
 });
 
 window.addEventListener("resize", () => {
@@ -879,24 +984,49 @@ function frameLoop() {
   const speed = baseSpeed * speedMultiplier * altitudeFactor;
   speedKnots = Math.round(speed * 1.94384); // Convert relative m/s to simulated knots
 
-  // Process movement input relative to camera heading
-  const direction = new THREE.Vector3();
-  if (activeKeys.has("KeyW")) direction.z -= 1;
-  if (activeKeys.has("KeyS")) direction.z += 1;
-  if (activeKeys.has("KeyA")) direction.x -= 1;
-  if (activeKeys.has("KeyD")) direction.x += 1;
+  // FlyTo trajectory takes over camera position/orientation until it completes.
+  // Manual input (keys/mouse) cancels it via cancelFlyTo().
+  let direction: THREE.Vector3 | null = null;
+  if (updateFlyTo()) {
+    // Skip manual movement; still update LOD and render.
+  } else {
+    // Process movement input relative to camera heading
+    direction = new THREE.Vector3();
+    if (activeKeys.has("KeyW")) direction.z -= 1;
+    if (activeKeys.has("KeyS")) direction.z += 1;
+    if (activeKeys.has("KeyA")) direction.x -= 1;
+    if (activeKeys.has("KeyD")) direction.x += 1;
 
-  // Apply camera orientation to horizontal inputs
-  direction.normalize();
-  direction.applyQuaternion(camera.quaternion);
+    // Apply camera orientation to horizontal inputs
+    direction.normalize();
+    direction.applyQuaternion(camera.quaternion);
 
-  // Vertical flying inputs (Q=down, E=up)
-  if (activeKeys.has("KeyQ")) direction.z -= 1;
-  if (activeKeys.has("KeyE")) direction.z += 1;
+    // Vertical flying inputs (Q=down, E=up)
+    if (activeKeys.has("KeyQ")) direction.z -= 1;
+    if (activeKeys.has("KeyE")) direction.z += 1;
 
-  // Update position
-  if (direction.lengthSq() > 0) {
-    camera.position.addScaledVector(direction.normalize(), speed * dt);
+    // Update position
+    if (direction.lengthSq() > 0) {
+      camera.position.addScaledVector(direction.normalize(), speed * dt);
+    }
+  }
+
+  // Follow-DEM: maintain constant above-ground clearance instead of
+  // above-sea-level altitude (ported from pTolemy3D's setFollowDem). The
+  // terrain Z under the camera is sampled from loaded tiles; camera Z is
+  // adjusted to hold the target AGL. Skipped when no terrain is loaded
+  // under the camera (e.g. over open ocean or during cold start).
+  if (ctrlFollowDem.checked) {
+    const gx = camera.position.x + worldAnchor[0];
+    const gy = camera.position.y + worldAnchor[1];
+    const groundElev = tileManager.getElevationAt(gx, gy);
+    if (groundElev !== null) {
+      const zScale = 1 / Math.cos((mercatorToLonLat(gx, gy)[1] * Math.PI) / 180);
+      const targetZ = groundElev * zScale + parseFloat(ctrlAglAlt.value);
+      // Smooth toward target (exponential smoothing) to avoid jitter when
+      // tiles swap LOD and centerElevation steps. τ = 0.2s.
+      camera.position.z += (targetZ - camera.position.z) * Math.min(1, dt / 0.2);
+    }
   }
 
   // Update LOD and stream/cache terrain tiles
@@ -912,7 +1042,7 @@ function frameLoop() {
 
   hudPos.textContent = `${lat.toFixed(5)} / ${lon.toFixed(5)}`;
   hudAlt.textContent = Math.round(camera.position.z).toString();
-  hudSpeed.textContent = direction.lengthSq() > 0 ? speedKnots.toString() : "0";
+  hudSpeed.textContent = (direction && direction.lengthSq() > 0) ? speedKnots.toString() : "0";
   hudTiles.textContent = tileManager.getActiveKeys().size.toString();
   hudCache.textContent = (bundleCache.bytesUsed() / (1024 * 1024)).toFixed(2);
   hudPrefetch.textContent = tileManager.getLastPrefetchCount().toString();
