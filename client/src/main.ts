@@ -14,9 +14,15 @@ const params = new URLSearchParams(window.location.search);
 const useLocal = params.get("src") === "local";
 const useLocalTiler = params.get("src") === "tiler-local";
 
-const BASE_URL = useLocal 
-  ? "/tiles" 
-  : (useLocalTiler ? "http://localhost:8000" : "https://REDACTED.cloudfront.net");
+// Deployed tile CDN. Mirrored into client/.env.local by infra/deploy-edge.sh
+// from the edge stack's DistributionDomain output — same lockstep trick as
+// VITE_TILE_KEY — so a recreated distribution doesn't need a source edit. The
+// fallback is the current distribution, so an unset var behaves as before.
+const CDN_BASE_URL = import.meta.env.VITE_TILE_BASE_URL ?? "https://REDACTED.cloudfront.net";
+
+const BASE_URL = useLocal
+  ? "/tiles"
+  : (useLocalTiler ? "http://localhost:8000" : CDN_BASE_URL);
 
 const LAYER = params.get("layer") ?? "naip-visualization";
 const YEAR = Number(params.get("year") ?? 2023);
