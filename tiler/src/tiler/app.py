@@ -14,7 +14,7 @@ from .imagery import render_imagery_tile
 from .registry import LAYERS
 from .resolver import MosaicResolver, S1MResolver
 from .settings import settings
-from .terrain import render_farfield_tile, render_terrain_tile
+from .terrain import TransientTerrainError, render_farfield_tile, render_terrain_tile
 
 app = FastAPI(title="flight-sim tiler", version="0.0.1")
 
@@ -111,8 +111,12 @@ def terrain_tile(
     s1m_min_zoom: int = None
 ) -> Response:
     """512px Terrarium Terrain-RGB tile, lossless WebP (plan §4.2)."""
+    if not 0 <= z <= settings.terrain_max_zoom:
+        # Beyond native DEM resolution: 404 so the CDN never caches upsampled
+        # junk over an unbounded key space (mirrors the imagery maxzoom).
+        raise HTTPException(404, f"z {z} beyond terrain maxzoom {settings.terrain_max_zoom}")
     n = 2**z
-    if not (0 <= z and 0 <= x < n and 0 <= y < n):
+    if not (0 <= x < n and 0 <= y < n):
         raise HTTPException(404, "tile out of range")
 
     resolved_usgs_min_zoom = usgs_min_zoom if usgs_min_zoom is not None else settings.usgs_min_zoom
@@ -147,7 +151,13 @@ def terrain_tile(
 
     # 3. Fall back to far-field planet-wide tiles if still no coverage
     if body is None:
-        body = render_farfield_tile(z, x, y, tilesize=settings.tile_size)
+        try:
+            body = render_farfield_tile(z, x, y, tilesize=settings.tile_size)
+        except TransientTerrainError:
+            # A child fetch failed transiently — 503 so the client retries and
+            # this immutable tile isn't cached with a sea-level hole (same
+            # contract as the basemap endpoint).
+            raise HTTPException(503, "terrain upstream unavailable, retry", headers={"Retry-After": "2"})
         dem_source = "farfield"
 
     if body is None:

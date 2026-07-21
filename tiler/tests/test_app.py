@@ -109,6 +109,25 @@ def test_terrain_out_of_range_404():
     assert client.get("/terrain/3/8/0.webp").status_code == 404
 
 
+def test_terrain_beyond_maxzoom_404_without_resolving():
+    # z19 must 404 before any resolve — upsampled terrain never enters the
+    # CDN cache and the tile key space stays bounded (mirrors imagery).
+    with patch.object(app_module, "get_s1m_resolver") as s1m:
+        assert client.get("/terrain/19/0/0.webp").status_code == 404
+        s1m.assert_not_called()
+
+
+def test_terrain_farfield_transient_503():
+    # A transient far-field child failure must 503 (client retries) so the
+    # immutable tile is never cached with a sea-level hole.
+    from tiler.terrain import TransientTerrainError
+
+    with patch.object(app_module, "render_farfield_tile", side_effect=TransientTerrainError("down")):
+        r = client.get("/terrain/8/75/96.webp")
+    assert r.status_code == 503
+    assert r.headers.get("retry-after") == "2"
+
+
 # --- basemap endpoint ---
 
 def test_basemap_happy_path_headers():
