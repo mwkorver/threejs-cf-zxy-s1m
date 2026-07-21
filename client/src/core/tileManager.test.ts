@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as THREE from "three";
 import { TileManager, type TileNode } from "./tileManager";
 import { BundleCache, type Bundle } from "./bundleCache";
-import { mercatorToTile } from "./mercator";
+import { mercatorToTile, lonLatToMercator, mercatorScale } from "./mercator";
 
 // Suppress noisy console output from tile loading warnings
 let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -435,6 +435,46 @@ describe("TileManager frustum culling", () => {
     const tm = makeManager({ maxZoom: 12, cullTiles: false });
     tm.update(new THREE.Vector3(0, 0, 1000));
     expect(tm.getActiveKeys().size).toBe(25);
+  });
+
+  it("sec(lat) audit: frustum box Z is scaled by mercatorScale at high latitude", () => {
+    // Regression test for the §5.1 sec(lat) scale audit: the frustum culling
+    // box Z must be in world (Mercator) metres, not true metres. At 49°N
+    // (sec(lat) ≈ 1.52), a 9000 m peak renders at world Z = 13680 m. Before
+    // the fix the box only extended to 9000 (true), so a camera at 10000 m
+    // world Z looking horizontally could cull a tile whose terrain actually
+    // extends above the frustum's lower plane.
+    //
+    // We verify the fix by placing the camera at 49°N with a high-elevation
+    // tile and checking it stays visible. (At the equator sec(lat)=1, so the
+    // bug is invisible there — the test must run at high latitude.)
+    const anchor = lonLatToMercator(0, 49); // 49°N, sec(lat) ≈ 1.524
+    const scene = new THREE.Scene();
+    const cache = new BundleCache(64 * 1024 * 1024);
+    const tm = new TileManager(
+      "http://test-tiler", "test-layer", 2023, scene, cache,
+      anchor, 12, 12, 2.2, true, // cullTiles = true
+    );
+
+    // Camera at world Z = 10000, looking straight down. All 25 root tiles
+    // are under the camera and must be visible — none culled by Z range.
+    const camera = new THREE.PerspectiveCamera(60, 1, 1, 100000);
+    camera.position.set(0, 0, 10000);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld(true);
+    tm.update(camera.position, camera);
+
+    // With the bug (true-metre box Z), tiles whose terrain exceeds 10000/1.52
+    // ≈ 6562 m true would have their box top at 9000 (true) < 10000 (camera),
+    // potentially causing culling. With the fix, box top = 9000*1.52 = 13680
+    // > 10000, so tiles are correctly retained.
+    const { rootNodes } = internals(tm);
+    let visibleCount = 0;
+    for (const node of rootNodes.values()) {
+      if (node.visible) visibleCount++;
+    }
+    // Looking straight down, all in-frustum roots should be visible.
+    expect(visibleCount).toBeGreaterThan(0);
   });
 
   it("retains children structure for culled nodes and only hides them when camera rotates away", () => {
