@@ -131,10 +131,10 @@ export class TileManager {
     showDemColors: { value: false },
     shadingMode: { value: 0.0 },
     hypsometricBlend: { value: 0.5 },
-    useLocalHypso: { value: 0.0 },
+    useLocalHypso: { value: 1.0 },
     localMinElev: { value: 0.0 },
     localMaxElev: { value: 4000.0 },
-    brightness: { value: 1.15 },
+    brightness: { value: 1.75 },
     contrast: { value: 1.10 },
     saturation: { value: 1.15 }
   };
