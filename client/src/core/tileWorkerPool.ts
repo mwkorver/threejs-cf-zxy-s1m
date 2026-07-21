@@ -1,5 +1,5 @@
 import { type TileId } from "./mercator";
-import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM } from "./tileLoader";
+import { loadTerrain, loadImageryFor } from "./tileLoader";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 
 interface PendingTask {
@@ -259,15 +259,15 @@ export class TileWorkerPool {
 
     let imageBitmap: ImageBitmap | null = null;
     try {
-      if (options.imagerySource === "osm") {
-        imageBitmap = await loadImageryOSM(tile);
-      } else {
-        if (tile.z <= options.externalImageryMaxZoom) {
-          imageBitmap = await loadImageryExternal(options.baseUrl, tile);
-        } else {
-          imageBitmap = await loadImagery(options.baseUrl, options.layer, options.year, tile);
-        }
-      }
+      // Same shared routing the worker uses, so this fallback (and the tests
+      // that run it) can't drift from the browser's real path.
+      imageBitmap = await loadImageryFor(tile, {
+        baseUrl: options.baseUrl,
+        layer: options.layer,
+        year: options.year,
+        imagerySource: options.imagerySource,
+        externalImageryMaxZoom: options.externalImageryMaxZoom,
+      });
     } catch (err) {
       console.warn(`Fallback imagery load failed for tile ${tile.z}/${tile.x}/${tile.y}:`, err);
     }

@@ -5,8 +5,16 @@
  */
 
 import { decodeTerrarium } from "./terrarium";
-import { tileBoundsMercator, type TileId } from "./mercator";
+import { type TileId } from "./mercator";
 import { withKey } from "./tileKey";
+import {
+  basemapRequest,
+  cogImageryRequest,
+  imageryRequest,
+  osmRequest,
+  terrainRequest,
+  type ImageryRouting,
+} from "./tileUrls";
 
 export interface TileManifest {
   layer: string;
@@ -57,13 +65,8 @@ export async function loadTerrain(
   usgsMinZoom?: number,
   s1mMinZoom?: number
 ): Promise<DecodedTerrain> {
-  let url = `${baseUrl}/terrain/${t.z}/${t.x}/${t.y}.webp`;
-  const params = [];
-  if (usgsMinZoom !== undefined && usgsMinZoom !== null) params.push(`usgs_min_zoom=${usgsMinZoom}`);
-  if (s1mMinZoom !== undefined && s1mMinZoom !== null) params.push(`s1m_min_zoom=${s1mMinZoom}`);
-  if (params.length > 0) url += `?${params.join("&")}`;
-
-  const res = await fetchTile(withKey(url), `terrain ${t.z}/${t.x}/${t.y}`);
+  const { url, label } = terrainRequest(baseUrl, t, usgsMinZoom, s1mMinZoom);
+  const res = await fetchTile(url, label);
   const demSource = res.headers.get("X-DEM-Source") || "farfield";
   const bmp = await createImageBitmap(await res.blob());
   const { rgba, w, h } = await bitmapToRgba(bmp);
@@ -79,26 +82,35 @@ export async function loadImagery(
   year: number,
   t: TileId,
 ): Promise<ImageBitmap> {
-  const res = await fetchTile(
-    withKey(`${baseUrl}/imagery/${layer}/${year}/${t.z}/${t.x}/${t.y}.webp`),
-    `imagery ${t.z}/${t.x}/${t.y}`,
-  );
+  const { url, label } = cogImageryRequest(baseUrl, layer, year, t);
+  const res = await fetchTile(url, label);
   return createImageBitmap(await res.blob());
 }
 
-/** Imagery from the USGS Imagery Only Tile Server (directly fetching pre-cached XYZ tiles).
- *  Used for low zooms where the COG tiler is slow/coverage-capped. */
+/** Low-zoom basemap: 512px stitched by the tiler from USDA NAIP cache children.
+ *  Used where the COG tiler is slow/coverage-capped. */
 export async function loadImageryExternal(baseUrl: string, t: TileId): Promise<ImageBitmap> {
-  // 512px basemap stitched by the tiler from USDA NAIP cache children.
-  const res = await fetchTile(withKey(`${baseUrl}/basemap/${t.z}/${t.x}/${t.y}.webp`), `basemap ${t.z}/${t.x}/${t.y}`);
+  const { url, label } = basemapRequest(baseUrl, t);
+  const res = await fetchTile(url, label);
   return createImageBitmap(await res.blob());
 }
 
-/** Imagery from the official OpenStreetMap tile server. NOTE: no withKey() —
- *  this is a third-party server, and the key must never leave our CDN. */
+/** Imagery from the official OpenStreetMap tile server (third-party: the
+ *  access key is never attached — see tileUrls.osmRequest). */
 export async function loadImageryOSM(t: TileId): Promise<ImageBitmap> {
-  const url = `https://tile.openstreetmap.org/${t.z}/${t.x}/${t.y}.png`;
-  const res = await fetchTile(url, `osm ${t.z}/${t.x}/${t.y}`);
+  const { url, label } = osmRequest(t);
+  const res = await fetchTile(url, label);
+  return createImageBitmap(await res.blob());
+}
+
+/**
+ * Imagery for a tile, routed by the shared rule (OSM / basemap / COG mosaic).
+ * This is what the main-thread fallback uses, so it exercises exactly the
+ * routing the worker runs in the browser.
+ */
+export async function loadImageryFor(t: TileId, routing: ImageryRouting): Promise<ImageBitmap> {
+  const { url, label } = imageryRequest(t, routing);
+  const res = await fetchTile(url, label);
   return createImageBitmap(await res.blob());
 }
 
