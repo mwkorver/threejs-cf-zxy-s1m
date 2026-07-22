@@ -1,12 +1,14 @@
 # threejs-cf-zxy-s1m
 
 [![CI](https://github.com/mwkorver/threejs-cf-zxy-s1m/actions/workflows/ci.yml/badge.svg)](https://github.com/mwkorver/threejs-cf-zxy-s1m/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![linting: ruff](https://img.shields.io/badge/linting-ruff-261230.svg)](https://github.com/astral-sh/ruff)
 
 > [!NOTE]
-> **Prototype, provided as-is.** This is a working exploration, not a maintained
-> product — issues and pull requests aren't monitored, so please fork rather
-> than wait on changes here. It is the companion to
+> **Prototype, released under [MIT](LICENSE) — use, fork, and adapt it freely.**
+> It is provided as-is, with no support or active maintenance; issues and pull
+> requests aren't monitored, so please fork rather than wait on changes here.
+> It is the companion to
 > [deckgl-s3-cog-s1m](https://github.com/mwkorver/deckgl-s3-cog-s1m), which
 > renders the same federal datasets with the opposite architecture.
 
@@ -296,3 +298,19 @@ so origin-side auth would leave every already-cached tile open.
   and the AWS-hosted `elevation-tiles-prod` pyramid for the global elevation
   fallback and its encoding.
 * **[Three.js](https://threejs.org/)** for the rendering layer.
+
+---
+
+## Project docs
+
+| File | What |
+|---|---|
+| [FLIGHT-SIM-PLAN.md](FLIGHT-SIM-PLAN.md) | Architecture, locked decisions, and the phased plan — read first |
+| [CHANGELOG.md](CHANGELOG.md) | Notable changes, [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format |
+| [SECURITY.md](SECURITY.md) | How to report a vulnerability privately, and what's in scope |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Short version: this is a prototype, fork freely |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
