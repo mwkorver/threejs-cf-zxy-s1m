@@ -179,8 +179,6 @@ export class TileWorkerPool {
         year: task.options.year,
         imagerySource: task.options.imagerySource,
         terrainMinZoom: task.options.terrainMinZoom,
-        usgsMinZoom: task.options.usgsMinZoom,
-        s1mMinZoom: task.options.s1mMinZoom,
         gridStep: task.options.gridStep,
         externalImageryMaxZoom: task.options.externalImageryMaxZoom
       });
@@ -241,7 +239,7 @@ export class TileWorkerPool {
 
     if (tile.z >= options.terrainMinZoom) {
       try {
-        const terrain = await loadTerrain(options.baseUrl, tile, options.usgsMinZoom, options.s1mMinZoom);
+        const terrain = await loadTerrain(options.baseUrl, tile);
         heights = terrain.heights;
         demSource = terrain.demSource;
       } catch (err: any) {

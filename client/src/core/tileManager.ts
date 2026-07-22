@@ -71,10 +71,6 @@ export class TileManager {
   // render as flat sea-level quads (relief is subpixel at those altitudes).
   // Keeps low zoom off the tiler's far-field path; z14 = USGS 1/3, z15+ = S1M.
   public terrainMinZoom = 14;
-  // Zoom at/above which USGS 1/3" DEM is used instead of far-field.
-  public usgsMinZoom = 11;
-  // Zoom at/above which S1M is used instead of USGS 1/3" DEM.
-  public s1mMinZoom = 15;
   // Shading mode (0.0 = Satellite, 1.0 = DEM, 2.0 = Hypsometric)
   public shadingMode = 0.0;
   // Blend factor for hypsometric tinting (0.0 to 1.0)
@@ -617,8 +613,6 @@ export class TileManager {
       year: this.year,
       imagerySource: this.imagerySource,
       terrainMinZoom: this.terrainMinZoom,
-      usgsMinZoom: this.usgsMinZoom,
-      s1mMinZoom: this.s1mMinZoom,
       gridStep: this.gridStep,
       externalImageryMaxZoom: this.externalImageryMaxZoom
     };
@@ -720,8 +714,6 @@ export class TileManager {
       year: this.year,
       imagerySource: this.imagerySource,
       terrainMinZoom: this.terrainMinZoom,
-      usgsMinZoom: this.usgsMinZoom,
-      s1mMinZoom: this.s1mMinZoom,
       gridStep: this.gridStep,
       externalImageryMaxZoom: this.externalImageryMaxZoom,
     };
@@ -1233,20 +1225,6 @@ export class TileManager {
   setTerrainMinZoom(z: number): void {
     if (z === this.terrainMinZoom) return;
     this.terrainMinZoom = z;
-    this.bundleCache.clear();
-    this.clear(); // reset nodes; next update() rebuilds + refetches
-  }
-
-  setUsgsMinZoom(z: number): void {
-    if (z === this.usgsMinZoom) return;
-    this.usgsMinZoom = z;
-    this.bundleCache.clear();
-    this.clear(); // reset nodes; next update() rebuilds + refetches
-  }
-
-  setS1mMinZoom(z: number): void {
-    if (z === this.s1mMinZoom) return;
-    this.s1mMinZoom = z;
     this.bundleCache.clear();
     this.clear(); // reset nodes; next update() rebuilds + refetches
   }

@@ -109,6 +109,24 @@ def test_terrain_out_of_range_404():
     assert client.get("/terrain/3/8/0.webp").status_code == 404
 
 
+def test_terrain_ignores_dem_band_query_params():
+    # The bands are config (TILER_*), never per-request: they change what a
+    # tile CONTAINS, and CloudFront's path-only cache key doesn't vary on query
+    # strings — honoring them would poison the cache the moment that policy
+    # changed. z12 is below the default s1m_min_zoom (15), so a honored
+    # ?s1m_min_zoom=1 would route to S1M; it must not.
+    with (
+        patch.object(app_module, "get_s1m_resolver") as s1m,
+        patch.object(app_module, "get_usgs13_resolver") as usgs13,
+        patch.object(app_module, "render_terrain_tile", return_value=b"WEBP"),
+    ):
+        usgs13.return_value.resolve.return_value = ["s3://prd-tnm/x.tif"]
+        r = client.get("/terrain/12/1204/1541.webp?s1m_min_zoom=1&usgs_min_zoom=1")
+    assert r.status_code == 200
+    assert r.headers["x-dem-source"] == "usgs13"  # band choice came from settings
+    s1m.assert_not_called()
+
+
 def test_terrain_beyond_maxzoom_404_without_resolving():
     # z19 must 404 before any resolve — upsampled terrain never enters the
     # CDN cache and the tile key space stays bounded (mirrors imagery).

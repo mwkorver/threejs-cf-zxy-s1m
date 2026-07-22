@@ -58,24 +58,23 @@ describe("imageryRequest", () => {
 });
 
 describe("terrainRequest", () => {
-  it("omits the DEM-band query string when no thresholds are given", () => {
-    // Note: the URL may still carry ?k=<access key> from withKey(); only the
-    // DEM-band params must be absent.
+  it("builds a path-only terrain URL", () => {
     const { url, label } = terrainRequest(BASE, t(15));
     expect(url).toContain(`${BASE}/terrain/15/1/2.webp`);
-    expect(url).not.toContain("usgs_min_zoom");
-    expect(url).not.toContain("s1m_min_zoom");
     expect(label).toBe("terrain 15/1/2");
   });
 
-  it("appends both DEM-band thresholds when supplied", () => {
-    const { url } = terrainRequest(BASE, t(15), 11, 15);
-    expect(url).toContain("usgs_min_zoom=11");
-    expect(url).toContain("s1m_min_zoom=15");
-  });
-
-  it("appends only the threshold that is supplied", () => {
-    expect(terrainRequest(BASE, t(15), 11).url).toContain("?usgs_min_zoom=11");
-    expect(terrainRequest(BASE, t(15), undefined, 15).url).toContain("?s1m_min_zoom=15");
+  it("carries no DEM-band params — the bands are tiler config, not per-request", () => {
+    // These once rode on query params, which CloudFront strips (so they were a
+    // no-op in production) and which would have varied tile CONTENT without
+    // varying the cache key had that policy ever changed. The only query string
+    // a tile URL may carry is the ?k= access key.
+    const { url } = terrainRequest(BASE, t(15));
+    expect(url).not.toContain("usgs_min_zoom");
+    expect(url).not.toContain("s1m_min_zoom");
+    const query = url.split("?")[1];
+    if (query !== undefined) {
+      expect(query.split("&").every((p) => p.startsWith("k="))).toBe(true);
+    }
   });
 });
