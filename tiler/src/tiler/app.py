@@ -103,14 +103,15 @@ def basemap_tile(z: int, x: int, y: int) -> Response:
 
 
 @app.get("/terrain/{z}/{x}/{y}.webp")
-def terrain_tile(
-    z: int,
-    x: int,
-    y: int,
-    usgs_min_zoom: int = None,
-    s1m_min_zoom: int = None
-) -> Response:
-    """512px Terrarium Terrain-RGB tile, lossless WebP (plan §4.2)."""
+def terrain_tile(z: int, x: int, y: int) -> Response:
+    """512px Terrarium Terrain-RGB tile, lossless WebP (plan §4.2).
+
+    Path-only, like every other endpoint. The DEM-band thresholds are config
+    (TILER_USGS_MIN_ZOOM / TILER_S1M_MIN_ZOOM), never per-request: they change
+    what a tile CONTAINS, so accepting them as query params only worked
+    against a local tiler (CloudFront strips query strings) and would have
+    become a cache-poisoning vector the moment that policy changed.
+    """
     if not 0 <= z <= settings.terrain_max_zoom:
         # Beyond native DEM resolution: 404 so the CDN never caches upsampled
         # junk over an unbounded key space (mirrors the imagery maxzoom).
@@ -119,9 +120,6 @@ def terrain_tile(
     if not (0 <= x < n and 0 <= y < n):
         raise HTTPException(404, "tile out of range")
 
-    resolved_usgs_min_zoom = usgs_min_zoom if usgs_min_zoom is not None else settings.usgs_min_zoom
-    resolved_s1m_min_zoom = s1m_min_zoom if s1m_min_zoom is not None else settings.s1m_min_zoom
-
     body = None
     dem_source = "farfield"
     
@@ -129,12 +127,12 @@ def terrain_tile(
     #    coverage isn't seamless, so fill any void pixels at its edge with the
     #    usgs13 DEM (real 10m elevation) instead of a 0m cliff. The fill resolver
     #    is lazy -- only tiles that actually have voids pay the extra query/read.
-    if z >= resolved_s1m_min_zoom:
+    if z >= settings.s1m_min_zoom:
         s1m_hrefs = get_s1m_resolver().resolve(z, x, y)
         if s1m_hrefs:
             fill = (
                 (lambda: get_usgs13_resolver().resolve(z, x, y))
-                if z >= resolved_usgs_min_zoom
+                if z >= settings.usgs_min_zoom
                 else None
             )
             body = render_terrain_tile(s1m_hrefs, z, x, y, tilesize=settings.tile_size, fill_hrefs=fill)
@@ -142,7 +140,7 @@ def terrain_tile(
                 dem_source = "s1m"
 
     # 2. If no S1M tile is available, check 10m USGS 1/3 arc-second DEM fallback index if zoom is high enough
-    if body is None and z >= resolved_usgs_min_zoom:
+    if body is None and z >= settings.usgs_min_zoom:
         usgs13_hrefs = get_usgs13_resolver().resolve(z, x, y)
         if usgs13_hrefs:
             body = render_terrain_tile(usgs13_hrefs, z, x, y, tilesize=settings.tile_size)

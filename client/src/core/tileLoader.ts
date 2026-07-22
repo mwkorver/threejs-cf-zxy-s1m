@@ -59,13 +59,8 @@ export interface DecodedTerrain {
 }
 
 /** Decoded terrain elevations (true meters), row-major, north-first, plus the source DEM. */
-export async function loadTerrain(
-  baseUrl: string,
-  t: TileId,
-  usgsMinZoom?: number,
-  s1mMinZoom?: number
-): Promise<DecodedTerrain> {
-  const { url, label } = terrainRequest(baseUrl, t, usgsMinZoom, s1mMinZoom);
+export async function loadTerrain(baseUrl: string, t: TileId): Promise<DecodedTerrain> {
+  const { url, label } = terrainRequest(baseUrl, t);
   const res = await fetchTile(url, label);
   const demSource = res.headers.get("X-DEM-Source") || "farfield";
   const bmp = await createImageBitmap(await res.blob());

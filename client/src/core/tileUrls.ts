@@ -52,22 +52,14 @@ export function resolveImageryKind(
 }
 
 /**
- * Terrain tile. The DEM-band thresholds ride on query params, which
- * CloudFront's path-only cache policy strips — so they only take effect
- * against a local tiler (see main.ts).
+ * Terrain tile. Path-only: which DEM band serves a zoom is tiler config
+ * (TILER_USGS_MIN_ZOOM / TILER_S1M_MIN_ZOOM), not a per-request parameter.
  */
-export function terrainRequest(
-  baseUrl: string,
-  t: TileId,
-  usgsMinZoom?: number | null,
-  s1mMinZoom?: number | null,
-): TileRequest {
-  let url = `${baseUrl}/terrain/${t.z}/${t.x}/${t.y}.webp`;
-  const params: string[] = [];
-  if (usgsMinZoom !== undefined && usgsMinZoom !== null) params.push(`usgs_min_zoom=${usgsMinZoom}`);
-  if (s1mMinZoom !== undefined && s1mMinZoom !== null) params.push(`s1m_min_zoom=${s1mMinZoom}`);
-  if (params.length > 0) url += `?${params.join("&")}`;
-  return { url: withKey(url), label: `terrain ${t.z}/${t.x}/${t.y}` };
+export function terrainRequest(baseUrl: string, t: TileId): TileRequest {
+  return {
+    url: withKey(`${baseUrl}/terrain/${t.z}/${t.x}/${t.y}.webp`),
+    label: `terrain ${t.z}/${t.x}/${t.y}`,
+  };
 }
 
 /** NAIP COG mosaic imagery (high zoom), rendered by the tiler Lambda. */

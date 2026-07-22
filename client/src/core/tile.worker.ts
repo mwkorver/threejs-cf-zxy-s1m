@@ -61,7 +61,7 @@ ctx.onmessage = async (e: MessageEvent) => {
   // and post a spurious ERROR for the aborted requestId.
   if (e.data.type === "ABORT") return;
 
-  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, usgsMinZoom, s1mMinZoom, gridStep, externalImageryMaxZoom } = e.data;
+  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom } = e.data;
   
   const abortController = new AbortController();
   const signal = abortController.signal;
@@ -83,7 +83,7 @@ ctx.onmessage = async (e: MessageEvent) => {
         return { heights: null, demSource: "flat" };
       }
       try {
-        const { url, label } = terrainRequest(baseUrl, tile, usgsMinZoom, s1mMinZoom);
+        const { url, label } = terrainRequest(baseUrl, tile);
         const res = await fetchTile(url, label, 5, signal);
         const demSource = res.headers.get("X-DEM-Source") || "farfield";
         const blob = await res.blob();

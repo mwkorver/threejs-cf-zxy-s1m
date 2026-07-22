@@ -604,34 +604,6 @@ describe("TileManager setting changes", () => {
     expect(cache.size()).toBe(0);
   });
 
-  it("setUsgsMinZoom clears cache and resets nodes", () => {
-    const tm = makeManager({ maxZoom: 14 });
-    tm.update(new THREE.Vector3(0, 0, 100));
-
-    const cache = (tm as any).bundleCache as BundleCache;
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
-    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom });
-
-    tm.setUsgsMinZoom(14);
-    expect(cache.size()).toBe(0);
-    expect(tm.usgsMinZoom).toBe(14);
-  });
-
-  it("setS1mMinZoom clears cache and resets nodes", () => {
-    const tm = makeManager({ maxZoom: 14 });
-    tm.update(new THREE.Vector3(0, 0, 100));
-
-    const cache = (tm as any).bundleCache as BundleCache;
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
-    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom });
-
-    tm.setS1mMinZoom(16);
-    expect(cache.size()).toBe(0);
-    expect(tm.s1mMinZoom).toBe(16);
-  });
-
   it("setShadingMode updates uniforms", () => {
     const tm = makeManager();
     tm.setShadingMode(2.0);
