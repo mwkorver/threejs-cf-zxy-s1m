@@ -708,27 +708,69 @@ describe("TileManager getElevationAt", () => {
     expect(elev).toBe(0);
   });
 
-  it("returns the finest (highest-z) loaded tile covering the point", async () => {
-    const tm = makeManager({ maxZoom: 14, lodFactor: 5.0, cullTiles: false });
-    tm.update(new THREE.Vector3(0, 0, 100));
-    await new Promise((r) => setTimeout(r, 0));
+  // The three below build the node tree directly rather than waiting on the
+  // async loader. The previous version raced a single setTimeout(0) against
+  // deep subdivision and guarded its only assertion behind `if (maxChildZ > 0)`,
+  // so it passed vacuously when loading hadn't settled and failed at random
+  // when it had — while the bug it should have caught went unnoticed.
 
-    // With subdivision, finer tiles exist under the camera. getElevationAt
-    // should pick the finest z, not a coarse root.
-    const { rootNodes } = internals(tm);
-    let maxChildZ = 0;
-    for (const node of rootNodes.values()) {
-      if (node.children) {
-        for (const child of node.children) {
-          if (child.loaded && child.tile.z > maxChildZ) maxChildZ = child.tile.z;
-        }
-      }
-    }
-    if (maxChildZ > 0) {
-      // A point under the camera should resolve to at least the child zoom
-      const elev = tm.getElevationAt(0, 0);
-      expect(elev).not.toBeNull();
-    }
+  /** The root covering `p`, put into the steady state of a subdivided node. */
+  function rootWithChildrenAt(tm: TileManager, p: [number, number]) {
+    const inside = (n: TileNode) =>
+      p[0] >= n.bounds.west && p[0] <= n.bounds.east &&
+      p[1] >= n.bounds.south && p[1] <= n.bounds.north;
+    const root = [...internals(tm).rootNodes.values()].find(inside)!;
+    root.children = (tm as any).createChildren(root.tile) as TileNode[];
+    const child = root.children.find(inside)!;
+    return { root, child };
+  }
+
+  it("descends past an unloaded subdivided parent to its loaded children", () => {
+    // Reachable when all four children load synchronously from a warm
+    // BundleCache: the parent is then never triggerLoad'd and sits at
+    // loaded=false while its children carry the terrain. The old walk died on
+    // that parent and returned null despite fine terrain being loaded there.
+    const tm = makeManager({ maxZoom: 13, cullTiles: false });
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    const p: [number, number] = [1000, -1000];
+
+    const { root, child } = rootWithChildrenAt(tm, p);
+    root.loaded = false;
+    root.centerElevation = undefined;
+    child.loaded = true;
+    child.centerElevation = 250;
+
+    expect(tm.getElevationAt(p[0], p[1])).toBe(250);
+  });
+
+  it("prefers the finest loaded tile when parent and child are both loaded", () => {
+    const tm = makeManager({ maxZoom: 13, cullTiles: false });
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    const p: [number, number] = [1000, -1000];
+
+    const { root, child } = rootWithChildrenAt(tm, p);
+    root.loaded = true;
+    root.centerElevation = 100;
+    child.loaded = true;
+    child.centerElevation = 250;
+
+    expect(tm.getElevationAt(p[0], p[1])).toBe(250);
+  });
+
+  it("falls back to a coarser sample when the finest tile has none", () => {
+    // A loaded node without centerElevation must not win the "finest" contest
+    // and mask a coarser node that does have a sample.
+    const tm = makeManager({ maxZoom: 13, cullTiles: false });
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    const p: [number, number] = [1000, -1000];
+
+    const { root, child } = rootWithChildrenAt(tm, p);
+    root.loaded = true;
+    root.centerElevation = 100;
+    child.loaded = true;
+    child.centerElevation = undefined;
+
+    expect(tm.getElevationAt(p[0], p[1])).toBe(100);
   });
 });
 

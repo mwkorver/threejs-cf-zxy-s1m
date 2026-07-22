@@ -1,7 +1,15 @@
 import os
 import re
+from unittest.mock import patch
 
-from tiler.resolver import REQUESTER_PAYS_BUCKETS, S1M_EPSG, CogAsset, build_tile_query, lake_read_paths
+from tiler.resolver import (
+    REQUESTER_PAYS_BUCKETS,
+    S1M_EPSG,
+    CogAsset,
+    MosaicResolver,
+    build_tile_query,
+    lake_read_paths,
+)
 
 USGS_INDEX = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "src", "tiler", "data", "USGS_13_DEM_Index.parquet"
@@ -28,6 +36,68 @@ def test_query_has_prune_and_refine():
     assert "year <= 2021" in sql
     assert "group by region" in sql
     assert "hive_partitioning=true" in sql
+
+
+# --- region pruning comes from the index, not a hardcoded table ---
+#
+# Pruning narrows the S3 LIST before the real query. The bounds driving it are
+# read from the lake's own bbox columns (min/max per region, answered from
+# Parquet row-group stats) and cached per container, so they can't go stale as
+# coverage grows and can't be wrong at a region's edge.
+
+def _resolver_with_extents(extents_rows):
+    """MosaicResolver whose DuckDB connection returns canned rows."""
+    with patch("tiler.resolver.duck.connect") as connect:
+        r = MosaicResolver("s3://bucket/lake", "us-west-2")
+    r._con = type("Con", (), {"execute": lambda self, sql: type("R", (), {"fetchall": lambda s: extents_rows})()})()
+    assert connect.called
+    return r
+
+
+NJ_AND_CA = [
+    ("nj", -75.6, 38.9, -73.9, 41.4),
+    ("ca", -124.4, 32.5, -114.1, 42.0),
+]
+
+
+def test_region_extents_read_from_index_and_cached():
+    r = _resolver_with_extents(NJ_AND_CA)
+    calls = []
+    real_execute = r._con.execute
+    r._con.execute = lambda sql: (calls.append(sql), real_execute(sql))[1]
+
+    first = r.region_extents("naip-visualization")
+    second = r.region_extents("naip-visualization")
+
+    assert first == {"nj": (-75.6, 38.9, -73.9, 41.4), "ca": (-124.4, 32.5, -114.1, 42.0)}
+    assert second is first          # cached for the life of the container
+    assert len(calls) == 1          # warm invocations pay nothing
+    # min/max over the bbox columns, grouped by the hive partition
+    assert "min(bbox_xmin)" in calls[0] and "max(bbox_ymax)" in calls[0]
+    assert "group by region" in calls[0] and "hive_partitioning=true" in calls[0]
+
+
+def test_resolve_reads_only_the_regions_reaching_the_tile():
+    r = _resolver_with_extents(NJ_AND_CA)
+    seen = {}
+
+    def fake_query(paths, west, south, east, north, requested_year):
+        seen["paths"] = paths
+        return "select 1"
+
+    r._con.execute = lambda sql: type("R", (), {"fetchall": lambda s: NJ_AND_CA if "min(" in sql else []})()
+    with patch("tiler.resolver.build_tile_query", side_effect=fake_query):
+        r.resolve("naip-visualization", 2023, 12, 1204, 1541)  # a New Jersey tile
+
+    assert seen["paths"] == ["s3://bucket/lake/collection=naip-visualization/region=nj/year=*/*.parquet"]
+
+
+def test_resolve_returns_empty_when_no_region_reaches_the_tile():
+    # Mid-Pacific: outside every region's extent, so nothing is even listed.
+    r = _resolver_with_extents(NJ_AND_CA)
+    with patch("tiler.resolver.build_tile_query") as q:
+        assert r.resolve("naip-visualization", 2023, 4, 1, 7) == []
+        q.assert_not_called()
 
 
 def test_requester_pays_flag():

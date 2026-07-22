@@ -850,16 +850,28 @@ export class TileManager {
   public getElevationAt(mx: number, my: number): number | null {
     let bestNode: TileNode | undefined;
     const checkNode = (node: TileNode) => {
-      if (!node.loaded) return;
-      if (mx >= node.bounds.west && mx <= node.bounds.east &&
-          my >= node.bounds.south && my <= node.bounds.north) {
-        if (!bestNode || node.tile.z > bestNode.tile.z) {
-          bestNode = node;
-        }
-        if (node.children) {
-          for (const child of node.children) {
-            checkNode(child);
-          }
+      // Outside this node: nothing in the subtree can cover the point.
+      if (mx < node.bounds.west || mx > node.bounds.east ||
+          my < node.bounds.south || my > node.bounds.north) {
+        return;
+      }
+      // Recurse regardless of THIS node's load state. Bailing on !loaded
+      // stopped the walk at an unloaded ancestor, hiding loaded descendants.
+      // Usually harmless — updateNode triggerLoads a parent whenever its
+      // children aren't all ready, so the chain is normally contiguous — but a
+      // parent whose four children all load synchronously from a warm
+      // BundleCache never loads itself, and the walk then died on it, yielding
+      // null (Follow-DEM disengages, draped footprints drop to sea level)
+      // despite fine terrain being loaded right there.
+      // Only a loaded node that actually has a sample may win: selecting one
+      // without centerElevation would mask a coarser node that has it.
+      if (node.loaded && node.centerElevation !== undefined &&
+          (bestNode === undefined || node.tile.z > bestNode.tile.z)) {
+        bestNode = node;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          checkNode(child);
         }
       }
     };
@@ -871,7 +883,7 @@ export class TileManager {
       checkNode(node);
     }
 
-    return bestNode && bestNode.centerElevation !== undefined ? bestNode.centerElevation : null;
+    return bestNode ? bestNode.centerElevation! : null;
   }
 
   private createMeshFromBundle(
