@@ -11,7 +11,6 @@ from tiler.encoding import decode_terrarium
 
 
 def _decode_webp(body: bytes) -> np.ndarray:
-    import rasterio
     from rasterio.io import MemoryFile
 
     with MemoryFile(body) as m, m.open() as ds:
