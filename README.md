@@ -47,44 +47,26 @@ render tier, in exchange for a client simple enough to fly.
 ## Architecture
 
 ```mermaid
-graph TD
-    subgraph Browser ["Browser (Three.js / WebGL)"]
-        Viewer["🛩️ Flat-Mercator camera + HUD"]
-        Workers["⚙️ Web Worker pool (fetch + decode + mesh)"]
-        LOD["🌲 Screen-space-error quadtree + BundleCache"]
-    end
+sequenceDiagram
+    autonumber
+    participant B as Browser (Three.js)
+    participant CF as CloudFront
+    participant L as Tiler Lambda
+    participant S3 as S3 COGs / upstream caches
 
-    subgraph Edge ["CloudFront"]
-        CF["🌐 Path-only immutable cache · Origin Shield · edge key gate"]
+    B->>CF: GET /terrain/15/9633/12332.webp
+    alt warm tile — the common case
+        CF-->>B: 512 px WebP straight from the edge
+    else cold tile
+        CF->>L: signed origin request (OAC)
+        L->>L: DuckDB: which COGs cover this tile?
+        L->>S3: range reads
+        S3-->>L: COG blocks
+        L->>L: mosaic → warp → Terrarium → WebP
+        L-->>CF: 512 px WebP, immutable
+        CF-->>B: tile (edge is now warm)
     end
-
-    subgraph AWS ["AWS (us-west-2)"]
-        Tiler["🚀 rio-tiler FastAPI on Lambda (container)"]
-        DuckDB["🦆 DuckDB over GeoParquet indexes"]
-        StaticS3["🪣 Static footprints (GeoJSON)"]
-    end
-
-    subgraph Sources ["Public / open S3 + upstream caches"]
-        NAIP["🪣 naip-visualization COGs (requester-pays)"]
-        TNM["🪣 prd-tnm — S1M 1 m + USGS 1/3″ DEMs"]
-        Terrarium["🪣 elevation-tiles-prod Terrarium pyramid"]
-        USDA["🗺️ USDA NAIP ImageServer cache"]
-    end
-
-    Viewer --> LOD
-    LOD -->|1. request z/x/y| Workers
-    Workers -->|2. GET /imagery /terrain /basemap| CF
-    CF -->|3. cache miss only| Tiler
-    Tiler -->|4. which COGs cover this tile?| DuckDB
-    DuckDB -->|5. hrefs| Tiler
-    Tiler -->|6. range reads → mosaic → warp| NAIP
-    Tiler -->|6. range reads → mosaic → warp| TNM
-    Tiler -->|7. 2×2 stitch passthrough| Terrarium
-    Tiler -->|7. 2×2 stitch| USDA
-    Tiler -->|8. 512px WebP| CF
-    CF -->|9. tile| Workers
-    Workers -->|10. heightfield mesh + texture| LOD
-    CF -->|/footprints/*.json straight from S3| StaticS3
+    B->>B: decode → heightfield mesh + texture
 ```
 
 1. **One tile contract.** The client requests 512 px imagery and elevation over
