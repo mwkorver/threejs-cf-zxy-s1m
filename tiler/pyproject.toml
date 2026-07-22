@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "ruff>=0.8,<1",          # lint/format, same tool + rule set as CI
     "uvicorn>=0.32",
     "boto3>=1.35",           # duck.py static-secret fallback (local dev)
     "botocore[crt]>=1.35",   # `aws login` credential provider
@@ -32,3 +33,25 @@ packages = ["src/tiler"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# All Python in this repo lives under tiler/, so ruff is configured here rather
+# than at the repo root; CI runs it with working-directory: tiler.
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [
+  ".git",
+  ".pytest_cache",
+  ".venv",
+  "dist",
+  "node_modules",
+]
+
+[tool.ruff.lint]
+# Deliberately narrow: real errors (E9 syntax/IO) and pyflakes (F undefined
+# names, unused imports). Style is left alone so lint failures always mean
+# something is actually broken.
+select = [
+  "E9",
+  "F",
+]

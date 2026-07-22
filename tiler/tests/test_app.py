@@ -155,6 +155,9 @@ def test_basemap_happy_path_headers():
     assert r.headers["content-type"] == "image/webp"
     assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert r.content == b"RIFFwebp"
+    # Path params reach the renderer in z/x/y order — a transposition here
+    # would serve a valid-looking tile for the wrong place.
+    assert render.call_args.args[:3] == (8, 75, 96)
 
 
 def test_basemap_no_coverage_404():
