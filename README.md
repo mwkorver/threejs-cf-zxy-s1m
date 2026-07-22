@@ -46,6 +46,33 @@ only misses invoke a Lambda. The browser gets to spend its budget on rendering.
 The trade is explicit: you give up direct-from-source pixels and accept a
 render tier, in exchange for a client simple enough to fly.
 
+### Why not TiTiler or cogeo-mosaic?
+
+Fair question, since both exist and this repo leans on
+[rio-tiler](https://github.com/cogeotiff/rio-tiler) for the actual reads.
+
+[**TiTiler**](https://github.com/developmentseed/titiler) is a more capable
+tiler than this one and would be the right answer for a general-purpose
+service. Its flexibility is the problem here: its endpoints are configured
+through query strings (`?rescale=`, `?bidx=`, `?expression=`, `?colormap=`), and
+this design needs the opposite — the URL *is* the cache key. Every rendering
+decision is frozen server-side into a fixed contract (512 px, Terrarium,
+lossless WebP for elevation) so CloudFront can forward no query strings at all
+and every viewer shares one immutable object per tile. Adopting TiTiler would
+mean locking down most of what makes it worth adopting.
+
+[**cogeo-mosaic**](https://github.com/developmentseed/cogeo-mosaic) is the
+closer call, and its MosaicJSON model is a good fit for a fixed set of assets.
+The mismatch is that the asset set here isn't fixed: NAIP is re-flown per state
+per year, and S1M coverage grows as USGS publishes. The resolver answers "newest
+year at or before the requested one, per region, finest gsd first" as a query
+against a Hive-partitioned GeoParquet index, so new COGs appear by writing
+Parquet rather than by regenerating and republishing a MosaicJSON. That's one
+~20-line SQL builder ([`resolver.py`](tiler/src/tiler/resolver.py)), and
+rio-tiler's `mosaic_reader` still does the pixel work.
+
+If the asset set were static, cogeo-mosaic would win outright.
+
 ## Architecture
 
 ```mermaid

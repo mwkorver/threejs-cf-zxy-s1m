@@ -23,5 +23,8 @@ client/public/tiles/
 .env.local
 *.local
 
+# Working notes / review punch-list — local only, not part of the repo's docs.
+CLEANUP.md
+
 # OS / editor
 .DS_Store

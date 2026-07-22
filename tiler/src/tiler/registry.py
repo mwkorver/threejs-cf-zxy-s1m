@@ -8,19 +8,25 @@ collection ids exactly.
 import math
 from dataclasses import dataclass
 
-# Web-Mercator ground resolution at z0 on the 256-px basis, meters/pixel at
-# the equator (plan §5.2: table is 256-px basis; ÷ sec(lat) for ground m/px).
-WEB_MERCATOR_BASE_RES = 156543.03392804097
+import morecantile
+
+# The tile grid itself is the authority on zoom<->resolution; don't restate its
+# constants here (plan §5.2: the table is on the 256-px basis, ÷ sec(lat) for
+# ground m/px).
+TMS = morecantile.tms.get("WebMercatorQuad")
 
 
 def maxzoom_for_gsd(gsd: float, tile_size: int = 512) -> int:
     """Smallest zoom that fully resolves a source of the given gsd (meters).
 
     Requests beyond this 404 so the CDN never caches upsampled junk
-    (plan §4.1). 512-px tiles carry 256-px resolution at z+1, hence the
-    tile-size shift.
+    (plan §4.1). The TMS is on the 256-px basis and a 512-px tile carries
+    256-px resolution at z+1, hence the tile-size shift.
+
+    `zoom_level_strategy="upper"` takes the finer zoom when a gsd falls between
+    two levels, so a source is never under-resolved.
     """
-    z256 = math.ceil(math.log2(WEB_MERCATOR_BASE_RES / gsd))
+    z256 = TMS.zoom_for_res(gsd, zoom_level_strategy="upper")
     return z256 - int(math.log2(tile_size // 256))
 
 
