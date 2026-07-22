@@ -5,7 +5,7 @@
 [![linting: ruff](https://img.shields.io/badge/linting-ruff-261230.svg)](https://github.com/astral-sh/ruff)
 
 > [!NOTE]
-> **Prototype, released under [MIT](LICENSE) — use, fork, and adapt it freely.**
+> **Public prototype, released under [MIT](LICENSE) — use, fork, and adapt it freely.**
 > It is provided as-is, with no support or active maintenance; issues and pull
 > requests aren't monitored, so please fork rather than wait on changes here.
 > It is the companion to
