@@ -23,7 +23,7 @@ client/public/tiles/
 .env.local
 *.local
 
-# Private working notes, not published docs
+# Working notes / review punch-list — local only, not part of the repo's docs.
 CLEANUP.md
 
 # OS / editor

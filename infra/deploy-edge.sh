@@ -44,13 +44,24 @@ aws cloudformation deploy \
     "TilerFunctionArn=$ARN" \
     "TileAccessKey=$KEY"
 
-# Keep the client in lockstep. .env.local is gitignored; Vite inlines
-# VITE_TILE_KEY into both the main bundle and the tile worker at build time.
+# Keep the client in lockstep. .env.local is gitignored; Vite inlines these
+# into both the main bundle and the tile worker at build time:
+#   VITE_TILE_KEY      - dev gate key, must match the edge function
+#   VITE_TILE_BASE_URL - this distribution, so a recreated stack doesn't need
+#                        a hand-edit in client/src/main.ts
+# Read the domain BEFORE truncating the file: if this call fails, set -e exits
+# with .env.local untouched rather than half-written.
+DIST_DOMAIN=$(aws cloudformation describe-stacks --stack-name flight-sim-edge --region "$REGION" \
+  --query "Stacks[0].Outputs[?OutputKey=='DistributionDomain'].OutputValue" --output text)
+
 ENV_FILE="$ROOT/client/.env.local"
+: > "$ENV_FILE"
 if [[ -n "$KEY" ]]; then
-  printf 'VITE_TILE_KEY=%s\n' "$KEY" > "$ENV_FILE"
-  echo "-- wrote $ENV_FILE (restart the dev server to pick it up)"
+  printf 'VITE_TILE_KEY=%s\n' "$KEY" >> "$ENV_FILE"
 else
-  rm -f "$ENV_FILE"
-  echo "-- removed $ENV_FILE (no key)"
+  echo "-- no key: omitting VITE_TILE_KEY"
 fi
+if [[ -n "$DIST_DOMAIN" && "$DIST_DOMAIN" != "None" ]]; then
+  printf 'VITE_TILE_BASE_URL=https://%s\n' "$DIST_DOMAIN" >> "$ENV_FILE"
+fi
+echo "-- wrote $ENV_FILE (restart the dev server to pick it up)"

@@ -1,7 +1,7 @@
 import { decodeTerrarium } from "./terrarium";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { type TileId } from "./mercator";
-import { withKey } from "./tileKey";
+import { imageryRequest, terrainRequest } from "./tileUrls";
 
 const ctx: any = self;
 
@@ -61,7 +61,7 @@ ctx.onmessage = async (e: MessageEvent) => {
   // and post a spurious ERROR for the aborted requestId.
   if (e.data.type === "ABORT") return;
 
-  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, usgsMinZoom, s1mMinZoom, gridStep, externalImageryMaxZoom } = e.data;
+  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom } = e.data;
   
   const abortController = new AbortController();
   const signal = abortController.signal;
@@ -83,18 +83,8 @@ ctx.onmessage = async (e: MessageEvent) => {
         return { heights: null, demSource: "flat" };
       }
       try {
-        let url = `${baseUrl}/terrain/${tile.z}/${tile.x}/${tile.y}.webp`;
-        const params = [];
-        if (usgsMinZoom !== undefined && usgsMinZoom !== null) params.push(`usgs_min_zoom=${usgsMinZoom}`);
-        if (s1mMinZoom !== undefined && s1mMinZoom !== null) params.push(`s1m_min_zoom=${s1mMinZoom}`);
-        if (params.length > 0) url += `?${params.join("&")}`;
-
-        const res = await fetchTile(
-          withKey(url),
-          `terrain ${tile.z}/${tile.x}/${tile.y}`,
-          5,
-          signal
-        );
+        const { url, label } = terrainRequest(baseUrl, tile);
+        const res = await fetchTile(url, label, 5, signal);
         const demSource = res.headers.get("X-DEM-Source") || "farfield";
         const blob = await res.blob();
         const bmp = await createImageBitmap(blob);
@@ -119,32 +109,16 @@ ctx.onmessage = async (e: MessageEvent) => {
 
     const imageryPromise = (async (): Promise<ImageBitmap | null> => {
       try {
-        let imgRes: Response;
-        if (imagerySource === "osm") {
-          // Third-party server: no withKey() — the key must never leave our CDN.
-          imgRes = await fetchTile(
-            `https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`,
-            `osm ${tile.z}/${tile.x}/${tile.y}`,
-            5,
-            signal
-          );
-        } else if (tile.z <= externalImageryMaxZoom) {
-          // Low-zoom basemap: the tiler stitches 4 USDA NAIP cache children
-          // into a 512px tile, served (and cached) through CloudFront.
-          imgRes = await fetchTile(
-            withKey(`${baseUrl}/basemap/${tile.z}/${tile.x}/${tile.y}.webp`),
-            `basemap ${tile.z}/${tile.x}/${tile.y}`,
-            5,
-            signal
-          );
-        } else {
-          imgRes = await fetchTile(
-            withKey(`${baseUrl}/imagery/${layer}/${year}/${tile.z}/${tile.x}/${tile.y}.webp`),
-            `imagery ${tile.z}/${tile.x}/${tile.y}`,
-            5,
-            signal
-          );
-        }
+        // Routing (OSM / low-zoom USDA stitch / NAIP COG mosaic) and key
+        // handling live in tileUrls, shared with the main-thread fallback.
+        const { url, label } = imageryRequest(tile, {
+          baseUrl,
+          layer,
+          year,
+          imagerySource,
+          externalImageryMaxZoom,
+        });
+        const imgRes = await fetchTile(url, label, 5, signal);
         const imgBlob = await imgRes.blob();
         return await createImageBitmap(imgBlob);
       } catch (err) {

@@ -14,15 +14,24 @@ const params = new URLSearchParams(window.location.search);
 const useLocal = params.get("src") === "local";
 const useLocalTiler = params.get("src") === "tiler-local";
 
-const BASE_URL = useLocal 
-  ? "/tiles" 
-  : (useLocalTiler ? "http://localhost:8000" : "https://REDACTED.cloudfront.net");
+// Deployed tile CDN. Mirrored into client/.env.local by infra/deploy-edge.sh
+// from the edge stack's DistributionDomain output — same lockstep trick as
+// VITE_TILE_KEY — so a recreated distribution doesn't need a source edit. The
+// fallback is the current distribution, so an unset var behaves as before.
+const CDN_BASE_URL = import.meta.env.VITE_TILE_BASE_URL ?? "https://REDACTED.cloudfront.net";
+
+const BASE_URL = useLocal
+  ? "/tiles"
+  : (useLocalTiler ? "http://localhost:8000" : CDN_BASE_URL);
 
 const LAYER = params.get("layer") ?? "naip-visualization";
 const YEAR = Number(params.get("year") ?? 2023);
 const MAX_ZOOM = Number(params.get("maxzoom") ?? 18);
 const LOD_FACTOR = Number(params.get("lod") ?? 2.2);
 const CULL_TILES = params.get("cull") !== "false";
+const PREFETCH_LOOKAHEAD = Number(params.get("lookahead") ?? 4);
+const PREFETCH_SAMPLES = Number(params.get("samples") ?? 4);
+
 
 // NJ flight corridor center
 const startLon = -74.44;
@@ -36,36 +45,6 @@ appDiv.style.position = "relative";
 appDiv.style.width = "100%";
 appDiv.style.height = "100%";
 
-const dualSliderStyle = document.createElement("style");
-dualSliderStyle.textContent = `
-  .dual-slider-container input[type="range"] {
-    -webkit-appearance: none;
-    pointer-events: none;
-  }
-  .dual-slider-container input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #f8fafc;
-    border: 2px solid #38bdf8;
-    cursor: pointer;
-    pointer-events: auto;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-  }
-  .dual-slider-container input[type="range"]::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #f8fafc;
-    border: 2px solid #38bdf8;
-    cursor: pointer;
-    pointer-events: auto;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-  }
-`;
-document.head.appendChild(dualSliderStyle);
 
 const scene = new THREE.Scene();
 const skyColor = new THREE.Color(0xa3c2f0);
@@ -111,6 +90,9 @@ const tileManager = new TileManager(
   CULL_TILES
 );
 tileManager.terrainMinZoom = 0;
+tileManager.prefetchLookaheadSec = PREFETCH_LOOKAHEAD;
+tileManager.prefetchSamples = PREFETCH_SAMPLES;
+
 // Debug handles for the browser console.
 (window as any).tileManager = tileManager;
 (window as any).camera = camera;
@@ -148,6 +130,8 @@ hud.innerHTML = `
 
   <div style="margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; margin-bottom: 4px;">ACTIVE TILES: <span id="hud-tiles">0</span></div>
   <div>GPU CACHE: <span id="hud-cache">0.00</span> / 256 MB</div>
+  <div>PREFETCH: <span id="hud-prefetch">0</span> tiles ahead</div>
+
   
   <div style="margin-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px;">
     <div style="font-weight: bold; color: #38bdf8; margin-bottom: 8px;">🌅 ATMOSPHERE & LIGHTING</div>
@@ -182,9 +166,9 @@ hud.innerHTML = `
     <div style="margin-bottom: 8px;">
       <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
         <span>IMAGERY BRIGHTNESS</span>
-        <span id="val-brightness">1.15</span>
+        <span id="val-brightness">1.75</span>
       </div>
-      <input type="range" id="ctrl-brightness" min="0.5" max="2.0" step="0.05" value="1.15" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+      <input type="range" id="ctrl-brightness" min="0.5" max="2.0" step="0.05" value="1.75" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
     </div>
 
     <div style="margin-bottom: 8px;">
@@ -236,36 +220,23 @@ hud.innerHTML = `
     </div>
 
     <div style="margin-bottom: 8px;">
+      <label style="display: flex; align-items: center; gap: 6px; font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">
+        <input type="checkbox" id="ctrl-follow-dem" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
+        FOLLOW TERRAIN (AGL hold)
+      </label>
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-top: 4px; margin-bottom: 2px;">
+        <span>AGL ALTITUDE</span>
+        <span id="val-agl-alt">500 m</span>
+      </div>
+      <input type="range" id="ctrl-agl-alt" min="50" max="5000" step="50" value="500" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    </div>
+
+    <div style="margin-bottom: 8px;">
       <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
         <span>USDA IMAGERY &le; Z (else COG tiler)</span>
         <span id="val-extimagery">13</span>
       </div>
       <input type="range" id="ctrl-extimagery" min="0" max="18" step="1" value="13" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
-    <div id="container-terrain-bands" style="margin-bottom: 12px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 4px;">
-        <span>TERRAIN RESOLUTION BANDS <span style="color: #f59e0b;">(local tiler only)</span></span>
-      </div>
-      <div style="display: flex; justify-content: space-between; font-size: 9px; color: #cbd5e1; margin-bottom: 6px; gap: 4px;">
-        <span style="display: flex; align-items: center; gap: 3px;">
-          <span style="display: inline-block; width: 6px; height: 6px; background: #64748b; border-radius: 1px;"></span>
-          Mapzen: z1-<span id="val-mapzen-max">10</span>
-        </span>
-        <span style="display: flex; align-items: center; gap: 3px;">
-          <span style="display: inline-block; width: 6px; height: 6px; background: #ff00ff; border-radius: 1px;"></span>
-          USGS: z<span id="val-usgs-min">11</span>-<span id="val-usgs-max">14</span>
-        </span>
-        <span style="display: flex; align-items: center; gap: 3px;">
-          <span style="display: inline-block; width: 6px; height: 6px; background: #00ffff; border-radius: 1px;"></span>
-          S1M: z<span id="val-s1m-min">15</span>-20
-        </span>
-      </div>
-      <div class="dual-slider-container" style="position: relative; height: 20px; width: 100%; margin-top: 4px; margin-bottom: 8px;">
-        <div id="slider-track" style="position: absolute; top: 8px; left: 0; right: 0; height: 4px; border-radius: 2px;"></div>
-        <input type="range" id="ctrl-usgs-min" min="1" max="20" value="11" step="1" style="position: absolute; width: 100%; top: 0; left: 0; height: 20px; margin: 0; -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none; cursor: pointer;">
-        <input type="range" id="ctrl-s1m-min" min="1" max="20" value="15" step="1" style="position: absolute; width: 100%; top: 0; left: 0; height: 20px; margin: 0; -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none; cursor: pointer;">
-      </div>
     </div>
 
     <div style="margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
@@ -346,11 +317,11 @@ hud.innerHTML = `
       <!-- Hypsometric bounds mode (Global vs Local) -->
       <div style="display: flex; gap: 12px; margin-bottom: 6px; font-size: 9px; color: #cbd5e1;">
         <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none;">
-          <input type="radio" name="ctrl-hyp-bounds" value="global" checked style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
+          <input type="radio" name="ctrl-hyp-bounds" value="global" style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
           Global
         </label>
         <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none;">
-          <input type="radio" name="ctrl-hyp-bounds" value="local" style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
+          <input type="radio" name="ctrl-hyp-bounds" value="local" checked style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
           Local to Viewport
         </label>
       </div>
@@ -367,7 +338,7 @@ hud.innerHTML = `
     • Drag — Pan<br>
     • Right-drag — Rotate / Tilt<br>
     • Scroll — Zoom to cursor<br>
-    • Double-click — Zoom in<br>
+    • Double-click — Fly to point
     • [W/A/S/D] Fly · [Q/E] Up/Down · [Shift] Boost
   </div>
 `;
@@ -411,6 +382,8 @@ const hudAlt = document.getElementById("hud-alt")!;
 const hudSpeed = document.getElementById("hud-speed")!;
 const hudTiles = document.getElementById("hud-tiles")!;
 const hudCache = document.getElementById("hud-cache")!;
+const hudPrefetch = document.getElementById("hud-prefetch")!;
+
 
 const ctrlPreset = document.getElementById("ctrl-preset") as HTMLSelectElement;
 const ctrlImagerySource = document.getElementById("ctrl-imagery-source") as HTMLSelectElement;
@@ -419,17 +392,9 @@ const ctrlAzimuth = document.getElementById("ctrl-azimuth") as HTMLInputElement;
 const ctrlAltitude = document.getElementById("ctrl-altitude") as HTMLInputElement;
 const ctrlFog = document.getElementById("ctrl-fog") as HTMLInputElement;
 const ctrlExaggeration = document.getElementById("ctrl-exaggeration") as HTMLInputElement;
+const ctrlFollowDem = document.getElementById("ctrl-follow-dem") as HTMLInputElement;
+const ctrlAglAlt = document.getElementById("ctrl-agl-alt") as HTMLInputElement;
 const ctrlExtImagery = document.getElementById("ctrl-extimagery") as HTMLInputElement;
-const ctrlUsgsMin = document.getElementById("ctrl-usgs-min") as HTMLInputElement;
-const ctrlS1mMin = document.getElementById("ctrl-s1m-min") as HTMLInputElement;
-// The DEM-band thresholds ride on ?usgs_min_zoom/?s1m_min_zoom query params,
-// which CloudFront's path-only cache policy strips — so they're a no-op on the
-// deployed tiler and only work against a local tiler. Hide them otherwise.
-const containerTerrainBands = document.getElementById("container-terrain-bands") as HTMLDivElement;
-if (!useLocalTiler) {
-  containerTerrainBands.style.display = "none";
-}
-const sliderTrack = document.getElementById("slider-track")!;
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
 const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
@@ -448,11 +413,8 @@ const valAzimuth = document.getElementById("val-azimuth")!;
 const valAltitude = document.getElementById("val-altitude")!;
 const valFog = document.getElementById("val-fog")!;
 const valExaggeration = document.getElementById("val-exaggeration")!;
+const valAglAlt = document.getElementById("val-agl-alt")!;
 const valExtImagery = document.getElementById("val-extimagery")!;
-const valMapzenMax = document.getElementById("val-mapzen-max")!;
-const valUsgsMin = document.getElementById("val-usgs-min")!;
-const valUsgsMax = document.getElementById("val-usgs-max")!;
-const valS1mMin = document.getElementById("val-s1m-min")!;
 const valSpeedCtrl = document.getElementById("val-speed-ctrl")!;
 const valBrightness = document.getElementById("val-brightness")!;
 const valContrast = document.getElementById("val-contrast")!;
@@ -591,6 +553,92 @@ ctrlExaggeration.addEventListener("input", () => {
   tileManager.setVerticalExaggeration(val);
 });
 
+ctrlAglAlt.addEventListener("input", () => {
+  valAglAlt.textContent = `${parseInt(ctrlAglAlt.value)} m`;
+});
+
+// --- FlyTo animated trajectory (ported from pTolemy3D's flyTo) ---
+// Replaces the instant lerp double-click with a smooth accel/decel path
+// that climbs to a cruise altitude, arcs over, and descends to the target.
+interface FlyToState {
+  startPos: THREE.Vector3;
+  endPos: THREE.Vector3;
+  startQuat: THREE.Quaternion;
+  endQuat: THREE.Quaternion;
+  startTime: number;
+  duration: number;
+  cruiseAlt: number;  // world Z apex along the arc
+}
+let flyToState: FlyToState | null = null;
+
+/** Cancel any in-flight FlyTo trajectory. */
+function cancelFlyTo(): void {
+  flyToState = null;
+}
+
+/**
+ * Smoothstep easing: 0 at t=0, 1 at t=1, with zero velocity at both ends
+ * (accel from rest, decel to rest). Matches pTolemy3D's brake-distance logic
+ * but in a closed form.
+ */
+function smoothstep(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Initiate a smooth FlyTo trajectory to a ground point. The camera climbs
+ * to a cruise altitude (midpoint Z raised by the arc factor), rotates to
+ * look at the target, then descends. Duration scales with distance.
+ */
+function flyTo(targetGround: THREE.Vector3): void {
+  const start = camera.position.clone();
+  const dist = start.distanceTo(targetGround);
+  // Duration scales with distance: ~2s for 1km, ~6s for 100km, capped.
+  const duration = Math.min(8000, Math.max(2000, dist * 0.04));
+  // Cruise altitude: arc above the direct path. Raise the midpoint Z so
+  // the camera climbs then descends, mirroring pTolemy3D's cruise_alt.
+  const cruiseAlt = Math.max(start.z, targetGround.z) + Math.min(dist * 0.15, 5000);
+
+  // End orientation: look straight down at the target from the arrival altitude.
+  const endQuat = new THREE.Quaternion();
+  const lookFrom = targetGround.clone();
+  lookFrom.z = targetGround.z + 500; // arrive 500m above the clicked point
+  const m = new THREE.Matrix4().lookAt(lookFrom, targetGround, new THREE.Vector3(0, 0, 1));
+  endQuat.setFromRotationMatrix(m);
+
+  flyToState = {
+    startPos: start,
+    endPos: lookFrom,
+    startQuat: camera.quaternion.clone(),
+    endQuat,
+    startTime: performance.now(),
+    duration,
+    cruiseAlt,
+  };
+}
+
+/** Advance the FlyTo trajectory by one frame; returns true if active. */
+function updateFlyTo(): boolean {
+  if (!flyToState) return false;
+  const s = flyToState;
+  const elapsed = performance.now() - s.startTime;
+  const t = Math.min(1, elapsed / s.duration);
+  const e = smoothstep(t);
+
+  // Position: lerp start→end, but raise Z along a sine arc for cruise altitude.
+  camera.position.lerpVectors(s.startPos, s.endPos, e);
+  const arcZ = Math.sin(t * Math.PI) * (s.cruiseAlt - Math.max(s.startPos.z, s.endPos.z));
+  camera.position.z += Math.max(0, arcZ);
+
+  // Orientation: slerp from start to end quaternion.
+  camera.quaternion.slerpQuaternions(s.startQuat, s.endQuat, e);
+
+  if (t >= 1) {
+    flyToState = null;
+  }
+  return true;
+}
+
 ctrlFootprints.addEventListener("change", () => {
   tileManager.setShowFootprints(ctrlFootprints.checked);
 });
@@ -600,44 +648,6 @@ ctrlExtImagery.addEventListener("input", () => {
   valExtImagery.textContent = z.toString();
   tileManager.setExternalImageryMaxZoom(z);
 });
-
-function updateTerrainBands() {
-  const u = parseInt(ctrlUsgsMin.value);
-  const s = parseInt(ctrlS1mMin.value);
-
-  valMapzenMax.textContent = (u - 1).toString();
-  valUsgsMin.textContent = u.toString();
-  valUsgsMax.textContent = (s - 1).toString();
-  valS1mMin.textContent = s.toString();
-
-  const pctU = ((u - 1) / 19) * 100;
-  const pctS = ((s - 1) / 19) * 100;
-  sliderTrack.style.background = `linear-gradient(to right, #64748b 0%, #64748b ${pctU}%, #ff00ff ${pctU}%, #ff00ff ${pctS}%, #00ffff ${pctS}%, #00ffff 100%)`;
-
-  tileManager.setUsgsMinZoom(u);
-  tileManager.setS1mMinZoom(s);
-}
-
-ctrlUsgsMin.addEventListener("input", () => {
-  const usgsVal = parseInt(ctrlUsgsMin.value);
-  const s1mVal = parseInt(ctrlS1mMin.value);
-  if (usgsVal >= s1mVal) {
-    ctrlUsgsMin.value = (s1mVal - 1).toString();
-  }
-  updateTerrainBands();
-});
-
-ctrlS1mMin.addEventListener("input", () => {
-  const usgsVal = parseInt(ctrlUsgsMin.value);
-  const s1mVal = parseInt(ctrlS1mMin.value);
-  if (s1mVal <= usgsVal) {
-    ctrlS1mMin.value = (usgsVal + 1).toString();
-  }
-  updateTerrainBands();
-});
-
-// Initialize slider bands & TileManager
-updateTerrainBands();
 
 ctrlSpeedCtrl.addEventListener("input", () => {
   baseSpeedKnots = parseInt(ctrlSpeedCtrl.value);
@@ -701,8 +711,12 @@ let previousMousePosition = { x: 0, y: 0 };
 let baseSpeedKnots = 800; // Customizable flight speed setting in knots
 let speedKnots = 800; // Default active airspeed simulation
 
-// Track keyboard state
-window.addEventListener("keydown", (e) => activeKeys.add(e.code));
+// Track keyboard state — any movement key cancels an in-flight FlyTo trajectory.
+const movementCodes = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ShiftLeft", "ShiftRight"]);
+window.addEventListener("keydown", (e) => {
+  activeKeys.add(e.code);
+  if (movementCodes.has(e.code)) cancelFlyTo();
+});
 window.addEventListener("keyup", (e) => activeKeys.delete(e.code));
 
 // Prevent standard context menu when clicking on the 3D scene (outside HUD)
@@ -783,6 +797,7 @@ window.addEventListener("mousedown", (e) => {
 
 window.addEventListener("mousemove", (e) => {
   if (dragMode === null || e.buttons === 0) return;
+  cancelFlyTo();
   const dx = e.clientX - previousMousePosition.x;
   const dy = e.clientY - previousMousePosition.y;
   previousMousePosition = { x: e.clientX, y: e.clientY };
@@ -836,12 +851,11 @@ window.addEventListener("wheel", (e) => {
   }
 }, { passive: false });
 
-// Double-click = zoom in 2x on the clicked point (orientation unchanged, so
-// the point stays under the cursor).
+// Double-click = FlyTo the clicked ground point (smooth animated trajectory).
 window.addEventListener("dblclick", (e) => {
   if (hud.contains(e.target as Node)) return;
   const point = pickGround(e.clientX, e.clientY);
-  if (point) camera.position.lerp(point, 0.5); // halve the distance to the point
+  if (point) flyTo(point);
 });
 
 window.addEventListener("resize", () => {
@@ -869,24 +883,49 @@ function frameLoop() {
   const speed = baseSpeed * speedMultiplier * altitudeFactor;
   speedKnots = Math.round(speed * 1.94384); // Convert relative m/s to simulated knots
 
-  // Process movement input relative to camera heading
-  const direction = new THREE.Vector3();
-  if (activeKeys.has("KeyW")) direction.z -= 1;
-  if (activeKeys.has("KeyS")) direction.z += 1;
-  if (activeKeys.has("KeyA")) direction.x -= 1;
-  if (activeKeys.has("KeyD")) direction.x += 1;
+  // FlyTo trajectory takes over camera position/orientation until it completes.
+  // Manual input (keys/mouse) cancels it via cancelFlyTo().
+  let direction: THREE.Vector3 | null = null;
+  if (updateFlyTo()) {
+    // Skip manual movement; still update LOD and render.
+  } else {
+    // Process movement input relative to camera heading
+    direction = new THREE.Vector3();
+    if (activeKeys.has("KeyW")) direction.z -= 1;
+    if (activeKeys.has("KeyS")) direction.z += 1;
+    if (activeKeys.has("KeyA")) direction.x -= 1;
+    if (activeKeys.has("KeyD")) direction.x += 1;
 
-  // Apply camera orientation to horizontal inputs
-  direction.normalize();
-  direction.applyQuaternion(camera.quaternion);
+    // Apply camera orientation to horizontal inputs
+    direction.normalize();
+    direction.applyQuaternion(camera.quaternion);
 
-  // Vertical flying inputs (Q=down, E=up)
-  if (activeKeys.has("KeyQ")) direction.z -= 1;
-  if (activeKeys.has("KeyE")) direction.z += 1;
+    // Vertical flying inputs (Q=down, E=up)
+    if (activeKeys.has("KeyQ")) direction.z -= 1;
+    if (activeKeys.has("KeyE")) direction.z += 1;
 
-  // Update position
-  if (direction.lengthSq() > 0) {
-    camera.position.addScaledVector(direction.normalize(), speed * dt);
+    // Update position
+    if (direction.lengthSq() > 0) {
+      camera.position.addScaledVector(direction.normalize(), speed * dt);
+    }
+  }
+
+  // Follow-DEM: maintain constant above-ground clearance instead of
+  // above-sea-level altitude (ported from pTolemy3D's setFollowDem). The
+  // terrain Z under the camera is sampled from loaded tiles; camera Z is
+  // adjusted to hold the target AGL. Skipped when no terrain is loaded
+  // under the camera (e.g. over open ocean or during cold start).
+  if (ctrlFollowDem.checked) {
+    const gx = camera.position.x + worldAnchor[0];
+    const gy = camera.position.y + worldAnchor[1];
+    const groundElev = tileManager.getElevationAt(gx, gy);
+    if (groundElev !== null) {
+      const zScale = 1 / Math.cos((mercatorToLonLat(gx, gy)[1] * Math.PI) / 180);
+      const targetZ = groundElev * zScale + parseFloat(ctrlAglAlt.value);
+      // Smooth toward target (exponential smoothing) to avoid jitter when
+      // tiles swap LOD and centerElevation steps. τ = 0.2s.
+      camera.position.z += (targetZ - camera.position.z) * Math.min(1, dt / 0.2);
+    }
   }
 
   // Update LOD and stream/cache terrain tiles
@@ -902,9 +941,11 @@ function frameLoop() {
 
   hudPos.textContent = `${lat.toFixed(5)} / ${lon.toFixed(5)}`;
   hudAlt.textContent = Math.round(camera.position.z).toString();
-  hudSpeed.textContent = direction.lengthSq() > 0 ? speedKnots.toString() : "0";
+  hudSpeed.textContent = (direction && direction.lengthSq() > 0) ? speedKnots.toString() : "0";
   hudTiles.textContent = tileManager.getActiveKeys().size.toString();
   hudCache.textContent = (bundleCache.bytesUsed() / (1024 * 1024)).toFixed(2);
+  hudPrefetch.textContent = tileManager.getLastPrefetchCount().toString();
+
 
   // Rotate the compass rose so the red N points to where north is on screen.
   compassFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);

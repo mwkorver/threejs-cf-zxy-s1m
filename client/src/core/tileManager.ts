@@ -9,7 +9,8 @@ import {
   mercatorToLonLat,
   EARTH_CIRCUMFERENCE
 } from "./mercator";
-import { loadTerrain, loadImagery, loadImageryExternal, loadImageryOSM, loadStaticFootprints, type FootprintCollection, type FootprintFeature } from "./tileLoader";
+import { loadStaticFootprints, type FootprintCollection, type FootprintFeature } from "./tileLoader";
+import { resolveImageryKind } from "./tileUrls";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import { TerrainShader } from "./terrainShader";
@@ -35,6 +36,8 @@ export interface TileNode {
   visible: boolean;
   /** performance.now() before which triggerLoad is skipped after a failure. */
   retryAfter?: number;
+  /** performance.now() when the node was handed to transitionNodes (stale pool). */
+  transitionSince?: number;
 }
 
 export class TileManager {
@@ -68,10 +71,6 @@ export class TileManager {
   // render as flat sea-level quads (relief is subpixel at those altitudes).
   // Keeps low zoom off the tiler's far-field path; z14 = USGS 1/3, z15+ = S1M.
   public terrainMinZoom = 14;
-  // Zoom at/above which USGS 1/3" DEM is used instead of far-field.
-  public usgsMinZoom = 11;
-  // Zoom at/above which S1M is used instead of USGS 1/3" DEM.
-  public s1mMinZoom = 15;
   // Shading mode (0.0 = Satellite, 1.0 = DEM, 2.0 = Hypsometric)
   public shadingMode = 0.0;
   // Blend factor for hypsometric tinting (0.0 to 1.0)
@@ -97,7 +96,27 @@ export class TileManager {
   private visibleNodesList: TileNode[] = [];
   // Keep old root nodes rendering smoothly until new base level roots are fully loaded
   private transitionNodes = new Map<string, TileNode>();
+  // Max lifetime (ms) of a stale tile after its base-zoom handoff. Coverage-
+  // based retirement only works zooming OUT (a stale fine tile hides once its
+  // coarser active ancestor renders); zooming IN, a stale coarse tile has no
+  // active ancestor and would pin until the global swap — which camera motion
+  // keeps resetting while each base-zoom step adds another stale cohort. The
+  // TTL bounds that: the global swap prunes everything anyway, so timing a
+  // straggler out just reaches the same steady state sooner.
+  public transitionTtlMs = 5000;
   private workerPool = new TileWorkerPool();
+
+  // --- Velocity-vector prefetch (plan §5.3) ---
+  private prefetchPrevPos?: THREE.Vector3;
+  private prefetchPrevTimeMs = 0;
+  private prefetchVelocity = new THREE.Vector3(); // Mercator m/s, local offset space
+  private lastPrefetchCount = 0;
+  /** How far ahead (seconds) to sample along the flight vector. */
+  public prefetchLookaheadSec = 4;
+  /** Number of sample points along the look-ahead ray. */
+  public prefetchSamples = 4;
+  /** Minimum horizontal Mercator m/s before prefetch activates (≈ 100 kt ground). */
+  public prefetchMinSpeedMs = 50;
 
   // Screen-space-error projection factor: (viewportH/2) * cot(fovY/2), i.e.
   // pixels per radian of vertical view angle. Recomputed each update() from
@@ -121,10 +140,10 @@ export class TileManager {
     showDemColors: { value: false },
     shadingMode: { value: 0.0 },
     hypsometricBlend: { value: 0.5 },
-    useLocalHypso: { value: 0.0 },
+    useLocalHypso: { value: 1.0 },
     localMinElev: { value: 0.0 },
     localMaxElev: { value: 4000.0 },
-    brightness: { value: 1.15 },
+    brightness: { value: 1.75 },
     contrast: { value: 1.10 },
     saturation: { value: 1.15 }
   };
@@ -186,8 +205,10 @@ export class TileManager {
 
     if (computedBaseZoom !== this.baseZoom) {
       // Move current root nodes to transitionNodes to keep them on screen during transition
+      const handoff = performance.now();
       for (const [key, node] of this.rootNodes.entries()) {
         this.transitionNodes.set(key, node);
+        node.transitionSince = handoff; // starts (or restarts) the stale TTL
         this.applyPolygonOffset(node, true);
         this.cancelLoadingSubtree(node);
       }
@@ -199,6 +220,22 @@ export class TileManager {
     const cx = localCameraPos.x + this.worldAnchor[0];
     const cy = localCameraPos.y + this.worldAnchor[1];
     this.lastCameraMercator = [cx, cy];
+
+    // Velocity estimate for prefetch (§5.3): finite-difference from prev frame.
+    // Clamped to 200 ms: tabs that go to background then resume would produce a
+    // huge phantom velocity spike from accumulated dt — reset instead.
+    const pfNow = performance.now();
+    const pfDt = pfNow - this.prefetchPrevTimeMs;
+    if (this.prefetchPrevPos && pfDt > 0 && pfDt < 200) {
+      this.prefetchVelocity
+        .subVectors(localCameraPos, this.prefetchPrevPos)
+        .divideScalar(pfDt / 1000);
+    } else if (pfDt >= 200) {
+      // Stale gap (tab hidden, long GC pause, etc.) — reset so we don't lurch.
+      this.prefetchVelocity.set(0, 0, 0);
+    }
+    this.prefetchPrevPos = localCameraPos.clone();
+    this.prefetchPrevTimeMs = pfNow;
 
     // 2. Determine the root-grid center tile. Bias it forward along the
     // horizontal component of the view direction: flying level, the frustum
@@ -236,6 +273,7 @@ export class TileManager {
               const node = this.transitionNodes.get(key)!;
               this.rootNodes.set(key, node);
               this.transitionNodes.delete(key);
+              node.transitionSince = undefined; // active again, no longer stale
               this.applyPolygonOffset(node, false);
             } else {
               const bounds = tileBoundsMercator(t);
@@ -308,7 +346,19 @@ export class TileManager {
         }
         this.transitionNodes.clear();
       } else {
-        // Still loading: keep transition nodes alive and visible
+        // Still loading: keep transition nodes alive and visible — but only
+        // for transitionTtlMs each. Without the TTL, a fast zoom-IN leaves
+        // stale coarse cohorts no coverage check can ever retire, and their
+        // coarsely-sampled DEM surfaces poke through the fine terrain
+        // ("bleeding"). Prune expired nodes individually; survivors keep
+        // rendering as the usual hole-free fallback.
+        const now = performance.now();
+        for (const [key, node] of this.transitionNodes.entries()) {
+          if (now - (node.transitionSince ?? now) > this.transitionTtlMs) {
+            this.pruneNode(node);
+            this.transitionNodes.delete(key);
+          }
+        }
         for (const node of this.transitionNodes.values()) {
           this.updateTransitionNode(node, cameraPosGlobal, frustum);
         }
@@ -345,6 +395,9 @@ export class TileManager {
       this.globalUniforms.localMinElev.value = 0.0;
       this.globalUniforms.localMaxElev.value = 4000.0;
     }
+
+    // 10. Prefetch tiles along the flight vector (§5.3)
+    this.prefetchAhead();
   }
 
   /**
@@ -354,12 +407,25 @@ export class TileManager {
     return this.activeKeys;
   }
 
+  /** Number of prefetch tile requests enqueued in the last update(). */
+  getLastPrefetchCount(): number {
+    return this.lastPrefetchCount;
+  }
+
   /** @returns true if the node was frustum-culled (renders nothing on screen). */
   private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): boolean {
+    // Per-tile ground→world Z scale at the tile's center latitude (plan §5.1).
+    // Every true-metre value (elevation, exagZ) must be multiplied by this
+    // before entering world Z, where the camera and frustum live. Mesh
+    // vertices bake h·zScale; the same factor applies here for consistency.
+    const zScale = mercatorScale(mercatorToLonLat(node.centerMercator[0], node.centerMercator[1])[1]);
+
     // 1. Perform frustum culling check first
     if (this.cullTiles && frustum) {
-      const tileMinZ = this.exagZ(-1000);
-      const tileMaxZ = this.exagZ(9000);
+      // Box Z in world (Mercator) metres: exagZ returns true metres, ×zScale
+      // converts to the world Z the frustum is projected in.
+      const tileMinZ = this.exagZ(-1000) * zScale;
+      const tileMaxZ = this.exagZ(9000) * zScale;
       const box = new THREE.Box3(
         new THREE.Vector3(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ),
         new THREE.Vector3(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ)
@@ -376,7 +442,9 @@ export class TileManager {
 
     const clampX = Math.max(node.bounds.west, Math.min(node.bounds.east, cameraPosGlobal.x));
     const clampY = Math.max(node.bounds.south, Math.min(node.bounds.north, cameraPosGlobal.y));
-    const closestPoint = new THREE.Vector3(clampX, clampY, node.centerElevation ?? 0);
+    // closestPoint.z must be in world Z (Mercator metres) to match
+    // cameraPosGlobal.z — both the frustum and the camera live in world space.
+    const closestPoint = new THREE.Vector3(clampX, clampY, this.exagZ(node.centerElevation ?? 0) * zScale);
     const dist = Math.max(1, cameraPosGlobal.distanceTo(closestPoint));
 
     // Pin this key as active
@@ -545,8 +613,6 @@ export class TileManager {
       year: this.year,
       imagerySource: this.imagerySource,
       terrainMinZoom: this.terrainMinZoom,
-      usgsMinZoom: this.usgsMinZoom,
-      s1mMinZoom: this.s1mMinZoom,
       gridStep: this.gridStep,
       externalImageryMaxZoom: this.externalImageryMaxZoom
     };
@@ -559,39 +625,15 @@ export class TileManager {
           return;
         }
 
-        const { demSource, centerElevation, meshData, imageBitmap, minElevation, maxElevation } = res;
-
-        // Build Three.js geometry from worker-returned typed arrays
-        const geom = new THREE.BufferGeometry();
-        geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
-        geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
-        geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
-        geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
-
-        // Create texture if imagery loaded successfully
-        let texture: THREE.Texture | undefined;
-        if (imageBitmap) {
-          const branded = this.bakeTileLabel(imageBitmap, node.tile);
-          texture = new THREE.CanvasTexture(branded as unknown as HTMLCanvasElement);
-          texture.colorSpace = THREE.SRGBColorSpace;
-          texture.anisotropy = 4;
-        }
-
-        const bytes =
-          meshData.positions.byteLength +
-          meshData.normals.byteLength +
-          meshData.indices.byteLength +
-          (texture ? 512 * 512 * 4 : 0);
-
+        const { demSource, centerElevation, minElevation, maxElevation } = res;
         node.centerElevation = centerElevation;
         node.demSource = demSource;
         node.minElevation = minElevation;
         node.maxElevation = maxElevation;
 
-        const bundle: Bundle = { key, bytes, geometry: geom, texture, centerElevation, demSource, minElevation, maxElevation };
+        const bundle = this.buildBundleFromResult(key, node.tile, res);
         this.bundleCache.put(bundle, this.activeKeys);
-
-        this.createMeshFromBundle(node, geom, texture);
+        this.createMeshFromBundle(node, bundle.geometry, bundle.texture);
         node.loaded = true;
         node.loading = false;
         node.retryAfter = undefined;
@@ -605,6 +647,111 @@ export class TileManager {
         node.loading = false;
         node.retryAfter = performance.now() + 2000 + Math.random() * 2000;
       });
+  }
+
+  /**
+   * Shared resolution step for triggerLoad and prefetchAhead: convert a worker
+   * result into a Bundle (geometry + texture) without touching any TileNode.
+   * Callers are responsible for putting the bundle into the cache.
+   */
+  private buildBundleFromResult(
+    key: string,
+    tile: TileId,
+    res: {
+      demSource: string;
+      centerElevation: number;
+      meshData: { positions: Float32Array; uvs: Float32Array; normals: Float32Array; indices: Uint32Array };
+      imageBitmap?: ImageBitmap | null;
+      minElevation: number;
+      maxElevation: number;
+    }
+  ): Bundle {
+    const { demSource, centerElevation, meshData, imageBitmap, minElevation, maxElevation } = res;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+    geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
+    geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+    geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+    let texture: THREE.Texture | undefined;
+    if (imageBitmap) {
+      const branded = this.bakeTileLabel(imageBitmap, tile);
+      texture = new THREE.CanvasTexture(branded as unknown as HTMLCanvasElement);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+    }
+
+    const bytes =
+      meshData.positions.byteLength +
+      meshData.normals.byteLength +
+      meshData.indices.byteLength +
+      (texture ? 512 * 512 * 4 : 0);
+
+    return { key, bytes, geometry: geom, texture, centerElevation, demSource, minElevation, maxElevation };
+  }
+
+  /**
+   * Velocity-vector prefetch (plan §5.3): sample look-ahead points along the
+   * horizontal flight vector and pre-warm the bundle cache for tiles the camera
+   * will encounter in prefetchLookaheadSec seconds. Called at the end of update().
+   *
+   * Tiles already in the bundle cache or actively loading are skipped (no-ops).
+   * Prefetch requests use a priority well below visible tiles so the worker pool
+   * never starves the current frame's tile loads.
+   */
+  private prefetchAhead(): void {
+    this.lastPrefetchCount = 0;
+    if (!this.prefetchPrevPos) return;
+
+    const horizSpeedSq =
+      this.prefetchVelocity.x ** 2 + this.prefetchVelocity.y ** 2;
+    if (horizSpeedSq < this.prefetchMinSpeedMs ** 2) return;
+
+    const options = {
+      baseUrl: this.baseUrl,
+      layer: this.layer,
+      year: this.year,
+      imagerySource: this.imagerySource,
+      terrainMinZoom: this.terrainMinZoom,
+      gridStep: this.gridStep,
+      externalImageryMaxZoom: this.externalImageryMaxZoom,
+    };
+
+    // Prefetch zoom: always at maxZoom (e.g. z15–18) — the tier where cold
+    // misses actually cause pop-in. At coarser zooms tiles are 100s of km
+    // wide; the camera can't outrun them and they're already in the active tree.
+    const zoom = this.maxZoom;
+    const anchorX = this.worldAnchor[0];
+    const anchorY = this.worldAnchor[1];
+
+    for (let s = 1; s <= this.prefetchSamples; s++) {
+      const t = (s / this.prefetchSamples) * this.prefetchLookaheadSec;
+      const fx = (this.prefetchPrevPos.x + anchorX) + this.prefetchVelocity.x * t;
+      const fy = (this.prefetchPrevPos.y + anchorY) + this.prefetchVelocity.y * t;
+
+      const tile = mercatorToTile(fx, fy, zoom);
+      const key = tileKey(tile);
+
+      // Skip if already cached or in the active LOD tree (loads via triggerLoad).
+      if (this.bundleCache.get(key)) continue;
+      if (this.activeKeys.has(key)) continue;
+
+      this.lastPrefetchCount++;
+      // Prefetch priority is well below active tiles. triggerLoad uses negative
+      // camera distances (roughly -1e3 to -1e6); -1e7 ensures prefetch yields.
+      const priority = -1e7 - s;
+      const capturedKey = key;
+      const capturedTile = { ...tile };
+      this.workerPool.requestTile(capturedTile, priority, options)
+        .then((res) => {
+          const bundle = this.buildBundleFromResult(capturedKey, capturedTile, res);
+          this.bundleCache.put(bundle, this.activeKeys);
+        })
+        .catch(() => {
+          // Non-fatal: the LOD tree retries if/when the camera arrives.
+        });
+    }
   }
 
   private buildViewportFootprintsMesh(
@@ -700,19 +847,31 @@ export class TileManager {
    * loaded tile covering it, or null if no loaded tile covers it (so callers
    * can skip drawing over absent terrain instead of floating at z=0).
    */
-  private getElevationAt(mx: number, my: number): number | null {
+  public getElevationAt(mx: number, my: number): number | null {
     let bestNode: TileNode | undefined;
     const checkNode = (node: TileNode) => {
-      if (!node.loaded) return;
-      if (mx >= node.bounds.west && mx <= node.bounds.east &&
-          my >= node.bounds.south && my <= node.bounds.north) {
-        if (!bestNode || node.tile.z > bestNode.tile.z) {
-          bestNode = node;
-        }
-        if (node.children) {
-          for (const child of node.children) {
-            checkNode(child);
-          }
+      // Outside this node: nothing in the subtree can cover the point.
+      if (mx < node.bounds.west || mx > node.bounds.east ||
+          my < node.bounds.south || my > node.bounds.north) {
+        return;
+      }
+      // Recurse regardless of THIS node's load state. Bailing on !loaded
+      // stopped the walk at an unloaded ancestor, hiding loaded descendants.
+      // Usually harmless — updateNode triggerLoads a parent whenever its
+      // children aren't all ready, so the chain is normally contiguous — but a
+      // parent whose four children all load synchronously from a warm
+      // BundleCache never loads itself, and the walk then died on it, yielding
+      // null (Follow-DEM disengages, draped footprints drop to sea level)
+      // despite fine terrain being loaded right there.
+      // Only a loaded node that actually has a sample may win: selecting one
+      // without centerElevation would mask a coarser node that has it.
+      if (node.loaded && node.centerElevation !== undefined &&
+          (bestNode === undefined || node.tile.z > bestNode.tile.z)) {
+        bestNode = node;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          checkNode(child);
         }
       }
     };
@@ -724,7 +883,7 @@ export class TileManager {
       checkNode(node);
     }
 
-    return bestNode && bestNode.centerElevation !== undefined ? bestNode.centerElevation : null;
+    return bestNode ? bestNode.centerElevation! : null;
   }
 
   private createMeshFromBundle(
@@ -1082,30 +1241,22 @@ export class TileManager {
     this.clear(); // reset nodes; next update() rebuilds + refetches
   }
 
-  setUsgsMinZoom(z: number): void {
-    if (z === this.usgsMinZoom) return;
-    this.usgsMinZoom = z;
-    this.bundleCache.clear();
-    this.clear(); // reset nodes; next update() rebuilds + refetches
-  }
-
-  setS1mMinZoom(z: number): void {
-    if (z === this.s1mMinZoom) return;
-    this.s1mMinZoom = z;
-    this.bundleCache.clear();
-    this.clear(); // reset nodes; next update() rebuilds + refetches
-  }
-
   /**
    * Which source letter a tile's imagery gets: the worker routes z <=
    * externalImageryMaxZoom to the USDA basemap stitch (U, yellow) and deeper
    * zooms to the NAIP COG mosaic resolved via DuckDB (N, cyan). OSM gets none.
    */
   private imagerySourceLetter(z: number): { ch: string; color: string } | null {
-    if (this.imagerySource === "osm") return null;
-    return z <= this.externalImageryMaxZoom
-      ? { ch: "U", color: "#ffd400" }
-      : { ch: "N", color: "#00e5ff" };
+    // Shares the fetch path's routing rule, so the baked letter can never
+    // claim a source the request didn't actually use.
+    switch (resolveImageryKind(z, this.imagerySource, this.externalImageryMaxZoom)) {
+      case "osm":
+        return null;
+      case "basemap":
+        return { ch: "U", color: "#ffd400" };
+      default:
+        return { ch: "N", color: "#00e5ff" };
+    }
   }
 
   /**

@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: typecheck · test (TS client)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      # Vitest runs the core tile math, the LOD/transition logic, the worker
+      # pool, and the shared tile-URL routing. No network: tileLoader is mocked.
+      - run: npm test
+
+  tiler:
+    name: ruff · pytest (Python tiler)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tiler
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      # The tiler is an installable package (hatchling); -e ".[dev]" pulls in
+      # ruff + pytest so CI and a local checkout run the identical tool set.
+      - run: pip install -e ".[dev]"
+      - name: ruff check
+        run: ruff check .
+      # Every S3/HTTP read is mocked (see tests/), so no AWS credentials and no
+      # network are needed — the suite is hermetic.
+      - name: pytest
+        run: python -m pytest

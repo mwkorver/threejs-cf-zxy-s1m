@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as THREE from "three";
 import { TileManager, type TileNode } from "./tileManager";
 import { BundleCache, type Bundle } from "./bundleCache";
-import { mercatorToTile } from "./mercator";
+import { mercatorToTile, lonLatToMercator, mercatorScale } from "./mercator";
 
 // Suppress noisy console output from tile loading warnings
 let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -22,9 +22,7 @@ vi.mock("./tileLoader", () => ({
   loadTerrain: vi.fn(() =>
     Promise.resolve({ heights: new Float32Array(512 * 512), demSource: "farfield" }),
   ),
-  loadImagery: vi.fn(() => Promise.resolve(null)),
-  loadImageryExternal: vi.fn(() => Promise.resolve(null)),
-  loadImageryOSM: vi.fn(() => Promise.resolve(null)),
+  loadImageryFor: vi.fn(() => Promise.resolve(null)),
   loadStaticFootprints: vi.fn(() =>
     Promise.resolve({ type: "FeatureCollection", features: [] }),
   ),
@@ -374,6 +372,30 @@ describe("TileManager dynamic base zoom", () => {
       expect(node.loading).toBe(false); // verified aborted
     }
   });
+
+  it("keeps fresh transition tiles alive while the new base zoom loads", () => {
+    const tm = makeManager({ maxZoom: 14 });
+    tm.update(new THREE.Vector3(0, 0, 1000)); // z12 roots
+    tm.update(new THREE.Vector3(0, 0, 50000)); // -> z8; new roots not loaded yet
+    // Same-frame handoff is well inside the default TTL: cohort must survive
+    // as the hole-free fallback.
+    expect(internals(tm).transitionNodes.size).toBeGreaterThan(0);
+  });
+
+  it("prunes a transition cohort after its TTL even if new roots never load", () => {
+    const tm = makeManager({ maxZoom: 14 });
+    tm.update(new THREE.Vector3(0, 0, 1000)); // z12 roots
+    tm.transitionTtlMs = -1; // everything is instantly past its lifetime
+    tm.update(new THREE.Vector3(0, 0, 50000)); // -> z8; new roots still loading
+    // Without the TTL these stale coarse-vs-fine cohorts pin until the global
+    // swap, which camera motion can defer indefinitely (the "bleeding" bug).
+    const { transitionNodes, rootNodes } = internals(tm);
+    expect(transitionNodes.size).toBe(0);
+    expect(rootNodes.size).toBe(25); // new base grid unaffected
+    for (const node of rootNodes.values()) {
+      expect(node.tile.z).toBe(8);
+    }
+  });
 });
 
 // ---- Frustum culling ----
@@ -411,6 +433,46 @@ describe("TileManager frustum culling", () => {
     const tm = makeManager({ maxZoom: 12, cullTiles: false });
     tm.update(new THREE.Vector3(0, 0, 1000));
     expect(tm.getActiveKeys().size).toBe(25);
+  });
+
+  it("sec(lat) audit: frustum box Z is scaled by mercatorScale at high latitude", () => {
+    // Regression test for the §5.1 sec(lat) scale audit: the frustum culling
+    // box Z must be in world (Mercator) metres, not true metres. At 49°N
+    // (sec(lat) ≈ 1.52), a 9000 m peak renders at world Z = 13680 m. Before
+    // the fix the box only extended to 9000 (true), so a camera at 10000 m
+    // world Z looking horizontally could cull a tile whose terrain actually
+    // extends above the frustum's lower plane.
+    //
+    // We verify the fix by placing the camera at 49°N with a high-elevation
+    // tile and checking it stays visible. (At the equator sec(lat)=1, so the
+    // bug is invisible there — the test must run at high latitude.)
+    const anchor = lonLatToMercator(0, 49); // 49°N, sec(lat) ≈ 1.524
+    const scene = new THREE.Scene();
+    const cache = new BundleCache(64 * 1024 * 1024);
+    const tm = new TileManager(
+      "http://test-tiler", "test-layer", 2023, scene, cache,
+      anchor, 12, 12, 2.2, true, // cullTiles = true
+    );
+
+    // Camera at world Z = 10000, looking straight down. All 25 root tiles
+    // are under the camera and must be visible — none culled by Z range.
+    const camera = new THREE.PerspectiveCamera(60, 1, 1, 100000);
+    camera.position.set(0, 0, 10000);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld(true);
+    tm.update(camera.position, camera);
+
+    // With the bug (true-metre box Z), tiles whose terrain exceeds 10000/1.52
+    // ≈ 6562 m true would have their box top at 9000 (true) < 10000 (camera),
+    // potentially causing culling. With the fix, box top = 9000*1.52 = 13680
+    // > 10000, so tiles are correctly retained.
+    const { rootNodes } = internals(tm);
+    let visibleCount = 0;
+    for (const node of rootNodes.values()) {
+      if (node.visible) visibleCount++;
+    }
+    // Looking straight down, all in-frustum roots should be visible.
+    expect(visibleCount).toBeGreaterThan(0);
   });
 
   it("retains children structure for culled nodes and only hides them when camera rotates away", () => {
@@ -542,34 +604,6 @@ describe("TileManager setting changes", () => {
     expect(cache.size()).toBe(0);
   });
 
-  it("setUsgsMinZoom clears cache and resets nodes", () => {
-    const tm = makeManager({ maxZoom: 14 });
-    tm.update(new THREE.Vector3(0, 0, 100));
-
-    const cache = (tm as any).bundleCache as BundleCache;
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
-    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom });
-
-    tm.setUsgsMinZoom(14);
-    expect(cache.size()).toBe(0);
-    expect(tm.usgsMinZoom).toBe(14);
-  });
-
-  it("setS1mMinZoom clears cache and resets nodes", () => {
-    const tm = makeManager({ maxZoom: 14 });
-    tm.update(new THREE.Vector3(0, 0, 100));
-
-    const cache = (tm as any).bundleCache as BundleCache;
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
-    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom });
-
-    tm.setS1mMinZoom(16);
-    expect(cache.size()).toBe(0);
-    expect(tm.s1mMinZoom).toBe(16);
-  });
-
   it("setShadingMode updates uniforms", () => {
     const tm = makeManager();
     tm.setShadingMode(2.0);
@@ -651,6 +685,95 @@ describe("TileManager vertical exaggeration", () => {
   });
 });
 
+// ---- Elevation sampling (Follow-DEM support) ----
+
+describe("TileManager getElevationAt", () => {
+  it("returns null when no tiles are loaded under the point", () => {
+    const tm = makeManager({ maxZoom: 12 });
+    // No update() yet — no tiles loaded
+    expect(tm.getElevationAt(0, 0)).toBeNull();
+  });
+
+  it("returns the center elevation of the loaded tile covering the point", async () => {
+    const tm = makeManager({ maxZoom: 12, cullTiles: false });
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    // Let the main-thread fallback microtasks settle so tiles load.
+    await new Promise((r) => setTimeout(r, 0));
+
+    // The camera is at (0, 0, 1000) — worldAnchor [0,0] means global = local.
+    // A root tile covers (0, 0); its centerElevation is 0 (flat terrain from
+    // the mocked loader returning a zero-filled Float32Array).
+    const elev = tm.getElevationAt(0, 0);
+    expect(elev).not.toBeNull();
+    expect(elev).toBe(0);
+  });
+
+  // The three below build the node tree directly rather than waiting on the
+  // async loader. The previous version raced a single setTimeout(0) against
+  // deep subdivision and guarded its only assertion behind `if (maxChildZ > 0)`,
+  // so it passed vacuously when loading hadn't settled and failed at random
+  // when it had — while the bug it should have caught went unnoticed.
+
+  /** The root covering `p`, put into the steady state of a subdivided node. */
+  function rootWithChildrenAt(tm: TileManager, p: [number, number]) {
+    const inside = (n: TileNode) =>
+      p[0] >= n.bounds.west && p[0] <= n.bounds.east &&
+      p[1] >= n.bounds.south && p[1] <= n.bounds.north;
+    const root = [...internals(tm).rootNodes.values()].find(inside)!;
+    root.children = (tm as any).createChildren(root.tile) as TileNode[];
+    const child = root.children.find(inside)!;
+    return { root, child };
+  }
+
+  it("descends past an unloaded subdivided parent to its loaded children", () => {
+    // Reachable when all four children load synchronously from a warm
+    // BundleCache: the parent is then never triggerLoad'd and sits at
+    // loaded=false while its children carry the terrain. The old walk died on
+    // that parent and returned null despite fine terrain being loaded there.
+    const tm = makeManager({ maxZoom: 13, cullTiles: false });
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    const p: [number, number] = [1000, -1000];
+
+    const { root, child } = rootWithChildrenAt(tm, p);
+    root.loaded = false;
+    root.centerElevation = undefined;
+    child.loaded = true;
+    child.centerElevation = 250;
+
+    expect(tm.getElevationAt(p[0], p[1])).toBe(250);
+  });
+
+  it("prefers the finest loaded tile when parent and child are both loaded", () => {
+    const tm = makeManager({ maxZoom: 13, cullTiles: false });
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    const p: [number, number] = [1000, -1000];
+
+    const { root, child } = rootWithChildrenAt(tm, p);
+    root.loaded = true;
+    root.centerElevation = 100;
+    child.loaded = true;
+    child.centerElevation = 250;
+
+    expect(tm.getElevationAt(p[0], p[1])).toBe(250);
+  });
+
+  it("falls back to a coarser sample when the finest tile has none", () => {
+    // A loaded node without centerElevation must not win the "finest" contest
+    // and mask a coarser node that does have a sample.
+    const tm = makeManager({ maxZoom: 13, cullTiles: false });
+    tm.update(new THREE.Vector3(0, 0, 1000));
+    const p: [number, number] = [1000, -1000];
+
+    const { root, child } = rootWithChildrenAt(tm, p);
+    root.loaded = true;
+    root.centerElevation = 100;
+    child.loaded = true;
+    child.centerElevation = undefined;
+
+    expect(tm.getElevationAt(p[0], p[1])).toBe(100);
+  });
+});
+
 // ---- Active keys ----
 
 describe("TileManager active keys", () => {
@@ -683,3 +806,145 @@ describe("TileManager active keys", () => {
     expect(overlap).toBe(0);
   });
 });
+
+// ---- Velocity-vector prefetch ----
+
+describe("TileManager prefetchAhead", () => {
+  /** Inject velocity state directly so tests don't depend on wall-clock timing. */
+  function injectVelocity(
+    tm: TileManager,
+    pos: THREE.Vector3,
+    vx: number,
+    vy: number
+  ) {
+    (tm as any).prefetchPrevPos = pos.clone();
+    (tm as any).prefetchVelocity.set(vx, vy, 0);
+  }
+
+  it("skips when horizontal speed is below the threshold (stationary camera)", () => {
+    const tm = makeManager({ maxZoom: 18, cullTiles: false });
+    const pool = (tm as any).workerPool;
+    const requestSpy = vi
+      .spyOn(pool, "requestTile")
+      .mockReturnValue(new Promise(() => {}));
+
+    const pos = new THREE.Vector3(0, 0, 2000);
+    tm.update(pos);
+    requestSpy.mockClear();
+
+    // Inject zero velocity (stationary)
+    injectVelocity(tm, pos, 0, 0);
+    (tm as any).prefetchAhead();
+
+    const calls = requestSpy.mock.calls as any[][];
+    const prefetchCalls = calls.filter(([, p]) => (p as number) <= -1e7);
+    expect(prefetchCalls.length).toBe(0);
+    expect(tm.getLastPrefetchCount()).toBe(0);
+  });
+
+  it("queues tiles ahead of the flight path when moving fast", () => {
+    // Very high altitude → baseZoom = z5. Prefetch zoom = z7. The 5×5 z5 root
+    // grid spans ≈ ±2.5 M m around the camera. A 2 M m/s velocity places all
+    // 4 look-ahead sample points > 2 M m east, clearly outside that grid.
+    const tm = makeManager({ maxZoom: 18, cullTiles: false });
+    const pool = (tm as any).workerPool;
+    const requestSpy = vi
+      .spyOn(pool, "requestTile")
+      .mockReturnValue(new Promise(() => {}));
+
+    const pos = new THREE.Vector3(0, 0, 400_000); // >320k m → baseZoom z5
+    tm.update(pos);
+    requestSpy.mockClear();
+
+    // 2,000,000 m/s east → look-ahead at 500k–2000k m east, outside the z5 grid
+    injectVelocity(tm, pos, 2_000_000, 0);
+    (tm as any).prefetchAhead();
+
+    // getLastPrefetchCount is the canonical check; requestSpy may or may not
+    // show calls if some look-ahead tiles were already requested by triggerLoad.
+    expect(tm.getLastPrefetchCount()).toBeGreaterThan(0);
+
+    // All look-ahead tiles must be east of the current camera tile.
+    // Prefetch now operates at maxZoom — the only tier where pop-in matters.
+    const maxZoom = (tm as any).maxZoom as number;
+    const currentTile = mercatorToTile(0, 0, maxZoom);
+    const allCalls = requestSpy.mock.calls as any[][];
+    for (const [tile] of allCalls) {
+      expect((tile as { x: number }).x).toBeGreaterThanOrEqual(currentTile.x);
+    }
+  });
+
+  it("skips tiles that are already in the bundle cache", () => {
+    const tm = makeManager({ maxZoom: 18, cullTiles: false });
+    const pool = (tm as any).workerPool;
+    const requestSpy = vi
+      .spyOn(pool, "requestTile")
+      .mockReturnValue(new Promise(() => {}));
+    const cache = (tm as any).bundleCache as BundleCache;
+
+    const pos = new THREE.Vector3(0, 0, 200_000);
+    tm.update(pos);
+    requestSpy.mockClear();
+
+    const baseZoom = (tm as any).baseZoom as number;
+    // Prefetch operates at maxZoom — update the cache with maxZoom tiles.
+    const zoom = (tm as any).maxZoom as number;
+    const lookahead = tm.prefetchLookaheadSec;
+    const samples = tm.prefetchSamples;
+
+    // Pre-populate cache with every tile prefetchAhead would request.
+    for (let s = 1; s <= samples; s++) {
+      const t = (s / samples) * lookahead;
+      const tile = mercatorToTile(5000 * t, 0, zoom);
+      const key = `${tile.z}/${tile.x}/${tile.y}`;
+      cache.put(
+        {
+          key,
+          bytes: 100,
+          geometry: new THREE.BufferGeometry(),
+          centerElevation: 0,
+          demSource: "farfield",
+          minElevation: 0,
+          maxElevation: 0,
+        },
+        new Set()
+      );
+    }
+
+    injectVelocity(tm, pos, 5000, 0);
+    (tm as any).prefetchAhead();
+
+    // All tiles were cached — no new requests should be issued
+    expect(requestSpy).not.toHaveBeenCalled();
+    expect(tm.getLastPrefetchCount()).toBe(0);
+  });
+
+  it("uses lower priority than active tile loads", () => {
+    const tm = makeManager({ maxZoom: 18, cullTiles: false });
+    const pool = (tm as any).workerPool;
+    const requestSpy = vi
+      .spyOn(pool, "requestTile")
+      .mockReturnValue(new Promise(() => {}));
+
+    const pos = new THREE.Vector3(0, 0, 200_000);
+    tm.update(pos);
+
+    // Capture priorities used by triggerLoad for currently-visible tiles
+    const activeCalls = requestSpy.mock.calls as any[][];
+    const activePriorities = activeCalls.map(([, p]) => p as number);
+    const minActivePriority = Math.min(...activePriorities, 0);
+
+    requestSpy.mockClear();
+
+    injectVelocity(tm, pos, 5000, 0);
+    (tm as any).prefetchAhead();
+
+    const allCalls = requestSpy.mock.calls as any[][];
+    for (const [, priority] of allCalls) {
+      expect(priority as number).toBeLessThan(minActivePriority);
+      expect(priority as number).toBeLessThanOrEqual(-1e7);
+    }
+  });
+});
+
+

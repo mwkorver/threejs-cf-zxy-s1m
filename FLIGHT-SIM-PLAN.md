@@ -273,12 +273,25 @@ a warm CDN. **Met ✅** on a warm CDN. Residual: on *cold* first-exploration the
 z0–z12 pyramid (Phase 2) is the prescribed mitigation.
 
 ### Phase 1 — make it a sim
-- Velocity-vector prefetch + byte-budgeted bundle cache.
-- Buildings: Overture → PMTiles, terrain-seated extrusions.
-- `sec(lat)` scale audit (single conversion function + tests).
+- ~~Velocity-vector prefetch + byte-budgeted bundle cache.~~ **Done** (§5.3).
+- ~~`sec(lat)` scale audit (single conversion function + tests).~~ **Done** —
+  found and fixed two true-metre vs Mercator-metre Z bugs in frustum culling
+  and LOD distance.
 - Second layer (`nj-imagery`, ~15 cm, same corridor) + layer switching;
   per-layer maxzoom clamps exercised for real (NAIP z17–18 vs NJ z19–20).
+  Tiler layer registered; client UI toggle still needed.
 - Basic flight model (even arcade physics) to drive the prefetcher honestly.
+- **Follow-DEM camera mode** (ported from pTolemy3D's `setFollowDem`):
+  maintain constant above-ground clearance instead of above-sea-level
+  altitude. `TileManager.getElevationAt()` already samples terrain under
+  the camera; wire it into the camera controller so the plane follows
+  terrain instead of flying through mountains.
+- **FlyTo animated trajectories** (ported from pTolemy3D's `flyTo` /
+  `flyToPositionSpeed`): smooth camera transitions with accel/decel curves,
+  cruise-altitude arc, and quaternion rotation interpolation. Replaces the
+  current instant `lerp(point, 0.5)` double-click with a cinematic flight
+  path.
+- Buildings: Overture → PMTiles, terrain-seated extrusions.
 
 ### Phase 2 — scale & polish
 - Pre-gen z0–z12 pyramids per layer/year; static-first origin routing.

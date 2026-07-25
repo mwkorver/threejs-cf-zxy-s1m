@@ -14,7 +14,7 @@ import { loadImagery, loadManifest, loadTerrain, type TileManifest } from "../..
 import type { PathConfig } from "./flightPath";
 
 // The deployed edge (infra/edge.yaml). CORS is applied at the distribution.
-const LIVE_BASE = "https://REDACTED.cloudfront.net";
+const LIVE_BASE = import.meta.env.VITE_TILE_BASE_URL ?? "https://REDACTED.cloudfront.net";
 const LOCAL_BASE = "/tiles";
 export const VERTICAL_EXAGGERATION = 4;
 

@@ -11,12 +11,13 @@ Two regimes behind one endpoint so the client speaks one terrain contract:
   elevation decode/re-encode, no conversion bugs at the boundary (plan §10.5).
 """
 
+import time
 from collections.abc import Callable
 
 import numpy as np
 import rasterio
 from rasterio.errors import RasterioIOError
-from rio_tiler.errors import TileOutsideBounds
+from rio_tiler.errors import EmptyMosaicError, TileOutsideBounds
 from rio_tiler.io import Reader
 from rio_tiler.mosaic import mosaic_reader
 from rio_tiler.utils import render
@@ -30,6 +31,26 @@ from .encoding import encode_terrarium, S1M_NODATA
 # path-style AuthorizationHeaderMalformed 400). No request-payer — public bucket.
 FARFIELD_TEMPLATE = "s3://elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 _FARFIELD_ENV = {"AWS_S3_ENDPOINT": "s3.us-east-1.amazonaws.com", "AWS_REGION": "us-east-1"}
+
+# Mirrors basemap._ATTEMPTS: transient child failures get one retry before the
+# whole tile is failed rather than cached with a sea-level hole.
+_FARFIELD_ATTEMPTS = 2
+
+# GDAL wraps everything in RasterioIOError, so "genuinely absent" (edge of the
+# pyramid's coverage -> sea-level fill is correct) is told apart from transient
+# (network/5xx -> must NOT be baked into an immutable tile) by message. Only
+# these markers mean absent; anything unrecognized is treated as transient, so
+# an unknown failure mode 503s (visible, retryable) instead of silently
+# poisoning the CDN cache.
+_NOT_FOUND_MARKERS = ("404", "does not exist", "no such file")
+
+
+class TransientTerrainError(Exception):
+    """A far-field child fetch failed transiently (network/5xx) after retries.
+
+    The endpoint turns this into a 503 so the client retries and the failed
+    (partial) tile is never cached immutably with a sea-level hole.
+    """
 
 
 def _s1m_tile(href: str, x: int, y: int, z: int, tilesize: int) -> "object":
@@ -61,7 +82,12 @@ def _mosaic_elev(hrefs: list[str], z: int, x: int, y: int, tilesize: int) -> "np
             tilesize=tilesize,
             allowed_exceptions=(TileOutsideBounds,),
         )
-    except Exception:
+    except EmptyMosaicError:
+        # Footprints intersected but no pixels covered the tile: genuine
+        # no-coverage, the caller falls through to the next DEM / 404s. Real
+        # read failures (throttle, auth) propagate instead — a transient blip
+        # must never become a cacheable 404 or a silent fall-through to a
+        # coarser DEM.
         return None
     elev = img.data[0].astype(np.float64)
     # Void detection: mask convention is 0=masked, 255=valid. Per-COG declared
@@ -105,11 +131,31 @@ def render_terrain_tile(
     return render(np.transpose(rgb, (2, 0, 1)), img_format="WEBP", lossless=True)
 
 
+def _read_farfield_child(url: str) -> "np.ndarray | None":
+    """(3, 256, 256) RGB, or None if the child genuinely doesn't exist (edge of
+    coverage). Raises TransientTerrainError after retries on anything else."""
+    last = "unknown"
+    for attempt in range(_FARFIELD_ATTEMPTS):
+        try:
+            with rasterio.open(url) as ds:
+                return ds.read(indexes=[1, 2, 3])
+        except RasterioIOError as e:
+            msg = str(e)
+            if any(m in msg.lower() for m in _NOT_FOUND_MARKERS):
+                return None  # genuinely absent -> sea-level fill is correct
+            last = msg  # transient (network/5xx) -> retry
+        if attempt < _FARFIELD_ATTEMPTS - 1:
+            time.sleep(0.4)
+    raise TransientTerrainError(f"far-field child {url} failed: {last}")
+
+
 def render_farfield_tile(z: int, x: int, y: int, tilesize: int) -> bytes | None:
     """512px far-field tile = 2x2 of z+1 elevation-tiles-prod 256px Terrarium.
 
     Pure pixel copy (same encoding), re-emitted as lossless WebP. Any missing
-    child (edge of coverage) is filled with sea-level Terrarium (128,0,0)."""
+    child (edge of coverage) is filled with sea-level Terrarium (128,0,0); a
+    transiently-failing child fails the WHOLE tile (TransientTerrainError ->
+    503) so a hiccup never poisons an immutable tile with a sea-level hole."""
     src = tilesize // 2  # upstream tiles are 256px
     canvas = np.zeros((tilesize, tilesize, 3), dtype=np.uint8)
     canvas[..., 0] = 128  # sea-level default so gaps decode to 0 m
@@ -117,11 +163,8 @@ def render_farfield_tile(z: int, x: int, y: int, tilesize: int) -> bytes | None:
     with rasterio.Env(**_FARFIELD_ENV):
         for dj, cy in enumerate((2 * y, 2 * y + 1)):
             for di, cx in enumerate((2 * x, 2 * x + 1)):
-                url = FARFIELD_TEMPLATE.format(z=z + 1, x=cx, y=cy)
-                try:
-                    with rasterio.open(url) as ds:
-                        arr = ds.read(indexes=[1, 2, 3])  # (3, 256, 256) RGB
-                except RasterioIOError:
+                arr = _read_farfield_child(FARFIELD_TEMPLATE.format(z=z + 1, x=cx, y=cy))
+                if arr is None:
                     continue  # missing child (edge of coverage) -> sea-level fill
                 got_any = True
                 r0, c0 = dj * src, di * src
