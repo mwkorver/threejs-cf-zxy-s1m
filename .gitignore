@@ -23,5 +23,8 @@ client/public/tiles/
 .env.local
 *.local
 
+# Private working notes, not published docs
+CLEANUP.md
+
 # OS / editor
 .DS_Store
