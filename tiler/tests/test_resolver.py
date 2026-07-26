@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from tiler.resolver import (
     REQUESTER_PAYS_BUCKETS,
-    S1M_EPSG,
+    DEM_INDEX_EPSG,
     CogAsset,
     MosaicResolver,
     build_tile_query,
@@ -120,7 +120,7 @@ def test_bundled_usgs_index_footprints_match_tile_names():
     from shapely import from_wkb
     from shapely.ops import transform as shp_transform
 
-    to_wgs84 = Transformer.from_crs(S1M_EPSG, 4326, always_xy=True)
+    to_wgs84 = Transformer.from_crs(DEM_INDEX_EPSG, 4326, always_xy=True)
     con = duckdb.connect()
     rows = con.execute(
         f"SELECT dataset, geometry_wkb FROM read_parquet('{USGS_INDEX}') "

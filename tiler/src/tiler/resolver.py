@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 TMS = morecantile.tms.get("WebMercatorQuad")
 
-S1M_BUCKET = "prd-tnm"  # public USGS TNM bucket, anonymous reads
-S1M_EPSG = 6350  # NAD83(2011) Conus Albers
+TNM_BUCKET = "prd-tnm"  # public USGS TNM bucket, anonymous reads
+DEM_INDEX_EPSG = 6350  # NAD83(2011) Conus Albers
 
 # Mirrors descriptors.REQUESTER_PAYS_BUCKETS in the source repo.
 REQUESTER_PAYS_BUCKETS = {"naip-analytic", "naip-visualization", "naip-stac-catalog"}
@@ -176,7 +176,7 @@ class DemIndexResolver:
         self._con = duck.connect(region)
         from pyproj import Transformer
 
-        self._to_albers = Transformer.from_crs(4326, S1M_EPSG, always_xy=True)
+        self._to_albers = Transformer.from_crs(4326, DEM_INDEX_EPSG, always_xy=True)
 
     def resolve(self, z: int, x: int, y: int) -> list[str]:
         """s3:// hrefs of S1M COGs intersecting tile z/x/y (empty if none)."""
@@ -208,5 +208,5 @@ class DemIndexResolver:
         hrefs = []
         for dataset, wkb in rows:
             if from_wkb(wkb).intersects(envelope):
-                hrefs.append(f"s3://{S1M_BUCKET}/StagedProducts/Elevation/{dataset}")
+                hrefs.append(f"s3://{TNM_BUCKET}/StagedProducts/Elevation/{dataset}")
         return hrefs

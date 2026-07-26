@@ -35,7 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from tiler import duck  # noqa: E402
-from tiler.resolver import S1M_BUCKET, S1M_EPSG  # noqa: E402
+from tiler.resolver import TNM_BUCKET, DEM_INDEX_EPSG  # noqa: E402
 from tiler.settings import settings  # noqa: E402
 
 # usgs13 index ships in the repo (same file get_usgs13_resolver loads at runtime).
@@ -70,7 +70,7 @@ def build_geojson(index_path: str, dataset_type: str, region: str, conus_only: b
     from shapely.geometry import mapping
     from shapely.ops import transform as shp_transform
 
-    to_latlon = Transformer.from_crs(S1M_EPSG, 4326, always_xy=True).transform
+    to_latlon = Transformer.from_crs(DEM_INDEX_EPSG, 4326, always_xy=True).transform
     w, s, e, n = CONUS_BBOX
 
     con = duck.connect(region)
@@ -94,7 +94,7 @@ def build_geojson(index_path: str, dataset_type: str, region: str, conus_only: b
             "type": "Feature",
             "properties": {
                 "dataset": dataset,
-                "href": f"s3://{S1M_BUCKET}/StagedProducts/Elevation/{dataset}",
+                "href": f"s3://{TNM_BUCKET}/StagedProducts/Elevation/{dataset}",
                 "type": dataset_type,
             },
             "geometry": gj,
