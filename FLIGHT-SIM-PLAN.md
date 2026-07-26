@@ -312,18 +312,33 @@ z0–z12 pyramid (Phase 2) is the prescribed mitigation.
 1. ~~Terrain tile grid~~ **Settled 2026-07-08**: vanilla 512×512, standard
    registration; client builds skirts at mesh time (see [§4.2](#42-terrain)).
 2. ~~deck.gl vs luma.gl vs three.js~~ **Settled 2026-07-09**: **three.js**.
-   All three were spiked against the same baked NJ tiles + a shared benchmark
-   (`client/src/spikes/`, results in its README). All render the tile contract
-   at 60 fps with low CPU; the clean differentiators were friction and camera
-   fit. three.js: rendered first try, 81 LOC, native free-fly eye/target
-   camera, ships frustum culling / raycasting / materials we'll need next.
-   luma.gl: perf-equal but took ~5 fixes to render (Vite core-dedupe, UBO
-   binding, a 16384² canvas footgun) and hand-rolls everything — kept as the
-   WebGPU fallback path (Phase 3). deck.gl: `OrbitView` has no free eye/target
-   camera (a real mismatch for free flight). Heavy-load runs (144–256 tiles)
-   only hit a uniform VRAM cliff — a resource-management artifact (unshared
-   per-tile textures), owned by the LOD manager, not the engine. Losing spikes
-   removed.
+   All three were spiked against the same baked NJ tiles and a shared
+   benchmark: load the block, build a skirted gridded mesh, drape the matching
+   imagery tile, free-fly over it and time frames. Light load — 16 tiles, mesh
+   step 4, ~13 s timed run — all three rendering correctly:
+
+   | engine | fps | frame p95 / max | cpu/frame p50 | friction to get there |
+   |---|---|---|---|---|
+   | three.js | 60 | 17.4 / 19.3 ms | 0.3 ms | none — direct BufferGeometry, UV texture, free eye/target camera |
+   | luma.gl | 60 | 17.6 / 28.3 ms | 0.6 ms | most fixes: Vite dedupe of `@luma.gl/core`, batched UBO, a canvas auto-resized to 16384² (black + fill-bound) |
+   | deck.gl | 60 | 18.3 / 21.7 ms | n/a | `SimpleMeshLayer` mesh format; `OrbitView` has **no free eye/target** camera |
+
+   deck's `metrics.cpuTime` isn't per-frame ms, so it isn't comparable to the
+   timed render calls in three/luma. All three clear the tile contract at 60 fps
+   with low CPU, so the clean differentiators were friction and camera fit, both
+   favouring three.js: it rendered first try in 81 LOC and ships the frustum
+   culling / raycasting / materials needed next. luma.gl is perf-equal once its
+   footguns are fixed and remains the WebGPU fallback (Phase 3); deck.gl's
+   `OrbitView` actively fights free flight.
+
+   Heavy load (144–256 tiles) was not a clean ranking: every engine falls to
+   ~1 fps once VRAM is exhausted, because the harness gave each replicated tile
+   its own texture. That measures naive resource management, not draw paths —
+   the real lesson is that at scale the bottleneck is GPU resource sharing
+   (atlasing / instancing), which the LOD manager owns, not the engine.
+
+   The spike code has since been removed; `client/src/core/` carries the
+   renderer it became.
 3. ~~Phase 0 corridor~~ **Settled 2026-07-08**: New Jersey on **NAIP** —
    the most representative source (requester-pays, CONUS-wide pattern) —
    with `nj-imagery` (~15 cm) as the Phase 1 second layer over the same

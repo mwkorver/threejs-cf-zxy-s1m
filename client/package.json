@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Flat-Mercator flight-sim client (FLIGHT-SIM-PLAN.md §5). Engine spike pending (§10.2): src/core is engine-agnostic; spikes live in src/spikes/.",
+  "description": "Flat-Mercator flight-sim client (FLIGHT-SIM-PLAN.md §5): streams NAIP imagery and 3DEP terrain tiles into a three.js renderer (engine settled §10.2). src/core stays engine-agnostic.",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
