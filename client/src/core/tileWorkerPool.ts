@@ -16,9 +16,10 @@ interface PendingTask {
 }
 
 // Tile tasks are almost entirely I/O (fetch + decode awaits), so a worker can
-// interleave several concurrently — capping at 1 task/worker throttled the
-// whole pipeline to 4 tiles in flight and starved forward flight.
-const MAX_TASKS_PER_WORKER = 4;
+// interleave several concurrently. Modern HTTP/2-multiplexed connections
+// handle high concurrency cleanly; now that memory is bounded, 8 tasks/worker
+// expands total pipeline depth to avoid starving forward flight.
+const MAX_TASKS_PER_WORKER = 8;
 
 export class TileWorkerPool {
   private workers: Worker[] = [];
@@ -41,8 +42,9 @@ export class TileWorkerPool {
     // `navigator` is absent outside browsers (Node <21 in particular), so guard
     // the global itself and not just the property.
     const cores = typeof navigator === "undefined" ? 0 : navigator.hardwareConcurrency;
-    const numWorkers = cores ? Math.min(4, cores) : 4;
+    const numWorkers = cores ? Math.min(8, cores) : 6;
     for (let i = 0; i < numWorkers; i++) {
+
       // Use standard module worker instantiation which Vite natively compiles
       const worker = new Worker(new URL("./tile.worker.ts", import.meta.url), { type: "module" });
 

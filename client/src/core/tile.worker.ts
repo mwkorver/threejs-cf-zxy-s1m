@@ -47,13 +47,23 @@ async function fetchTile(url: string, label: string, maxAttempts = 5, signal?: A
   }
 }
 
+let sharedCanvas: OffscreenCanvas | null = null;
+let sharedCtx: OffscreenCanvasRenderingContext2D | null = null;
+
 async function bitmapToRgba(bmp: ImageBitmap): Promise<{ rgba: Uint8ClampedArray; w: number; h: number }> {
-  const canvas = new OffscreenCanvas(bmp.width, bmp.height);
-  const ctx2d = canvas.getContext("2d", { willReadFrequently: true })!;
-  ctx2d.drawImage(bmp, 0, 0);
-  const { data } = ctx2d.getImageData(0, 0, bmp.width, bmp.height);
-  return { rgba: data, w: bmp.width, h: bmp.height };
+  const w = bmp.width;
+  const h = bmp.height;
+  if (!sharedCanvas || sharedCanvas.width !== w || sharedCanvas.height !== h) {
+    sharedCanvas = new OffscreenCanvas(w, h);
+    sharedCtx = sharedCanvas.getContext("2d", { willReadFrequently: true })!;
+  } else {
+    sharedCtx!.clearRect(0, 0, w, h);
+  }
+  sharedCtx!.drawImage(bmp, 0, 0);
+  const { data } = sharedCtx!.getImageData(0, 0, w, h);
+  return { rgba: data, w, h };
 }
+
 
 ctx.onmessage = async (e: MessageEvent) => {
   // ABORT control messages are handled by the per-request listeners below;
