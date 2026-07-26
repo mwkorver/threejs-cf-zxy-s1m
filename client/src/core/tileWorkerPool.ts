@@ -44,7 +44,6 @@ export class TileWorkerPool {
     const cores = typeof navigator === "undefined" ? 0 : navigator.hardwareConcurrency;
     const numWorkers = cores ? Math.min(8, cores) : 6;
     for (let i = 0; i < numWorkers; i++) {
-
       // Use standard module worker instantiation which Vite natively compiles
       const worker = new Worker(new URL("./tile.worker.ts", import.meta.url), { type: "module" });
 

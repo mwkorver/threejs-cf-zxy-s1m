@@ -47,9 +47,19 @@ async function fetchTile(url: string, label: string, maxAttempts = 5, signal?: A
   }
 }
 
+// One canvas per worker rather than one per tile: a worker interleaves several
+// tile tasks, and churning a 512² OffscreenCanvas for each was pure allocation.
 let sharedCanvas: OffscreenCanvas | null = null;
 let sharedCtx: OffscreenCanvasRenderingContext2D | null = null;
 
+/**
+ * Decode a bitmap to RGBA through the shared canvas.
+ *
+ * MUST NOT await. Concurrent tile tasks share this canvas, and the only thing
+ * keeping them from overwriting each other's pixels is that the body runs to
+ * completion in a single turn. Adding an await here would corrupt tiles
+ * non-deterministically, in proportion to MAX_TASKS_PER_WORKER.
+ */
 async function bitmapToRgba(bmp: ImageBitmap): Promise<{ rgba: Uint8ClampedArray; w: number; h: number }> {
   const w = bmp.width;
   const h = bmp.height;
@@ -63,7 +73,6 @@ async function bitmapToRgba(bmp: ImageBitmap): Promise<{ rgba: Uint8ClampedArray
   const { data } = sharedCtx!.getImageData(0, 0, w, h);
   return { rgba: data, w, h };
 }
-
 
 ctx.onmessage = async (e: MessageEvent) => {
   // ABORT control messages are handled by the per-request listeners below;

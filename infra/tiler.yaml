@@ -16,7 +16,10 @@ Resources:
     Properties:
       PackageType: Image
       Architectures: [arm64] # Graviton: cheaper, builds native on arm64 Macs
-      MemorySize: 3072 # warp + WebP encode are CPU-bound (3072 MB provides ~2 full vCPU cores)
+      # warp + WebP encode are CPU-bound, and Lambda scales vCPU with memory
+      # (1 vCPU at 1769 MB), so 3072 MB buys ~1.7 vCPU. Only pays off with
+      # GDAL_NUM_THREADS below; 2 full vCPU would need ~3538 MB.
+      MemorySize: 3072
       Timeout: 60 # headroom for cold start + basemap child retries
       # Guarantees the tiler a floor of 100 concurrent slots (blunts fast-low-
       # pass spikes, plan §8) and caps it at 100 — a cost ceiling against a
@@ -29,9 +32,13 @@ Resources:
         Variables:
           TILER_LAKE_PATH: "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index"
           TILER_S1M_INDEX_PATH: "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index/s1m/S1M_Products.parquet"
-          GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"
-          GDAL_HTTP_MERGE_CONSECUTIVE_FILE_AT_BYTES: "65536"
-          VSI_CACHE: "TRUE"
+          # GDAL tuning for COG-over-S3 reads. Names verified against the GDAL
+          # shipped in the image — an unrecognised key here is silently ignored,
+          # so a typo reads as a working knob while doing nothing.
+          GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR" # no LIST per open, just the object
+          GDAL_NUM_THREADS: "ALL_CPUS" # warp across the vCPU the memory size buys
+          CPL_VSIL_CURL_CHUNK_SIZE: "65536" # min read unit, up from GDAL's 16 KB
+          VSI_CACHE: "TRUE" # cache read blocks in memory (25 MB/handle default)
           # Frequently-tweaked knobs — pydantic reads TILER_* (settings.py). These
           # are function config, so they can be changed with a fast config-only
           # `sam deploy` (no image rebuild) or `aws lambda update-function-configuration`
@@ -40,7 +47,6 @@ Resources:
           TILER_USGS_MIN_ZOOM: "11"
           TILER_S1M_MIN_ZOOM: "15"
           TILER_TILE_SIZE: "512"
-
       Policies:
         - Statement:
             # Signed source reads (plan §2 row 10, §7). Requester-pays is scoped
