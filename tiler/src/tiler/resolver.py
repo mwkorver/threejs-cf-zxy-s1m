@@ -157,11 +157,15 @@ class MosaicResolver:
         return [CogAsset(href=r[0], source_bucket=r[1], gsd=r[2]) for r in rows]
 
 
-class S1MResolver:
-    """S1M DEM tile lookup for terrain tiles (plan §4.2).
+class DemIndexResolver:
+    """DEM tile lookup for terrain tiles (plan §4.2).
 
-    Ported from deckgl-s3-cog-s1m's s1m.py. Unlike the imagery lake, the S1M
-    index stores geometry/bbox in EPSG:6350 Albers, so we transform the tile's
+    Serves any Albers-indexed 3DEP DEM index — S1M (1 m) and USGS 1/3" both
+    use this shape — so the dataset is chosen by which parquet index is passed
+    to the constructor, not by the class.
+
+    Ported from deckgl-s3-cog-s1m's s1m.py. Unlike the imagery lake, these
+    indexes store geometry/bbox in EPSG:6350 Albers, so we transform the tile's
     geographic bounds to an Albers envelope, do the cheap bbox-range prune in
     DuckDB, then refine with shapely (the index has no ST_Intersects). COGs
     live in the public prd-tnm bucket (anonymous reads).

@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .basemap import BASEMAP_MAX_ZOOM, TransientBasemapError, render_basemap_tile
 from .imagery import render_imagery_tile
 from .registry import LAYERS
-from .resolver import MosaicResolver, S1MResolver
+from .resolver import MosaicResolver, DemIndexResolver
 from .settings import settings
 from .terrain import TransientTerrainError, render_farfield_tile, render_terrain_tile
 
@@ -39,18 +39,18 @@ def get_resolver() -> MosaicResolver:
 
 
 @lru_cache(maxsize=1)
-def get_s1m_resolver() -> S1MResolver:
+def get_s1m_resolver() -> DemIndexResolver:
     """One S1M resolver (DuckDB + Albers transformer) per container."""
-    return S1MResolver(settings.s1m_index_path, settings.aws_region)
+    return DemIndexResolver(settings.s1m_index_path, settings.aws_region)
 
 
 @lru_cache(maxsize=1)
-def get_usgs13_resolver() -> S1MResolver:
+def get_usgs13_resolver() -> DemIndexResolver:
     """One USGS 1/3 Arc-Second resolver (using local data/USGS_13_DEM_Index.parquet) per container."""
     import os
     current_dir = os.path.dirname(os.path.abspath(__file__))
     local_path = os.path.join(current_dir, "data", "USGS_13_DEM_Index.parquet")
-    return S1MResolver(local_path, settings.aws_region)
+    return DemIndexResolver(local_path, settings.aws_region)
 
 
 @app.get("/imagery/{layer}/{year}/{z}/{x}/{y}.webp")

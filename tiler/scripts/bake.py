@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from tiler.imagery import render_imagery_tile  # noqa: E402
 from tiler.registry import LAYERS  # noqa: E402
-from tiler.resolver import TMS, MosaicResolver, S1MResolver  # noqa: E402
+from tiler.resolver import TMS, MosaicResolver, DemIndexResolver  # noqa: E402
 from tiler.settings import settings  # noqa: E402
 from tiler.terrain import render_terrain_tile  # noqa: E402
 
@@ -45,7 +45,7 @@ def main() -> None:
     ]
     layer = LAYERS[args.layer]
     mr = MosaicResolver(settings.lake_path, settings.aws_region)
-    sr = S1MResolver(settings.s1m_index_path, settings.aws_region)
+    sr = DemIndexResolver(settings.s1m_index_path, settings.aws_region)
 
     # DuckDB connections aren't thread-safe: resolve sequentially, render in
     # parallel (rio-tiler S3 reads are the slow, thread-safe part).

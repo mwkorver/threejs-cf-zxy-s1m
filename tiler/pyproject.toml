@@ -2,7 +2,13 @@
 name = "tiler"
 version = "0.0.1"
 description = "Thin rio-tiler service: NAIP/state imagery + S1M Terrain-RGB tiles on one EPSG:3857 quadtree (FLIGHT-SIM-PLAN.md §4, §10.4)"
-requires-python = ">=3.12"
+# Pinned to the minor the Lambda base image ships (see tiler/Dockerfile), so a
+# venv on another minor -- and therefore a possibly different GDAL/rasterio
+# wheel -- is rejected rather than quietly passing tests the deployed runtime
+# would not run. `pip install -e .` enforces this (and CI installs with pip);
+# note that `uv pip install -e .` does NOT, so uv users must pick 3.12 by hand:
+#   uv venv --python 3.12 .venv
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.115",
     "mangum>=0.19",          # Lambda adapter
