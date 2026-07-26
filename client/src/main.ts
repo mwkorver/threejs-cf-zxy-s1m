@@ -12,6 +12,8 @@ import "./hud.css";
 import { lonLatToMercator, mercatorToLonLat } from "./core/mercator";
 import { BundleCache } from "./core/bundleCache";
 import { TileManager } from "./core/tileManager";
+import { TexturePool } from "./core/texturePool";
+import { createStarfield, updateSky } from "./core/sky";
 
 // 1. Setup default configurations & URL query parameters
 const params = new URLSearchParams(window.location.search);
@@ -51,10 +53,14 @@ appDiv.style.height = "100%";
 
 
 const scene = new THREE.Scene();
-const skyColor = new THREE.Color(0xa3c2f0);
+// Sea-level sky colour and fog density the user asked for. updateSky grades
+// both toward space with altitude, so it needs the ground intent kept apart
+// from what is actually on scene.background/scene.fog this frame.
+const groundSkyColor = new THREE.Color(0xa3c2f0);
+let baseFogDensity = 0.0;
 const fogColor = new THREE.Color(0xdce8f7);
-scene.background = skyColor;
-scene.fog = new THREE.FogExp2(fogColor.getHex(), 0.0);
+scene.background = groundSkyColor.clone();
+scene.fog = new THREE.FogExp2(fogColor.getHex(), baseFogDensity);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 10000000);
 camera.up.set(0, 0, 1); // Z-up world
@@ -77,10 +83,17 @@ const sun = new THREE.DirectionalLight(0xfff2e0, 0.6);
 sun.position.set(-1, -1, 1.4).normalize();
 scene.add(sun);
 
+// Starfield backdrop; fades in with altitude (see updateSky in the frame loop).
+const stars = createStarfield(2_000_000);
+scene.add(stars);
+
 // 3. Initialize caching and tile management
 // Allocate a 256MB VRAM cache budget for meshes & textures
 const cacheBudget = 256 * 1024 * 1024;
-const bundleCache = new BundleCache(cacheBudget);
+// Recycle tile textures rather than allocating one per tile: the cache hands
+// evicted textures back to the pool, TileManager takes them out again.
+const texturePool = new TexturePool();
+const bundleCache = new BundleCache(cacheBudget, texturePool);
 const tileManager = new TileManager(
   BASE_URL,
   LAYER,
@@ -94,6 +107,7 @@ const tileManager = new TileManager(
   CULL_TILES
 );
 tileManager.terrainMinZoom = 0;
+tileManager.texturePool = texturePool;
 tileManager.prefetchLookaheadSec = PREFETCH_LOOKAHEAD;
 tileManager.prefetchSamples = PREFETCH_SAMPLES;
 
@@ -129,10 +143,18 @@ hud.innerHTML = `
   <div class="hud-readout">SPEED: <span id="hud-speed">0</span> kt</div>
 
   ${slider("speed-ctrl", "FLIGHT SPEED SETTING", 'min="50" max="1000" step="10" value="800"', "800 kt")}
+  ${slider("inertia", "INERTIA (glide time)", 'min="0" max="2" step="0.05" value="0.35"', "0.35 s")}
+  ${slider("clearance", "MIN GROUND CLEARANCE", 'min="0" max="500" step="10" value="50"', "50 m")}
+
+  <div class="hud-group">
+    ${toggle('<input type="checkbox" class="hud-check" id="ctrl-panorama">', "PANORAMA (auto-orbit)")}
+  </div>
+  ${slider("orbit-speed", "ORBIT SPEED", 'min="1" max="30" step="1" value="6"', "6 °/s")}
 
   <div class="hud-section">ACTIVE TILES: <span id="hud-tiles">0</span></div>
   <div>GPU CACHE: <span id="hud-cache">0.00</span> / 256 MB</div>
   <div>PREFETCH: <span id="hud-prefetch">0</span> tiles ahead</div>
+  <div>TEX POOL: <span id="hud-texpool">0 new / 0 reused</span></div>
 
   <div class="hud-section">
     <div class="hud-section-title">🌅 ATMOSPHERE &amp; LIGHTING</div>
@@ -163,6 +185,7 @@ hud.innerHTML = `
     ${slider("azimuth", "SUN AZIMUTH", 'min="0" max="360" step="5" value="225"', "225°")}
     ${slider("altitude", "SUN ALTITUDE", 'min="5" max="90" step="5" value="55"', "55°")}
     ${slider("fog", "FOG DENSITY", 'min="0" max="0.0003" step="0.00001" value="0"', "0.00000")}
+    ${slider("space-alt", "SPACE ALTITUDE", 'min="2" max="60" step="1" value="10"', "10 km")}
     ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="2.0"', "2.0x")}
 
     <div class="hud-group">
@@ -262,6 +285,7 @@ const hudSpeed = document.getElementById("hud-speed")!;
 const hudTiles = document.getElementById("hud-tiles")!;
 const hudCache = document.getElementById("hud-cache")!;
 const hudPrefetch = document.getElementById("hud-prefetch")!;
+const hudTexPool = document.getElementById("hud-texpool")!;
 
 
 const ctrlPreset = document.getElementById("ctrl-preset") as HTMLSelectElement;
@@ -276,6 +300,11 @@ const ctrlAglAlt = document.getElementById("ctrl-agl-alt") as HTMLInputElement;
 const ctrlExtImagery = document.getElementById("ctrl-extimagery") as HTMLInputElement;
 const ctrlFootprints = document.getElementById("ctrl-footprints") as HTMLInputElement;
 const ctrlSpeedCtrl = document.getElementById("ctrl-speed-ctrl") as HTMLInputElement;
+const ctrlInertia = document.getElementById("ctrl-inertia") as HTMLInputElement;
+const ctrlClearance = document.getElementById("ctrl-clearance") as HTMLInputElement;
+const ctrlPanorama = document.getElementById("ctrl-panorama") as HTMLInputElement;
+const ctrlOrbitSpeed = document.getElementById("ctrl-orbit-speed") as HTMLInputElement;
+const ctrlSpaceAlt = document.getElementById("ctrl-space-alt") as HTMLInputElement;
 const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
 const ctrlShadingModes = document.getElementsByName("ctrl-shading-mode") as NodeListOf<HTMLInputElement>;
 const containerDemLegend = document.getElementById("container-dem-legend") as HTMLDivElement;
@@ -295,6 +324,10 @@ const valExaggeration = document.getElementById("val-exaggeration")!;
 const valAglAlt = document.getElementById("val-agl-alt")!;
 const valExtImagery = document.getElementById("val-extimagery")!;
 const valSpeedCtrl = document.getElementById("val-speed-ctrl")!;
+const valInertia = document.getElementById("val-inertia")!;
+const valClearance = document.getElementById("val-clearance")!;
+const valOrbitSpeed = document.getElementById("val-orbit-speed")!;
+const valSpaceAlt = document.getElementById("val-space-alt")!;
 const valBrightness = document.getElementById("val-brightness")!;
 const valContrast = document.getElementById("val-contrast")!;
 const valSaturation = document.getElementById("val-saturation")!;
@@ -370,10 +403,11 @@ function applyPreset(mood: MoodPreset) {
   tileManager.globalUniforms.hillshadeIntensity.value = mood.hillshade;
   updateSunDirection(mood.azimuth, mood.altitude);
 
-  scene.background = new THREE.Color(mood.skyColor);
+  // Record the sea-level look; updateSky grades it toward space each frame.
+  groundSkyColor.set(mood.skyColor);
+  baseFogDensity = mood.fogDensity;
   if (scene.fog && scene.fog instanceof THREE.FogExp2) {
     scene.fog.color = new THREE.Color(mood.fogColor);
-    scene.fog.density = mood.fogDensity;
   }
 }
 
@@ -420,9 +454,8 @@ ctrlAltitude.addEventListener("input", () => {
 ctrlFog.addEventListener("input", () => {
   const fogD = parseFloat(ctrlFog.value);
   valFog.textContent = fogD.toFixed(5);
-  if (scene.fog && scene.fog instanceof THREE.FogExp2) {
-    scene.fog.density = fogD;
-  }
+  // Ground-level density; updateSky thins it out with altitude.
+  baseFogDensity = fogD;
   ctrlPreset.value = "custom";
 });
 
@@ -533,6 +566,32 @@ ctrlSpeedCtrl.addEventListener("input", () => {
   valSpeedCtrl.textContent = `${baseSpeedKnots} kt`;
 });
 
+ctrlInertia.addEventListener("input", () => {
+  valInertia.textContent = `${parseFloat(ctrlInertia.value).toFixed(2)} s`;
+});
+
+ctrlClearance.addEventListener("input", () => {
+  const m = parseInt(ctrlClearance.value);
+  valClearance.textContent = m === 0 ? "off" : `${m} m`;
+});
+
+ctrlOrbitSpeed.addEventListener("input", () => {
+  valOrbitSpeed.textContent = `${parseInt(ctrlOrbitSpeed.value)} °/s`;
+});
+
+ctrlSpaceAlt.addEventListener("input", () => {
+  valSpaceAlt.textContent = `${parseInt(ctrlSpaceAlt.value)} km`;
+});
+
+// Panorama pivots about the ground point under the camera when switched on.
+ctrlPanorama.addEventListener("change", () => {
+  if (ctrlPanorama.checked) {
+    startPanorama();
+  } else {
+    panoramaPivot = null;
+  }
+});
+
 ctrlOutlines.addEventListener("change", () => {
   const isChecked = ctrlOutlines.checked;
   tileManager.setShowOutlines(isChecked);
@@ -590,6 +649,44 @@ let previousMousePosition = { x: 0, y: 0 };
 let baseSpeedKnots = 800; // Customizable flight speed setting in knots
 let speedKnots = 800; // Default active airspeed simulation
 
+// Carried velocity, so the camera accelerates and coasts instead of starting
+// and stopping dead. pTolemy3D held velocity/vert_velocity/horz_velocity with
+// an acceleration term; the same feel falls out of easing toward the input
+// velocity with a time constant, which also collapses to the old instant
+// behaviour when the INERTIA slider is 0.
+const velocity = new THREE.Vector3();
+
+// Auto-orbit (pTolemy3D's panorama()): pivot stays fixed while the camera
+// sweeps around it. Null when the mode is off.
+let panoramaPivot: THREE.Vector3 | null = null;
+
+/**
+ * Begin auto-orbit about whatever the camera is looking at.
+ *
+ * Deliberately not the ground directly beneath the camera: that pivot has zero
+ * horizontal radius, so rotating about it moves the camera nowhere.
+ */
+function startPanorama(): void {
+  cancelFlyTo();
+  velocity.set(0, 0, 0);
+
+  const cx = window.innerWidth / 2;
+  const cy = window.innerHeight / 2;
+  // Terrain under the view centre, else where that ray crosses sea level.
+  let pivot = pickGround(cx, cy) ?? rayToPlane(cx, cy, 0);
+
+  if (!pivot) {
+    // Camera is looking up: orbit a point ahead along the ground track instead.
+    const forward = tmpV.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    forward.z = 0;
+    if (forward.lengthSq() < 1e-9) forward.set(0, 1, 0);
+    forward.normalize().multiplyScalar(Math.max(camera.position.z, 1000) * 2);
+    pivot = new THREE.Vector3(camera.position.x + forward.x, camera.position.y + forward.y, 0);
+  }
+
+  panoramaPivot = pivot.clone();
+}
+
 // Track keyboard state — any movement key cancels an in-flight FlyTo trajectory.
 const movementCodes = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ShiftLeft", "ShiftRight"]);
 window.addEventListener("keydown", (e) => {
@@ -611,6 +708,8 @@ window.addEventListener("contextmenu", (e) => {
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 const tmpV = new THREE.Vector3();
+// Camera position at the top of the frame, for measuring actual ground speed.
+const framePrevPos = new THREE.Vector3();
 
 /** Ground point (world/offset coords) under a screen pixel, or null on a miss. */
 function pickGround(clientX: number, clientY: number): THREE.Vector3 | null {
@@ -760,16 +859,29 @@ function frameLoop() {
   // Scale speed dynamically as a function of altitude (with a floor of 1.0 at 1500m)
   const altitudeFactor = Math.max(1.0, camera.position.z / 1500.0);
   const speed = baseSpeed * speedMultiplier * altitudeFactor;
-  speedKnots = Math.round(speed * 1.94384); // Convert relative m/s to simulated knots
+  // Measured after the camera has moved, so the readout covers coasting,
+  // FlyTo and panorama too, not just the requested key speed.
+  framePrevPos.copy(camera.position);
 
   // FlyTo trajectory takes over camera position/orientation until it completes.
   // Manual input (keys/mouse) cancels it via cancelFlyTo().
-  let direction: THREE.Vector3 | null = null;
   if (updateFlyTo()) {
     // Skip manual movement; still update LOD and render.
+    velocity.set(0, 0, 0);
+  } else if (panoramaPivot) {
+    // Auto-orbit: swing the camera around the fixed pivot, holding its radius
+    // and height, and keep it aimed at the pivot.
+    const omega = (parseInt(ctrlOrbitSpeed.value) * Math.PI) / 180;
+    const offset = tmpV.copy(camera.position).sub(panoramaPivot);
+    const cos = Math.cos(omega * dt);
+    const sin = Math.sin(omega * dt);
+    const ox = offset.x * cos - offset.y * sin;
+    const oy = offset.x * sin + offset.y * cos;
+    camera.position.set(panoramaPivot.x + ox, panoramaPivot.y + oy, camera.position.z);
+    camera.lookAt(panoramaPivot);
   } else {
     // Process movement input relative to camera heading
-    direction = new THREE.Vector3();
+    const direction = new THREE.Vector3();
     if (activeKeys.has("KeyW")) direction.z -= 1;
     if (activeKeys.has("KeyS")) direction.z += 1;
     if (activeKeys.has("KeyA")) direction.x -= 1;
@@ -783,10 +895,19 @@ function frameLoop() {
     if (activeKeys.has("KeyQ")) direction.z -= 1;
     if (activeKeys.has("KeyE")) direction.z += 1;
 
-    // Update position
+    // Ease the carried velocity toward what the keys are asking for. tau = 0
+    // snaps (no inertia); larger values accelerate in and coast out.
+    const targetVelocity = tmpV.set(0, 0, 0);
     if (direction.lengthSq() > 0) {
-      camera.position.addScaledVector(direction.normalize(), speed * dt);
+      targetVelocity.copy(direction.normalize()).multiplyScalar(speed);
     }
+    const tau = parseFloat(ctrlInertia.value);
+    const blend = tau <= 0 ? 1 : 1 - Math.exp(-dt / tau);
+    velocity.lerp(targetVelocity, blend);
+    // Stop chasing an asymptote once the glide is imperceptible.
+    if (velocity.lengthSq() < 1e-4) velocity.set(0, 0, 0);
+
+    camera.position.addScaledVector(velocity, dt);
   }
 
   // Follow-DEM: maintain constant above-ground clearance instead of
@@ -807,6 +928,35 @@ function frameLoop() {
     }
   }
 
+  // Hard floor under the camera, adapted from pTolemy3D's checkAlt(), which
+  // refused any move landing within 25 units of the ground. Uses the *rendered*
+  // ground height so the floor holds under vertical exaggeration. 0 = off.
+  const clearance = parseInt(ctrlClearance.value);
+  if (clearance > 0) {
+    const groundZ = tileManager.groundZAt(
+      camera.position.x + worldAnchor[0],
+      camera.position.y + worldAnchor[1]
+    );
+    if (groundZ !== null && camera.position.z < groundZ + clearance) {
+      camera.position.z = groundZ + clearance;
+      // Shed downward momentum so holding Q doesn't build speed into the floor.
+      if (velocity.z < 0) velocity.z = 0;
+    }
+  }
+
+  // Actual ground speed this frame (Mercator m/s -> knots).
+  speedKnots = dt > 0 ? Math.round((camera.position.distanceTo(framePrevPos) / dt) * 1.94384) : 0;
+
+  // Sky/fog/stars grade with altitude (pTolemy3D's Sky.horizonAlt).
+  updateSky(
+    scene,
+    camera,
+    stars,
+    groundSkyColor,
+    baseFogDensity,
+    parseInt(ctrlSpaceAlt.value) * 1000
+  );
+
   // Update LOD and stream/cache terrain tiles
   tileManager.update(camera.position, camera);
 
@@ -820,10 +970,15 @@ function frameLoop() {
 
   hudPos.textContent = `${lat.toFixed(5)} / ${lon.toFixed(5)}`;
   hudAlt.textContent = Math.round(camera.position.z).toString();
-  hudSpeed.textContent = (direction && direction.lengthSq() > 0) ? speedKnots.toString() : "0";
+  // Report ground truth rather than the requested speed: with inertia the
+  // camera still coasts after the keys are released, and FlyTo/panorama move
+  // it with no key held at all.
+  hudSpeed.textContent = speedKnots.toString();
   hudTiles.textContent = tileManager.getActiveKeys().size.toString();
   hudCache.textContent = (bundleCache.bytesUsed() / (1024 * 1024)).toFixed(2);
   hudPrefetch.textContent = tileManager.getLastPrefetchCount().toString();
+  const pool = texturePool.stats();
+  hudTexPool.textContent = `${pool.created} new / ${pool.reused} reused`;
 
 
   // Rotate the compass rose so the red N points to where north is on screen.

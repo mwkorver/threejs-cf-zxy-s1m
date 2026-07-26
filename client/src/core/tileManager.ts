@@ -13,6 +13,7 @@ import { loadStaticFootprints, type FootprintCollection, type FootprintFeature }
 import { resolveImageryKind } from "./tileUrls";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
+import type { TexturePool } from "./texturePool";
 import { TerrainShader } from "./terrainShader";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
@@ -71,6 +72,9 @@ export class TileManager {
   // render as flat sea-level quads (relief is subpixel at those altitudes).
   // Keeps low zoom off the tiler's far-field path; z14 = USGS 1/3, z15+ = S1M.
   public terrainMinZoom = 14;
+  // Recycles tile textures rather than allocating one per tile. Share the same
+  // instance with BundleCache, which returns evicted textures to it.
+  public texturePool?: TexturePool;
   // Shading mode (0.0 = Satellite, 1.0 = DEM, 2.0 = Hypsometric)
   public shadingMode = 0.0;
   // Blend factor for hypsometric tinting (0.0 to 1.0)
@@ -677,7 +681,9 @@ export class TileManager {
     let texture: THREE.Texture | undefined;
     if (imageBitmap) {
       const branded = this.bakeTileLabel(imageBitmap, tile);
-      texture = new THREE.CanvasTexture(branded as unknown as HTMLCanvasElement);
+      texture = this.texturePool
+        ? this.texturePool.acquire(branded as unknown as TexImageSource)
+        : new THREE.CanvasTexture(branded as unknown as HTMLCanvasElement);
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.anisotropy = 4;
     }
@@ -1153,6 +1159,18 @@ export class TileManager {
    */
   private exagZ(h: number): number {
     return (h - this.exagReference) * this.verticalExaggeration + this.exagReference;
+  }
+
+  /**
+   * World Z of the terrain surface under a Mercator point *as rendered* —
+   * exaggeration and the sec(lat) scale included — or null where no loaded
+   * tile covers it. Use this, not raw getElevationAt, for anything that has to
+   * agree with what the camera can see (e.g. a ground-clearance floor).
+   */
+  public groundZAt(mx: number, my: number): number | null {
+    const elevation = this.getElevationAt(mx, my);
+    if (elevation === null) return null;
+    return this.exagZ(elevation) * mercatorScale(mercatorToLonLat(mx, my)[1]);
   }
 
   /**

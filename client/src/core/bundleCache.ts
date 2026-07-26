@@ -1,4 +1,5 @@
 import type * as THREE from "three";
+import type { TexturePool } from "./texturePool";
 
 export interface Bundle {
   key: string; // tileKey(z/x/y)
@@ -16,7 +17,12 @@ export class BundleCache {
   private map = new Map<string, Bundle>();
   private currentBytes = 0;
 
-  constructor(readonly byteBudget: number) {}
+  /**
+   * @param texturePool when given, evicted tile textures are recycled through
+   *   it instead of disposed. Eviction skips pinned keys, so a released
+   *   texture is never one a live mesh still renders.
+   */
+  constructor(readonly byteBudget: number, private readonly texturePool?: TexturePool) {}
 
   get(key: string): Bundle | undefined {
     const bundle = this.map.get(key);
@@ -68,7 +74,11 @@ export class BundleCache {
       bundle.geometry.dispose();
     }
     if (bundle.texture) {
-      bundle.texture.dispose();
+      if (this.texturePool) {
+        this.texturePool.release(bundle.texture);
+      } else {
+        bundle.texture.dispose();
+      }
     }
     if (bundle.footprints) {
       bundle.footprints.geometry.dispose();
