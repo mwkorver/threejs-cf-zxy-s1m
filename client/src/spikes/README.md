@@ -1,4 +1,4 @@
-# Engine spike (plan §10.2 — **settled: three.js**, 2026-07-09)
+# Engine spike (plan [§10.2](../../../FLIGHT-SIM-PLAN.md#10-open-questions-settle-in-phase-0) — **settled: three.js**, 2026-07-09)
 
 deck.gl, luma.gl, and three.js were each spiked against the same baked NJ
 tiles and a shared benchmark. **three.js won**; the deck.gl and luma.gl spikes
@@ -42,7 +42,7 @@ measures naive resource management, not the engines' draw paths. The real
 lesson: **at scale the bottleneck is GPU resource sharing (texture atlasing /
 instancing), which the LOD manager owns — not the engine.**
 
-## Verdict (plan §10.2)
+## Verdict (plan [§10.2](../../../FLIGHT-SIM-PLAN.md#10-open-questions-settle-in-phase-0))
 
 All three render our exact contract (skirted mesh + per-tile texture on one
 quadtree) at 60 fps with low CPU. The clean differentiators are **friction and

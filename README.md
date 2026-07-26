@@ -174,9 +174,9 @@ can never drift apart.
 
 | Directory | What | Plan ref |
 |---|---|---|
-| [`tiler/`](tiler) | Thin rio-tiler FastAPI service (Lambda container): imagery + terrain tiles | §4.1, §4.2, §10.4 |
-| [`client/`](client) | TypeScript client: flat Mercator world, terrain meshes with skirts, engine spikes | §5, §6, §10.2 |
-| [`infra/`](infra) | SAM/CloudFormation: tiler stack → edge (CloudFront) stack | §3, §7 |
+| [`tiler/`](tiler) | Thin rio-tiler FastAPI service (Lambda container): imagery + terrain tiles | [§4.1](FLIGHT-SIM-PLAN.md#41-imagery), [§4.2](FLIGHT-SIM-PLAN.md#42-terrain), [§10.4](FLIGHT-SIM-PLAN.md#10-open-questions-settle-in-phase-0) |
+| [`client/`](client) | TypeScript client: flat Mercator world, terrain meshes with skirts, engine spikes | [§5](FLIGHT-SIM-PLAN.md#5-client-architecture-notes), [§6](FLIGHT-SIM-PLAN.md#6-engine-decision-custom-renderer-vs-cesiumjs), [§10.2](FLIGHT-SIM-PLAN.md#10-open-questions-settle-in-phase-0) |
+| [`infra/`](infra) | SAM/CloudFormation: tiler stack → edge (CloudFront) stack | [§3](FLIGHT-SIM-PLAN.md#3-architecture), [§7](FLIGHT-SIM-PLAN.md#7-reuse-from-deckgl-s3-cog-s1m) |
 
 ### Tile contracts (v0)
 

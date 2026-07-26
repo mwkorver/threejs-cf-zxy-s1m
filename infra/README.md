@@ -1,8 +1,8 @@
-# Infrastructure (plan §3, §7)
+# Infrastructure (plan [§3](../FLIGHT-SIM-PLAN.md#3-architecture), [§7](../FLIGHT-SIM-PLAN.md#7-reuse-from-deckgl-s3-cog-s1m))
 
 Deploy shape reused from `deckgl-s3-cog-s1m`: **foundation → tiler → static
 assets**, all in **us-west-2** (same region as `naip-analytic`, `prd-tnm`
-etc., so requester-pays reads are same-region GET pennies — plan §2 row 10).
+etc., so requester-pays reads are same-region GET pennies — plan [§2 row 10](../FLIGHT-SIM-PLAN.md#2-locked-decisions)).
 
 | Stack | Contents | Status |
 |---|---|---|
@@ -75,8 +75,8 @@ the role granted **both** `lambda:InvokeFunctionUrl` **and** `lambda:InvokeFunct
 for `cloudfront.amazonaws.com`. With only the former, every request 403s
 `{"Message":"Forbidden"}` at the Function URL — edge.yaml grants both.
 
-Cache policy notes (plan §4.1, §8):
+Cache policy notes (plan [§4.1](../FLIGHT-SIM-PLAN.md#41-imagery), [§8](../FLIGHT-SIM-PLAN.md#8-cost--risk-notes)):
 - Path-only cache keys — **no query strings anywhere**.
 - Tiles are immutable: `Cache-Control: public, max-age=31536000, immutable`.
 - Origin shield + pre-genned z0–z12 pyramid are the cold-latency mitigations,
-  in that order (§8); hot-tile write-behind only if Phase 0/1 p99 demands.
+  in that order ([§8](../FLIGHT-SIM-PLAN.md#8-cost--risk-notes)); hot-tile write-behind only if Phase 0/1 p99 demands.

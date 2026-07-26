@@ -33,14 +33,14 @@ universal contract**:
 |---|----------|--------|-----------|
 | 1 | Coverage | **CONUS only** | Bounds precision & projection choices; matches NAIP/S1M coverage |
 | 2 | Tile grid | **EPSG:3857 (Web Mercator) XYZ** | Every tool speaks it (TiTiler, tippecanoe, PMTiles, deck.gl); path-based CDN keys; distortion handled as scale factor, not reprojection |
-| 3 | World model | **Flat Mercator-meter world, Z-up** | No ellipsoid, no ENU rotations, trivial physics. Ground-truth via `sec(lat)` scale (see §5.1) |
+| 3 | World model | **Flat Mercator-meter world, Z-up** | No ellipsoid, no ENU rotations, trivial physics. Ground-truth via `sec(lat)` scale (see [§5.1](#51-coordinates--precision-bake-in-from-day-one)) |
 | 4 | Imagery tiles | **WebP, 512 px, dynamic TiTiler + pre-genned low/mid zooms (z0–z12)** | Full pre-gen of CONUS to z17+ is tens of TB for sparse access; dynamic-behind-CDN fills organically; small pre-genned pyramid guarantees instant cold start |
 | 5 | Mosaic resolver | **GeoParquet lake as the mosaic index** | Biggest reuse from the existing repo: "which COGs intersect tile z/x/y" *is* `/search`. Year-pinned mosaics = path parameter. Consolidated into this project's own bucket `s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index` (2026-07-10) |
 | 5a | NAIP source | **`naip-visualization` RGB COGs** (not `naip-analytic` RGBIR) | 3-band uint8 JPEG COGs, display-ready — the tiler dropped the IR band anyway; smaller reads. Lake collection = `naip-visualization`, served at `/imagery/naip-visualization/...` |
 | 6 | Terrain payload | **Terrain-RGB (Terrarium-style) raster tiles from S1M**, quantized-mesh deferred | One pipeline with imagery (same tiler, same quadtree); client meshes regular grids (simpler than the current drape mesher). Revisit quantized-mesh only if client meshing shows up in profiles |
 | 7 | Far-field terrain | **AWS Open Data `s3://elevation-tiles-prod` (Mapzen Terrarium)** | Already tiled in exactly this scheme, global, free; S1M kicks in below a screen-space-error threshold |
 | 8 | Buildings | **Overture → tippecanoe → PMTiles on S3 + CloudFront** | Fully static, zero servers, range-read friendly, zoom-graded simplification for free |
-| 9 | Rendering engine | **three.js — not CesiumJS** (settled §10.2, 2026-07-09) | See §6. Cesium = globe engine overhead for pre-aligned tiles; custom pipeline keeps the GPU raster/mesh control and velocity prefetch. three won the Phase 0 spike (least friction, native free-fly camera); luma.gl kept as WebGPU fallback. Backend stays engine-agnostic so Cesium/luma remain fallback consumers |
+| 9 | Rendering engine | **three.js — not CesiumJS** (settled [§10.2](#10-open-questions-settle-in-phase-0), 2026-07-09) | See [§6](#6-engine-decision-custom-renderer-vs-cesiumjs). Cesium = globe engine overhead for pre-aligned tiles; custom pipeline keeps the GPU raster/mesh control and velocity prefetch. three won the Phase 0 spike (least friction, native free-fly camera); luma.gl kept as WebGPU fallback. Backend stays engine-agnostic so Cesium/luma remain fallback consumers |
 | 10 | Region | **us-west-2** | Same as sources (`naip-visualization`, `prd-tnm` etc., per RODA); requester-pays reads become same-region GET pennies. All reads signed via the execution role; requester-pays scoped per-bucket |
 
 ## 3. Architecture
@@ -101,8 +101,8 @@ signing.
   - 512×512 WebP, quality ~75 (≈30–80 KB/tile target).
   - Resolver: lake query `collection + year + tile bbox` → COG list → rio-tiler
     mosaic read → warp to 3857 → encode. All reads signed via the role;
-    requester-pays scoped per-asset to the buckets that need it (§2 row 5a).
-  - Per-layer `maxzoom` from registry `gsd` (see table §5.2); requests beyond
+    requester-pays scoped per-asset to the buckets that need it ([§2 row 5a](#2-locked-decisions)).
+  - Per-layer `maxzoom` from registry `gsd` (see table [§5.2](#52-per-layer-zoom-ceilings-256-px-basis--seclat-for-ground-mpx)); requests beyond
     it 404 (client clamps; CDN never caches upsampled junk).
 - Pre-generated static pyramid z0–z12 written to S3 once per layer/year
   (small; this is what every session hits constantly).
@@ -110,12 +110,12 @@ signing.
 ### 4.2 Terrain
 
 - `GET /terrain/{z}/{x}/{y}.webp` (or `.png`)
-  - Terrain-RGB encoding, **Terrarium** packing (§10.5), **lossless** WebP.
+  - Terrain-RGB encoding, **Terrarium** packing ([§10.5](#10-open-questions-settle-in-phase-0)), **lossless** WebP.
   - Grid (**decided**): vanilla **512×512**, standard registration — no
     overlap ring, no 257-vertex grids. Matches the imagery tile size (one
     quadtree, one size); a 512 tile at z carries 256-tile resolution at z+1,
     so maxzoom drops and request count quarters. Seam hiding is the client's
-    job: skirts generated at mesh-build time (see §5.3) handle both same-zoom
+    job: skirts generated at mesh-build time (see [§5.3](#53-lod--streaming)) handle both same-zoom
     hairline cracks and cross-LOD T-junctions with one mechanism. Rationale:
     skirts are a rendering artifact, not data — baking a bespoke registration
     convention into the tiles would break third-party consumers (MapLibre,
@@ -125,7 +125,7 @@ signing.
     data product and belong serverside; skirt texture stretch tuned via
     per-zoom skirt height (Cesium's published formula as starting point);
     building seating samples the height raster, never mesh raycasts, so skirt
-    geometry can't pollute picking (§4.3 already does this).
+    geometry can't pollute picking ([§4.3](#43-buildings) already does this).
   - Source: S1M COGs via `S1M_Products.parquet` lookup; `-999999` nodata → void
     fill or transparent.
   - `maxzoom` ≈ 15–16 (1 m source at 512 px); below-threshold zooms can
@@ -180,7 +180,7 @@ global constant.
 - Skirts generated client-side at mesh-build time: one extra vertex ring
   copied from the edge and dropped by a per-zoom height (Cesium's formula),
   O(perimeter) on an O(area) pass. Hides same-zoom cracks and cross-LOD
-  T-junctions with one mechanism; keeps server tiles vanilla (§4.2).
+  T-junctions with one mechanism; keeps server tiles vanilla ([§4.2](#42-terrain)).
 - **Velocity-vector prefetch**: fetch bundles the camera will see in 3–5 s
   from position + heading + speed. This is the sim's killer optimization and
   the main reason for a custom LOD manager.
@@ -188,7 +188,7 @@ global constant.
 
 ## 6. Engine decision (custom renderer vs CesiumJS)
 
-Chosen: **three.js** (settled §10.2 after the Phase 0 spike; luma.gl kept as
+Chosen: **three.js** (settled [§10.2](#10-open-questions-settle-in-phase-0) after the Phase 0 spike; luma.gl kept as
 the WebGPU fallback path). Reasons recorded for going custom over Cesium:
 
 - Cesium runs planet-scale machinery per frame (ellipsoid traversal,
@@ -230,7 +230,7 @@ stalls.
   async write-behind of hot tiles to S3 (Phase 2, only if p99 demands it).
 - **Lambda spike** on fast low passes → reserved concurrency + the static
   pyramid blunt it.
-- **NAIP vintage seams** → single-year mosaics per path (§4.1).
+- **NAIP vintage seams** → single-year mosaics per path ([§4.1](#41-imagery)).
 - **S1M coverage gaps** (still expanding) → far-field terrain fallback fills;
   client renders no-data as fallback-LOD terrain rather than holes.
 - **Requester-pays on misses**: same-region GETs only; monitor
@@ -239,13 +239,13 @@ stalls.
 ## 9. Phased plan
 
 ### Phase 0 — prove the loop (1 corridor, ~2–3 weeks of focused work)
-Goal: fly a camera over one corridor — **New Jersey, NAIP** (§10.3): the
+Goal: fly a camera over one corridor — **New Jersey, NAIP** ([§10.3](#10-open-questions-settle-in-phase-0)): the
 most representative source (requester-pays, CONUS-wide access pattern),
 with `nj-imagery` upgrade waiting in Phase 1 — with server tiles end-to-end.
 
 1. New repo skeleton: `tiler/` (Python, thin rio-tiler service on Lambda
-   container — §10.4),
-   `client/` (TS, three.js renderer — §10.2), `infra/` (SAM/CFN, reuse
+   container — [§10.4](#10-open-questions-settle-in-phase-0)),
+   `client/` (TS, three.js renderer — [§10.2](#10-open-questions-settle-in-phase-0)), `infra/` (SAM/CFN, reuse
    foundation pattern), `PLAN.md` (this file).
 2. Imagery tiler: lake-backed mosaic resolver → `/imagery/naip-visualization/{year}/z/x/y.webp`
    (NJ, latest vintage in the lake),
@@ -264,7 +264,7 @@ with `nj-imagery` upgrade waiting in Phase 1 — with server tiles end-to-end.
   interval p95 ~17 ms; live app holds this at ~197 active LOD tiles.
 - Lambda cost/flight-hour (2 GB arm64, measured durations): **~$0.01 warm CDN,
   ~$0.06 cold-exploration** — pennies at single-user scale.
-- Cold path hardened: DuckDB extensions baked into the image (§8), account
+- Cold path hardened: DuckDB extensions baked into the image ([§8](#8-cost--risk-notes)), account
   concurrency raised 10→1000, tiler reserved at 100, client 429 backoff.
 
 **Exit criteria:** sustained 60 fps low pass with no visible tile starvation on
@@ -273,7 +273,7 @@ a warm CDN. **Met ✅** on a warm CDN. Residual: on *cold* first-exploration the
 z0–z12 pyramid (Phase 2) is the prescribed mitigation.
 
 ### Phase 1 — make it a sim
-- ~~Velocity-vector prefetch + byte-budgeted bundle cache.~~ **Done** (§5.3).
+- ~~Velocity-vector prefetch + byte-budgeted bundle cache.~~ **Done** ([§5.3](#53-lod--streaming)).
 - ~~`sec(lat)` scale audit (single conversion function + tests).~~ **Done** —
   found and fixed two true-metre vs Mercator-metre Z bugs in frustum culling
   and LOD distance.
@@ -310,7 +310,7 @@ z0–z12 pyramid (Phase 2) is the prescribed mitigation.
 ## 10. Open questions (settle in Phase 0)
 
 1. ~~Terrain tile grid~~ **Settled 2026-07-08**: vanilla 512×512, standard
-   registration; client builds skirts at mesh time (see §4.2).
+   registration; client builds skirts at mesh time (see [§4.2](#42-terrain)).
 2. ~~deck.gl vs luma.gl vs three.js~~ **Settled 2026-07-09**: **three.js**.
    All three were spiked against the same baked NJ tiles + a shared benchmark
    (`client/src/spikes/`, results in its README). All render the tile contract
