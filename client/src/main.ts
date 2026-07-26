@@ -494,6 +494,20 @@ function cancelFlyTo(): void {
 }
 
 /**
+ * Move the Follow-DEM hold altitude, clamped to the slider's range.
+ *
+ * Follow-DEM drives camera Z every frame, so manual altitude input (wheel
+ * zoom, Q/E) has to change the *target* or it is simply overwritten.
+ */
+function setAglTarget(metres: number): void {
+  const min = parseFloat(ctrlAglAlt.min);
+  const max = parseFloat(ctrlAglAlt.max);
+  const clamped = Math.round(THREE.MathUtils.clamp(metres, min, max));
+  ctrlAglAlt.value = String(clamped);
+  valAglAlt.textContent = `${clamped} m`;
+}
+
+/**
  * Smoothstep easing: 0 at t=0, 1 at t=1, with zero velocity at both ends
  * (accel from rest, decel to rest). Matches pTolemy3D's brake-distance logic
  * but in a closed form.
@@ -832,6 +846,18 @@ window.addEventListener("wheel", (e) => {
     const fwd = tmpV.set(0, 0, -1).applyQuaternion(camera.quaternion);
     camera.position.addScaledVector(fwd, -step);
   }
+
+  // Follow-DEM rewrites camera Z every frame, so without this the zoom's
+  // vertical component is undone before it is ever drawn: the camera slides
+  // horizontally toward the cursor but never gets closer to the ground. Carry
+  // the new clearance into the hold target instead.
+  if (ctrlFollowDem.checked) {
+    const groundZ = tileManager.groundZAt(
+      camera.position.x + worldAnchor[0],
+      camera.position.y + worldAnchor[1]
+    );
+    if (groundZ !== null) setAglTarget(camera.position.z - groundZ);
+  }
 }, { passive: false });
 
 // Double-click = FlyTo the clicked ground point (smooth animated trajectory).
@@ -896,9 +922,18 @@ function frameLoop() {
     direction.normalize();
     direction.applyQuaternion(camera.quaternion);
 
-    // Vertical flying inputs (Q=down, E=up)
-    if (activeKeys.has("KeyQ")) direction.z -= 1;
-    if (activeKeys.has("KeyE")) direction.z += 1;
+    // Vertical flying inputs (Q=down, E=up). While Follow-DEM holds an AGL,
+    // it owns camera Z and would undo any climb next frame, so retarget the
+    // hold instead of fighting it — the same "manual input wins" rule that
+    // makes a movement key cancel an in-flight FlyTo.
+    let verticalInput = 0;
+    if (activeKeys.has("KeyQ")) verticalInput -= 1;
+    if (activeKeys.has("KeyE")) verticalInput += 1;
+    if (verticalInput !== 0 && ctrlFollowDem.checked) {
+      setAglTarget(parseFloat(ctrlAglAlt.value) + verticalInput * speed * dt);
+    } else {
+      direction.z += verticalInput;
+    }
 
     // Ease the carried velocity toward what the keys are asking for. tau = 0
     // snaps (no inertia); larger values accelerate in and coast out.
