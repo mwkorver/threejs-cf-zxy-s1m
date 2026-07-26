@@ -46,6 +46,24 @@ only misses invoke a Lambda. The browser gets to spend its budget on rendering.
 The trade is explicit: you give up direct-from-source pixels and accept a
 render tier, in exchange for a client simple enough to fly.
 
+### A twenty-year callback
+
+Part of the interest in building this was to find out whether anything we built
+into **pTolemy3D** twenty years ago still holds up. That viewer solved
+streaming-terrain flight in Java and JOGL, against JPEG2000 imagery and a very
+different web — but the hard parts of flying a camera over tiles it does not
+have yet turn out not to have changed much.
+
+Several of its ideas came across intact: a background loading pipeline so the
+render loop never stalls, nearest-tile-first scheduling so the closest terrain
+wins the next download slot, aborting requests for tiles that left the view, and
+altitude-scaled movement speed. Others did not survive contact — its view-cone
+logic is frustum culling, not LOD, and an early attempt to scale subdivision by
+camera pitch here caused LOD inversions and was replaced by screen-space error.
+
+[**README-PTOLEMY3D.md**](README-PTOLEMY3D.md) traces each pattern from the
+original implementation to where it now lives in `client/src/core/`.
+
 ### Why not TiTiler or cogeo-mosaic?
 
 Fair question, since both exist and this repo leans on
