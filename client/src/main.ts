@@ -915,13 +915,18 @@ function frameLoop() {
   // terrain Z under the camera is sampled from loaded tiles; camera Z is
   // adjusted to hold the target AGL. Skipped when no terrain is loaded
   // under the camera (e.g. over open ocean or during cold start).
+  //
+  // groundZAt reports the surface as rendered, so the held clearance is the
+  // gap the pilot can see. Measuring raw elevation instead would hold 500 m
+  // above where the terrain would be *unexaggerated* — at the default 2x that
+  // is a different, and much smaller, gap than the one on screen.
   if (ctrlFollowDem.checked) {
-    const gx = camera.position.x + worldAnchor[0];
-    const gy = camera.position.y + worldAnchor[1];
-    const groundElev = tileManager.getElevationAt(gx, gy);
-    if (groundElev !== null) {
-      const zScale = 1 / Math.cos((mercatorToLonLat(gx, gy)[1] * Math.PI) / 180);
-      const targetZ = groundElev * zScale + parseFloat(ctrlAglAlt.value);
+    const groundZ = tileManager.groundZAt(
+      camera.position.x + worldAnchor[0],
+      camera.position.y + worldAnchor[1]
+    );
+    if (groundZ !== null) {
+      const targetZ = groundZ + parseFloat(ctrlAglAlt.value);
       // Smooth toward target (exponential smoothing) to avoid jitter when
       // tiles swap LOD and centerElevation steps. τ = 0.2s.
       camera.position.z += (targetZ - camera.position.z) * Math.min(1, dt / 0.2);
