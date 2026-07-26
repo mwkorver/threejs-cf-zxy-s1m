@@ -1,7 +1,10 @@
 /**
- * Entry point. Real rendering starts once the engine spike (plan §10.2,
- * src/spikes/) picks the render path; until then this just proves the
- * toolchain and the core tile math.
+ * Entry point: wires the three.js renderer (the engine picked in plan §10.2)
+ * to the tile manager, the HUD, and the flight controls.
+ *
+ * Reads config from URL query params, builds the scene and camera, hands
+ * streaming and LOD to TileManager, renders the HUD overlay, then runs the
+ * flight controller each frame. Numbered sections below follow that order.
  */
 
 import * as THREE from "three";
