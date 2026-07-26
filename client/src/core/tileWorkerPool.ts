@@ -38,7 +38,10 @@ export class TileWorkerPool {
       return;
     }
 
-    const numWorkers = navigator.hardwareConcurrency ? Math.min(4, navigator.hardwareConcurrency) : 4;
+    // `navigator` is absent outside browsers (Node <21 in particular), so guard
+    // the global itself and not just the property.
+    const cores = typeof navigator === "undefined" ? 0 : navigator.hardwareConcurrency;
+    const numWorkers = cores ? Math.min(4, cores) : 4;
     for (let i = 0; i < numWorkers; i++) {
       // Use standard module worker instantiation which Vite natively compiles
       const worker = new Worker(new URL("./tile.worker.ts", import.meta.url), { type: "module" });
