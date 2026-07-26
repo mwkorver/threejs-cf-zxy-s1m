@@ -49,7 +49,8 @@ render tier, in exchange for a client simple enough to fly.
 ### A twenty-year callback
 
 Part of the interest in building this was to find out whether anything we built
-into **pTolemy3D** twenty years ago still holds up. That viewer solved
+into [**pTolemy3D**](https://github.com/mwkorver/ptolemy3d) twenty years ago
+still holds up. That viewer solved
 streaming-terrain flight in Java and JOGL, against JPEG2000 imagery and a very
 different web — but the hard parts of flying a camera over tiles it does not
 have yet turn out not to have changed much.
