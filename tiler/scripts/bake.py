@@ -10,18 +10,15 @@ cold tiler latency on every frame. Needs AWS creds.
 """
 
 import argparse
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
-from tiler.imagery import render_imagery_tile  # noqa: E402
-from tiler.registry import LAYERS  # noqa: E402
-from tiler.resolver import TMS, MosaicResolver, DemIndexResolver  # noqa: E402
-from tiler.settings import settings  # noqa: E402
-from tiler.terrain import render_terrain_tile  # noqa: E402
+from tiler.imagery import render_imagery_tile
+from tiler.registry import LAYERS
+from tiler.resolver import TMS, MosaicResolver, DemIndexResolver
+from tiler.settings import settings
+from tiler.terrain import render_terrain_tile
 
 
 def main() -> None:

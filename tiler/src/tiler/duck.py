@@ -53,8 +53,16 @@ def _create_static_secret(con: duckdb.DuckDBPyConnection, region: str) -> None:
     if creds is None:
         raise RuntimeError("no AWS credentials available for DuckDB S3 access")
     frozen = creds.get_frozen_credentials()
-    token = f", SESSION_TOKEN '{frozen.token}'" if frozen.token else ""
-    con.execute(
-        f"CREATE OR REPLACE SECRET s3 (TYPE s3, KEY_ID '{frozen.access_key}', "
-        f"SECRET '{frozen.secret_key}'{token}, REGION '{region}')"
-    )
+    # Bound parameters, not interpolation: a DuckDB error carries the statement
+    # text, and these values must not be in it.
+    if frozen.token:
+        con.execute(
+            "CREATE OR REPLACE SECRET s3 "
+            "(TYPE s3, KEY_ID ?, SECRET ?, SESSION_TOKEN ?, REGION ?)",
+            [frozen.access_key, frozen.secret_key, frozen.token, region],
+        )
+    else:
+        con.execute(
+            "CREATE OR REPLACE SECRET s3 (TYPE s3, KEY_ID ?, SECRET ?, REGION ?)",
+            [frozen.access_key, frozen.secret_key, region],
+        )

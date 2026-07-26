@@ -59,28 +59,33 @@ def lake_read_paths(lake_root: str, collection: str, states: list[str]) -> list[
     ]
 
 
-def build_tile_query(read_paths: list[str], west: float, south: float, east: float, north: float, requested_year: int) -> str:
+def build_tile_query(read_paths: list[str], west: float, south: float, east: float, north: float, requested_year: int) -> tuple[str, list]:
     """The /search intersect query, scoped to one tile envelope and specific states.
 
     Finds the latest available year up to the requested year for each state/region,
     and layers the more recent year on top.
+
+    Returns the SQL and its bound parameters. Paths are bound rather than
+    interpolated so nothing has to hand-escape quotes; the envelope and year are
+    numbers this module computes itself.
     """
-    paths_str = ", ".join(f"'{p}'" for p in read_paths)
-    return f"""
+    sql = f"""
         select asset_href, source_bucket, gsd
-        from read_parquet([{paths_str}], hive_partitioning=true)
+        from read_parquet(?, hive_partitioning=true)
         where bbox_xmin <= {east} and bbox_xmax >= {west}
           and bbox_ymin <= {north} and bbox_ymax >= {south}
           and ST_Intersects(geometry, ST_MakeEnvelope({west}, {south}, {east}, {north}))
           and (region, year) in (
               select region, max(year)
-              from read_parquet([{paths_str}], hive_partitioning=true)
+              from read_parquet(?, hive_partitioning=true)
               where year <= {requested_year}
               group by region
           )
         order by year desc, gsd asc nulls last, source_key asc
         limit {MAX_ASSETS_PER_TILE}
     """
+    # One binding per read_parquet(?), in the order they appear.
+    return sql, [read_paths, read_paths]
 
 
 class MosaicResolver:
@@ -112,15 +117,15 @@ class MosaicResolver:
             return cached
 
         glob = f"{self.lake_root.rstrip('/')}/collection={collection}/region=*/year=*/*.parquet"
-        sql = f"""
+        sql = """
             select region,
                    min(bbox_xmin), min(bbox_ymin),
                    max(bbox_xmax), max(bbox_ymax)
-            from read_parquet('{glob.replace("'", "''")}', hive_partitioning=true)
+            from read_parquet(?, hive_partitioning=true)
             group by region
         """
         try:
-            rows = self._con.execute(sql).fetchall()
+            rows = self._con.execute(sql, [glob]).fetchall()
         except duckdb.IOException as e:
             # No partitions for this collection -> empty glob -> 404 upstream.
             logger.warning(f"Lake extent scan failed for {collection}: {e}")
@@ -142,9 +147,9 @@ class MosaicResolver:
             return []
 
         paths = lake_read_paths(self.lake_root, collection, sorted(regions))
-        sql = build_tile_query(paths, bounds.left, bounds.bottom, bounds.right, bounds.top, year)
+        sql, params = build_tile_query(paths, bounds.left, bounds.bottom, bounds.right, bounds.top, year)
         try:
-            rows = self._con.execute(sql).fetchall()
+            rows = self._con.execute(sql, params).fetchall()
         except duckdb.IOException as e:
             # No partition for this collection -> empty glob -> 404 upstream.
             logger.warning(f"Lake read failed for {collection} {year} {z}/{x}/{y}: {e}")
@@ -190,15 +195,14 @@ class DemIndexResolver:
             ys.append(ay)
         axmin, axmax, aymin, aymax = min(xs), max(xs), min(ys), max(ys)
 
-        escaped = self.index_path.replace("'", "''")
         rows = self._con.execute(
-            f"""
+            """
             SELECT dataset, geometry_wkb
-            FROM read_parquet('{escaped}')
+            FROM read_parquet(?)
             WHERE bbox_xmin <= ? AND bbox_xmax >= ?
               AND bbox_ymin <= ? AND bbox_ymax >= ?
             """,
-            [axmax, axmin, aymax, aymin],
+            [self.index_path, axmax, axmin, aymax, aymin],
         ).fetchall()
 
         from shapely import from_wkb

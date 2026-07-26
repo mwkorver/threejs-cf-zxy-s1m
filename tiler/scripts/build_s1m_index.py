@@ -30,14 +30,11 @@ Then refresh the overlay: build_footprints.py --which s1m --invalidate
 
 import argparse
 import re
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
-from tiler.settings import settings  # noqa: E402
+from tiler.settings import settings
 
 BUCKET = "prd-tnm"
 PREFIX = "StagedProducts/Elevation/"

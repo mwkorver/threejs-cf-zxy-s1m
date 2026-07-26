@@ -23,8 +23,12 @@ def test_read_path_narrows_to_partition_subtree():
 
 
 def test_query_has_prune_and_refine():
-    sql = build_tile_query(["s3://b/lake/collection=naip/region=nj/year=*/*.parquet"],
-                           west=-74.5, south=40.4, east=-74.4, north=40.5, requested_year=2021)
+    paths = ["s3://b/lake/collection=naip/region=nj/year=*/*.parquet"]
+    sql, params = build_tile_query(paths, west=-74.5, south=40.4, east=-74.4,
+                                   north=40.5, requested_year=2021)
+    # Paths are bound, not spliced into the SQL text.
+    assert params == [paths, paths]
+    assert "s3://b/lake" not in sql
     # cheap bbox-column prune against row-group stats...
     assert "bbox_xmin <= -74.4" in sql and "bbox_xmax >= -74.5" in sql
     assert "bbox_ymin <= 40.5" in sql and "bbox_ymax >= 40.4" in sql
@@ -49,7 +53,7 @@ def _resolver_with_extents(extents_rows):
     """MosaicResolver whose DuckDB connection returns canned rows."""
     with patch("tiler.resolver.duck.connect") as connect:
         r = MosaicResolver("s3://bucket/lake", "us-west-2")
-    r._con = type("Con", (), {"execute": lambda self, sql: type("R", (), {"fetchall": lambda s: extents_rows})()})()
+    r._con = type("Con", (), {"execute": lambda self, sql, params=None: type("R", (), {"fetchall": lambda s: extents_rows})()})()
     assert connect.called
     return r
 
@@ -64,7 +68,7 @@ def test_region_extents_read_from_index_and_cached():
     r = _resolver_with_extents(NJ_AND_CA)
     calls = []
     real_execute = r._con.execute
-    r._con.execute = lambda sql: (calls.append(sql), real_execute(sql))[1]
+    r._con.execute = lambda sql, params=None: (calls.append(sql), real_execute(sql, params))[1]
 
     first = r.region_extents("naip-visualization")
     second = r.region_extents("naip-visualization")
@@ -83,9 +87,9 @@ def test_resolve_reads_only_the_regions_reaching_the_tile():
 
     def fake_query(paths, west, south, east, north, requested_year):
         seen["paths"] = paths
-        return "select 1"
+        return "select 1", [paths, paths]
 
-    r._con.execute = lambda sql: type("R", (), {"fetchall": lambda s: NJ_AND_CA if "min(" in sql else []})()
+    r._con.execute = lambda sql, params=None: type("R", (), {"fetchall": lambda s: NJ_AND_CA if "min(" in sql else []})()
     with patch("tiler.resolver.build_tile_query", side_effect=fake_query):
         r.resolve("naip-visualization", 2023, 12, 1204, 1541)  # a New Jersey tile
 

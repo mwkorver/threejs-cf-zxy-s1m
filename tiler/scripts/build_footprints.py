@@ -28,15 +28,12 @@ import argparse
 import gzip
 import json
 import os
-import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
-from tiler import duck  # noqa: E402
-from tiler.resolver import TNM_BUCKET, DEM_INDEX_EPSG  # noqa: E402
-from tiler.settings import settings  # noqa: E402
+from tiler import duck
+from tiler.resolver import TNM_BUCKET, DEM_INDEX_EPSG
+from tiler.settings import settings
 
 # usgs13 index ships in the repo (same file get_usgs13_resolver loads at runtime).
 USGS13_INDEX = Path(__file__).resolve().parent.parent / "src" / "tiler" / "data" / "USGS_13_DEM_Index.parquet"
@@ -74,9 +71,8 @@ def build_geojson(index_path: str, dataset_type: str, region: str, conus_only: b
     w, s, e, n = CONUS_BBOX
 
     con = duck.connect(region)
-    escaped = index_path.replace("'", "''")
     rows = con.execute(
-        f"SELECT dataset, geometry_wkb FROM read_parquet('{escaped}')"
+        "SELECT dataset, geometry_wkb FROM read_parquet(?)", [index_path]
     ).fetchall()
 
     features = []
