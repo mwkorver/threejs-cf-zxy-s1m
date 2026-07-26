@@ -274,6 +274,22 @@ describe("TileManager LOD subdivision", () => {
     expect(foundSubdivided).toBe(true);
   }, 15000);
 
+  it("stops refining once the active-tile cap is reached", () => {
+    // Pinned bundles are exempt from cache eviction, so an unbounded active
+    // set voids the byte budget entirely. The cap is what keeps it honest.
+    const capped = makeManager({ maxZoom: 18, lodFactor: 5.0 });
+    capped.maxActiveTiles = 30;
+    capped.update(new THREE.Vector3(0, 0, 50));
+
+    const uncapped = makeManager({ maxZoom: 18, lodFactor: 5.0 });
+    uncapped.update(new THREE.Vector3(0, 0, 50));
+
+    expect(uncapped.getActiveKeys().size).toBeGreaterThan(30);
+    // The cap bounds growth; the root grid itself is always pinned, so the
+    // ceiling is the cap plus whatever a already-subdivided node finishes.
+    expect(capped.getActiveKeys().size).toBeLessThan(uncapped.getActiveKeys().size);
+  }, 15000);
+
   it("children tile IDs are the correct quadtree subdivisions", () => {
     const tm = makeManager({ maxZoom: 14, lodFactor: 5.0 });
     tm.update(new THREE.Vector3(0, 0, 50));

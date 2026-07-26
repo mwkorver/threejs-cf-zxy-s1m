@@ -108,6 +108,11 @@ const tileManager = new TileManager(
 );
 tileManager.terrainMinZoom = 0;
 tileManager.texturePool = texturePool;
+// Pinned tiles are exempt from cache eviction, so the tile cap is what makes
+// the byte budget real — derive one from the other rather than letting them
+// drift. ~1 MB per tile (mesh + 512² texture); the 0.8 is headroom for the
+// transient while culled subtrees behind the camera are still being pruned.
+tileManager.maxActiveTiles = Math.floor((cacheBudget / (1024 * 1024)) * 0.8);
 tileManager.prefetchLookaheadSec = PREFETCH_LOOKAHEAD;
 tileManager.prefetchSamples = PREFETCH_SAMPLES;
 
@@ -153,7 +158,7 @@ hud.innerHTML = `
 
   <div class="hud-section">ACTIVE TILES: <span id="hud-tiles">0</span></div>
   <div>GPU CACHE: <span id="hud-cache">0.00</span> / 256 MB</div>
-  <div>PREFETCH: <span id="hud-prefetch">0</span> tiles ahead</div>
+  <div>PREFETCH: <span id="hud-prefetch">0 now / 0 total</span></div>
   <div>TEX POOL: <span id="hud-texpool">0 new / 0 reused</span></div>
 
   <div class="hud-section">
@@ -979,9 +984,13 @@ function frameLoop() {
   // camera still coasts after the keys are released, and FlyTo/panorama move
   // it with no key held at all.
   hudSpeed.textContent = speedKnots.toString();
-  hudTiles.textContent = tileManager.getActiveKeys().size.toString();
+  hudTiles.textContent = `${tileManager.getActiveKeys().size} / ${tileManager.maxActiveTiles}`;
   hudCache.textContent = (bundleCache.bytesUsed() / (1024 * 1024)).toFixed(2);
-  hudPrefetch.textContent = tileManager.getLastPrefetchCount().toString();
+  // Per-frame count plus a running total: the current frame is 0 most of the
+  // time (parked, or the tiles ahead are already cached), which made a working
+  // prefetch look dead.
+  hudPrefetch.textContent =
+    `${tileManager.getLastPrefetchCount()} now / ${tileManager.getPrefetchTotal()} total`;
   const pool = texturePool.stats();
   hudTexPool.textContent = `${pool.created} new / ${pool.reused} reused`;
 

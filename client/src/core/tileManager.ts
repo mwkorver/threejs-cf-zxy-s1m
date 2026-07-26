@@ -115,12 +115,24 @@ export class TileManager {
   private prefetchPrevTimeMs = 0;
   private prefetchVelocity = new THREE.Vector3(); // Mercator m/s, local offset space
   private lastPrefetchCount = 0;
+  /** Prefetches issued since load. The per-frame count is 0 most frames — the
+   *  camera is parked, or the tiles ahead are already cached — so a running
+   *  total is what actually shows the feature working. */
+  private prefetchTotal = 0;
   /** How far ahead (seconds) to sample along the flight vector. */
   public prefetchLookaheadSec = 4;
   /** Number of sample points along the look-ahead ray. */
   public prefetchSamples = 4;
   /** Minimum horizontal Mercator m/s before prefetch activates (≈ 100 kt ground). */
   public prefetchMinSpeedMs = 50;
+
+  /**
+   * Ceiling on pinned tiles, and so on resident VRAM: pinned bundles are exempt
+   * from cache eviction, so this is what keeps BundleCache's byte budget real.
+   * Roughly one megabyte per tile (mesh + 512² texture), so the default pairs
+   * with a 256 MB budget.
+   */
+  public maxActiveTiles = 256;
 
   // Screen-space-error projection factor: (viewportH/2) * cot(fovY/2), i.e.
   // pixels per radian of vertical view angle. Recomputed each update() from
@@ -416,6 +428,11 @@ export class TileManager {
     return this.lastPrefetchCount;
   }
 
+  /** Prefetch requests enqueued since load. */
+  getPrefetchTotal(): number {
+    return this.prefetchTotal;
+  }
+
   /** @returns true if the node was frustum-culled (renders nothing on screen). */
   private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): boolean {
     // Per-tile ground→world Z scale at the tile's center latitude (plan §5.1).
@@ -436,8 +453,18 @@ export class TileManager {
       );
 
       if (!frustum.intersectsBox(box)) {
-        // Node is completely out of view: make it and its subtree invisible
-        this.hideSubtree(node);
+        // Node is completely out of view. Normally retained (still pinned) so
+        // rotating back is gap-free — but in forward flight that trail is the
+        // main source of pinned-tile growth, and pinned bundles are exempt
+        // from eviction, so it is what actually voids the cache budget. Once
+        // the active set is at its cap, drop the subtree instead and accept a
+        // reload if the camera turns back: a brief gap under memory pressure
+        // beats an unbounded resident set.
+        if (this.activeKeys.size >= this.maxActiveTiles) {
+          this.pruneNode(node);
+        } else {
+          this.hideSubtree(node);
+        }
         return true; // Stop recursion and loading!
       }
     }
@@ -465,7 +492,17 @@ export class TileManager {
     // frustum culling's job (behind-camera tiles are culled, never loaded).
     const geometricError = tileW / 64; // mesh cell size (512px / gridStep 8)
     const ssePx = (geometricError / dist) * this.sseFactor;
-    const shouldSubdivide = ssePx > this.sseThreshold && node.tile.z < this.maxZoom;
+    // Refinement also has to fit in memory. Every pinned key holds its bundle
+    // against eviction, so an unbounded active set silently voids the cache
+    // budget: at speed this hit 658 tiles / 677 MB against a 256 MB budget,
+    // with nothing evictable. Stopping subdivision at the cap costs detail at
+    // the far edge of the view instead, and keeps the budget meaningful.
+    // Already-subdivided nodes keep refining, so hitting the cap degrades the
+    // frontier rather than collapsing LOD under the camera.
+    const withinTileBudget =
+      this.activeKeys.size < this.maxActiveTiles || node.children !== undefined;
+    const shouldSubdivide =
+      ssePx > this.sseThreshold && node.tile.z < this.maxZoom && withinTileBudget;
 
     if (shouldSubdivide) {
       if (!node.children) {
@@ -744,6 +781,7 @@ export class TileManager {
       if (this.activeKeys.has(key)) continue;
 
       this.lastPrefetchCount++;
+      this.prefetchTotal++;
       // Prefetch priority is well below active tiles. triggerLoad uses negative
       // camera distances (roughly -1e3 to -1e6); -1e7 ensures prefetch yields.
       const priority = -1e7 - s;
