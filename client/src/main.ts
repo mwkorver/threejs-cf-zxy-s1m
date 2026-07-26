@@ -5,6 +5,7 @@
  */
 
 import * as THREE from "three";
+import "./hud.css";
 import { lonLatToMercator, mercatorToLonLat } from "./core/mercator";
 import { BundleCache } from "./core/bundleCache";
 import { TileManager } from "./core/tileManager";
@@ -97,56 +98,53 @@ tileManager.prefetchSamples = PREFETCH_SAMPLES;
 (window as any).tileManager = tileManager;
 (window as any).camera = camera;
 
-// 4. Create floating HUD overlay
+// 4. Create floating HUD overlay (styles in hud.css)
 const hud = document.createElement("div");
-hud.style.position = "absolute";
-hud.style.top = "20px";
-hud.style.left = "20px";
-hud.style.background = "rgba(15, 23, 42, 0.85)";
-hud.style.backdropFilter = "blur(12px)";
-hud.style.border = "1px solid rgba(255, 255, 255, 0.1)";
-hud.style.padding = "20px";
-hud.style.borderRadius = "12px";
-hud.style.fontFamily = "monospace";
-hud.style.fontSize = "13px";
-hud.style.color = "#f8fafc";
-hud.style.pointerEvents = "auto"; // Allow interaction with controls
-hud.style.zIndex = "100";
-hud.style.boxShadow = "0 10px 25px rgba(0,0,0,0.5)";
-hud.style.width = "280px";
+hud.className = "hud";
+
+/** A labelled slider. Every one pairs `ctrl-<id>` with a `val-<id>` readout. */
+const slider = (id: string, label: string, attrs: string, value: string) => `
+  <div class="hud-group">
+    <div class="hud-label"><span>${label}</span><span id="val-${id}">${value}</span></div>
+    <input type="range" class="hud-slider" id="ctrl-${id}" ${attrs}>
+  </div>`;
+
+/** A checkbox or radio with its caption. */
+const toggle = (input: string, caption: string) =>
+  `<label class="hud-toggle">${input} ${caption}</label>`;
+
+/** A colour key entry: swatch (or letter) plus caption. */
+const key = (mark: string, caption: string) =>
+  `<span class="hud-legend-item">${mark} ${caption}</span>`;
+
+const swatch = (color: string) => `<span class="hud-swatch" style="background:${color}"></span>`;
+
 hud.innerHTML = `
-  <div style="font-weight: bold; font-size: 15px; margin-bottom: 10px; color: #38bdf8; letter-spacing: 1px;">✈️ FLIGHT SIM DEMO</div>
-  <div style="margin-bottom: 4px;">LAT/LON: <span id="hud-pos">- / -</span></div>
-  <div style="margin-bottom: 4px;">ALTITUDE: <span id="hud-alt">0</span> m</div>
-  <div style="margin-bottom: 4px;">SPEED: <span id="hud-speed">0</span> kt</div>
+  <div class="hud-title">✈️ FLIGHT SIM DEMO</div>
+  <div class="hud-readout">LAT/LON: <span id="hud-pos">- / -</span></div>
+  <div class="hud-readout">ALTITUDE: <span id="hud-alt">0</span> m</div>
+  <div class="hud-readout">SPEED: <span id="hud-speed">0</span> kt</div>
 
-  <div style="margin-top: 8px; margin-bottom: 8px;">
-    <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-      <span>FLIGHT SPEED SETTING</span>
-      <span id="val-speed-ctrl">800 kt</span>
-    </div>
-    <input type="range" id="ctrl-speed-ctrl" min="50" max="1000" step="10" value="800" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-  </div>
+  ${slider("speed-ctrl", "FLIGHT SPEED SETTING", 'min="50" max="1000" step="10" value="800"', "800 kt")}
 
-  <div style="margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; margin-bottom: 4px;">ACTIVE TILES: <span id="hud-tiles">0</span></div>
+  <div class="hud-section">ACTIVE TILES: <span id="hud-tiles">0</span></div>
   <div>GPU CACHE: <span id="hud-cache">0.00</span> / 256 MB</div>
   <div>PREFETCH: <span id="hud-prefetch">0</span> tiles ahead</div>
 
-  
-  <div style="margin-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px;">
-    <div style="font-weight: bold; color: #38bdf8; margin-bottom: 8px;">🌅 ATMOSPHERE & LIGHTING</div>
-    
-    <div style="margin-bottom: 8px;">
-      <label style="display: block; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">IMAGERY SOURCE</label>
-      <select id="ctrl-imagery-source" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; padding: 4px; font-family: monospace; font-size: 12px; cursor: pointer; outline: none;">
+  <div class="hud-section">
+    <div class="hud-section-title">🌅 ATMOSPHERE &amp; LIGHTING</div>
+
+    <div class="hud-group">
+      <label class="hud-label" for="ctrl-imagery-source">IMAGERY SOURCE</label>
+      <select class="hud-select" id="ctrl-imagery-source">
         <option value="satellite">NAIP Aerial (USDA)</option>
         <option value="osm">OpenStreetMap Roads</option>
       </select>
     </div>
-    
-    <div style="margin-bottom: 8px;">
-      <label style="display: block; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">PRESET MOOD</label>
-      <select id="ctrl-preset" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; padding: 4px; font-family: monospace; font-size: 12px; cursor: pointer; outline: none;">
+
+    <div class="hud-group">
+      <label class="hud-label" for="ctrl-preset">PRESET MOOD</label>
+      <select class="hud-select" id="ctrl-preset">
         <option value="midday">Bright Midday (Realism)</option>
         <option value="golden">Golden Hour (Moody)</option>
         <option value="overcast">Overcast (Soft)</option>
@@ -155,185 +153,63 @@ hud.innerHTML = `
       </select>
     </div>
 
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>HILLSHADE OPACITY</span>
-        <span id="val-hillshade">0.25</span>
-      </div>
-      <input type="range" id="ctrl-hillshade" min="0" max="1" step="0.05" value="0.25" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
+    ${slider("hillshade", "HILLSHADE OPACITY", 'min="0" max="1" step="0.05" value="0.25"', "0.25")}
+    ${slider("brightness", "IMAGERY BRIGHTNESS", 'min="0.5" max="2.0" step="0.05" value="1.75"', "1.75")}
+    ${slider("contrast", "IMAGERY CONTRAST", 'min="0.5" max="2.0" step="0.05" value="1.10"', "1.10")}
+    ${slider("saturation", "IMAGERY SATURATION", 'min="0.5" max="2.0" step="0.05" value="1.15"', "1.15")}
+    ${slider("azimuth", "SUN AZIMUTH", 'min="0" max="360" step="5" value="225"', "225°")}
+    ${slider("altitude", "SUN ALTITUDE", 'min="5" max="90" step="5" value="55"', "55°")}
+    ${slider("fog", "FOG DENSITY", 'min="0" max="0.0003" step="0.00001" value="0"', "0.00000")}
+    ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="2.0"', "2.0x")}
 
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>IMAGERY BRIGHTNESS</span>
-        <span id="val-brightness">1.75</span>
-      </div>
-      <input type="range" id="ctrl-brightness" min="0.5" max="2.0" step="0.05" value="1.75" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+    <div class="hud-group">
+      ${toggle('<input type="checkbox" class="hud-check" id="ctrl-follow-dem">', "FOLLOW TERRAIN (AGL hold)")}
     </div>
+    ${slider("agl-alt", "AGL ALTITUDE", 'min="50" max="5000" step="50" value="500"', "500 m")}
+    ${slider("extimagery", "USDA IMAGERY &le; Z (else COG tiler)", 'min="0" max="18" step="1" value="13"', "13")}
 
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>IMAGERY CONTRAST</span>
-        <span id="val-contrast">1.10</span>
-      </div>
-      <input type="range" id="ctrl-contrast" min="0.5" max="2.0" step="0.05" value="1.10" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>IMAGERY SATURATION</span>
-        <span id="val-saturation">1.15</span>
-      </div>
-      <input type="range" id="ctrl-saturation" min="0.5" max="2.0" step="0.05" value="1.15" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>SUN AZIMUTH</span>
-        <span id="val-azimuth">225°</span>
-      </div>
-      <input type="range" id="ctrl-azimuth" min="0" max="360" step="5" value="225" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>SUN ALTITUDE</span>
-        <span id="val-altitude">55°</span>
-      </div>
-      <input type="range" id="ctrl-altitude" min="5" max="90" step="5" value="55" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>FOG DENSITY</span>
-        <span id="val-fog">0.00000</span>
-      </div>
-      <input type="range" id="ctrl-fog" min="0" max="0.0003" step="0.00001" value="0" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>VERTICAL EXAGGERATION</span>
-        <span id="val-exaggeration">2.0x</span>
-      </div>
-      <input type="range" id="ctrl-exaggeration" min="1" max="10" step="0.5" value="2.0" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
-    <div style="margin-bottom: 8px;">
-      <label style="display: flex; align-items: center; gap: 6px; font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">
-        <input type="checkbox" id="ctrl-follow-dem" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
-        FOLLOW TERRAIN (AGL hold)
-      </label>
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-top: 4px; margin-bottom: 2px;">
-        <span>AGL ALTITUDE</span>
-        <span id="val-agl-alt">500 m</span>
-      </div>
-      <input type="range" id="ctrl-agl-alt" min="50" max="5000" step="50" value="500" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
-    <div style="margin-bottom: 8px;">
-      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
-        <span>USDA IMAGERY &le; Z (else COG tiler)</span>
-        <span id="val-extimagery">13</span>
-      </div>
-      <input type="range" id="ctrl-extimagery" min="0" max="18" step="1" value="13" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
-    </div>
-
-    <div style="margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <input type="checkbox" id="ctrl-footprints" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
-        <label for="ctrl-footprints" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW DEM FOOTPRINTS</label>
-      </div>
-      <div style="display: flex; gap: 12px; font-size: 9px; color: #94a3b8; margin-left: 22px;">
-        <span style="display: flex; align-items: center; gap: 4px;">
-          <span style="display: inline-block; width: 8px; height: 8px; background: #00ffff; border-radius: 2px;"></span>
-          S1M (1m)
-        </span>
-        <span style="display: flex; align-items: center; gap: 4px;">
-          <span style="display: inline-block; width: 8px; height: 8px; background: #ff00ff; border-radius: 2px;"></span>
-          USGS 1/3" (10m)
-        </span>
+    <div class="hud-group">
+      ${toggle('<input type="checkbox" class="hud-check" id="ctrl-footprints">', "SHOW DEM FOOTPRINTS")}
+      <div class="hud-legend">
+        ${key(swatch("#00ffff"), "S1M (1m)")}
+        ${key(swatch("#ff00ff"), 'USGS 1/3" (10m)')}
       </div>
     </div>
 
-    <div style="margin-top: 8px; margin-bottom: 4px; display: flex; flex-direction: column; gap: 4px;">
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <input type="checkbox" id="ctrl-outlines" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
-        <label for="ctrl-outlines" style="font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">SHOW TMS OUTLINES & LABELS</label>
-      </div>
-      <div style="display: flex; gap: 12px; font-size: 9px; color: #94a3b8; margin-left: 22px;">
-        <span style="display: flex; align-items: center; gap: 4px;">
-          <span style="color: #ffd400; font-weight: bold;">U</span> USDA server
-        </span>
-        <span style="display: flex; align-items: center; gap: 4px;">
-          <span style="color: #00e5ff; font-weight: bold;">N</span> NAIP COG (DuckDB)
-        </span>
+    <div class="hud-group">
+      ${toggle('<input type="checkbox" class="hud-check" id="ctrl-outlines">', "SHOW TMS OUTLINES &amp; LABELS")}
+      <div class="hud-legend">
+        ${key('<span class="hud-key" style="color:#ffd400">U</span>', "USDA server")}
+        ${key('<span class="hud-key" style="color:#00e5ff">N</span>', "NAIP COG (DuckDB)")}
       </div>
     </div>
 
-    <div style="margin-top: 8px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px;">
-      <span style="font-size: 10px; color: #94a3b8; margin-bottom: 2px;">SHADING MODE</span>
-      
-      <div style="display: flex; flex-direction: column; gap: 4px; margin-left: 2px;">
-        <label style="display: flex; align-items: center; gap: 8px; font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">
-          <input type="radio" name="ctrl-shading-mode" value="0" checked style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
-          Satellite / Imagery
-        </label>
-        
-        <label style="display: flex; align-items: center; gap: 8px; font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">
-          <input type="radio" name="ctrl-shading-mode" value="1" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
-          DEM Shading (DEM Colors)
-        </label>
-        
-        <label style="display: flex; align-items: center; gap: 8px; font-size: 10px; color: #f8fafc; cursor: pointer; user-select: none;">
-          <input type="radio" name="ctrl-shading-mode" value="2" style="cursor: pointer; width: 14px; height: 14px; accent-color: #38bdf8;">
-          Hypsometric Tinting
-        </label>
-      </div>
+    <div class="hud-group">
+      <div class="hud-label"><span>SHADING MODE</span></div>
+      ${toggle('<input type="radio" class="hud-radio" name="ctrl-shading-mode" value="0" checked>', "Satellite / Imagery")}
+      ${toggle('<input type="radio" class="hud-radio" name="ctrl-shading-mode" value="1">', "DEM Shading (DEM Colors)")}
+      ${toggle('<input type="radio" class="hud-radio" name="ctrl-shading-mode" value="2">', "Hypsometric Tinting")}
     </div>
 
-    <!-- DEM Shading Legend (visible only when DEM Shading is active) -->
-    <div id="container-dem-legend" style="display: none; gap: 10px; font-size: 9px; color: #94a3b8; margin-left: 22px; margin-bottom: 6px; flex-wrap: wrap;">
-      <span style="display: flex; align-items: center; gap: 4px;">
-        <span style="display: inline-block; width: 8px; height: 8px; background: #00cccc; border-radius: 2px;"></span>
-        S1M (1m)
-      </span>
-      <span style="display: flex; align-items: center; gap: 4px;">
-        <span style="display: inline-block; width: 8px; height: 8px; background: #cc00cc; border-radius: 2px;"></span>
-        USGS 1/3" (10m)
-      </span>
-      <span style="display: flex; align-items: center; gap: 4px;">
-        <span style="display: inline-block; width: 8px; height: 8px; background: #666666; border-radius: 2px;"></span>
-        Far-field
-      </span>
-      <span style="display: flex; align-items: center; gap: 4px;">
-        <span style="display: inline-block; width: 8px; height: 8px; background: #ccb300; border-radius: 2px;"></span>
-        Flat
-      </span>
+    <!-- Shown by main.ts only while DEM Shading is the active mode. -->
+    <div class="hud-legend" id="container-dem-legend" style="display: none;">
+      ${key(swatch("#00cccc"), "S1M (1m)")}
+      ${key(swatch("#cc00cc"), 'USGS 1/3" (10m)')}
+      ${key(swatch("#666666"), "Far-field")}
+      ${key(swatch("#ccb300"), "Flat")}
     </div>
 
-    <!-- Hypsometric Blend slider (visible only when Hypsometric Tinting is active) -->
-    <div id="container-hypsometric" style="display: none; margin-bottom: 8px; margin-left: 22px;">
-      <!-- Hypsometric bounds mode (Global vs Local) -->
-      <div style="display: flex; gap: 12px; margin-bottom: 6px; font-size: 9px; color: #cbd5e1;">
-        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none;">
-          <input type="radio" name="ctrl-hyp-bounds" value="global" style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
-          Global
-        </label>
-        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none;">
-          <input type="radio" name="ctrl-hyp-bounds" value="local" checked style="cursor: pointer; width: 12px; height: 12px; accent-color: #38bdf8;">
-          Local to Viewport
-        </label>
+    <!-- Shown by main.ts only while Hypsometric Tinting is the active mode. -->
+    <div class="hud-sub" id="container-hypsometric" style="display: none;">
+      <div class="hud-row">
+        ${toggle('<input type="radio" class="hud-radio" name="ctrl-hyp-bounds" value="global">', "Global")}
+        ${toggle('<input type="radio" class="hud-radio" name="ctrl-hyp-bounds" value="local" checked>', "Local to Viewport")}
       </div>
-      <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; margin-bottom: 2px;">
-        <span>TINT BLEND</span>
-        <span id="val-hypblend">50%</span>
-      </div>
-      <input type="range" id="ctrl-hypblend" min="0" max="1" step="0.05" value="0.5" style="width: 100%; accent-color: #38bdf8; cursor: pointer;">
+      ${slider("hypblend", "TINT BLEND", 'min="0" max="1" step="0.05" value="0.5"', "50%")}
     </div>
   </div>
 
-  <div style="margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: 10px; font-size: 11px; color: #94a3b8; line-height: 1.4;">
+  <div class="hud-help">
     Controls:<br>
     • Drag — Pan<br>
     • Right-drag — Rotate / Tilt<br>
@@ -468,12 +344,12 @@ const PRESETS = {
 function updateSunDirection(azimuth: number, altitude: number) {
   const azimuthRad = (azimuth * Math.PI) / 180;
   const altitudeRad = (altitude * Math.PI) / 180;
-  
+
   const z = Math.sin(altitudeRad);
   const r = Math.cos(altitudeRad);
   const x = r * Math.sin(azimuthRad);
   const y = r * Math.cos(azimuthRad);
-  
+
   tileManager.globalUniforms.sunDirection.value.set(x, y, z).normalize();
 }
 
@@ -482,15 +358,15 @@ function applyPreset(mood: MoodPreset) {
   ctrlAzimuth.value = mood.azimuth.toString();
   ctrlAltitude.value = mood.altitude.toString();
   ctrlFog.value = mood.fogDensity.toString();
-  
+
   valHillshade.textContent = mood.hillshade.toFixed(2);
   valAzimuth.textContent = `${mood.azimuth}°`;
   valAltitude.textContent = `${mood.altitude}°`;
   valFog.textContent = mood.fogDensity.toFixed(5);
-  
+
   tileManager.globalUniforms.hillshadeIntensity.value = mood.hillshade;
   updateSunDirection(mood.azimuth, mood.altitude);
-  
+
   scene.background = new THREE.Color(mood.skyColor);
   if (scene.fog && scene.fog instanceof THREE.FogExp2) {
     scene.fog.color = new THREE.Color(mood.fogColor);
@@ -667,7 +543,7 @@ ctrlShadingModes.forEach((radio) => {
     if (radio.checked) {
       const mode = parseFloat(radio.value);
       tileManager.setShadingMode(mode);
-      
+
       // Toggle Legend/Blend containers visibility
       containerDemLegend.style.display = (mode === 1.0) ? "flex" : "none";
       containerHypsometric.style.display = (mode === 2.0) ? "block" : "none";

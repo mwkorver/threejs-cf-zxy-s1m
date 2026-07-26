@@ -1,0 +1,160 @@
+/* HUD overlay styles. The markup lives in main.ts; nothing here is dynamic, so
+   it belongs in a stylesheet rather than in a template string. */
+
+.hud {
+  --accent: #38bdf8;
+  --muted: #94a3b8;
+  --fg: #f8fafc;
+  --rule: rgba(255, 255, 255, 0.15);
+
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  width: 280px;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--fg);
+  z-index: 100;
+  pointer-events: auto; /* controls stay clickable inside the overlay */
+}
+
+.hud-title {
+  margin-bottom: 10px;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+
+/* Live telemetry readouts (LAT/LON, ALTITUDE, ...) */
+.hud-readout {
+  margin-bottom: 4px;
+}
+
+/* A rule-separated block, e.g. the tile stats or the lighting controls. */
+.hud-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.hud-section-title {
+  margin-bottom: 8px;
+  color: var(--accent);
+  font-weight: bold;
+}
+
+/* One labelled control: caption row above, input below. */
+.hud-group {
+  margin-bottom: 8px;
+}
+
+.hud-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.hud-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.hud-select {
+  width: 100%;
+  padding: 4px;
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  color: var(--fg);
+  font-family: monospace;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.hud-check,
+.hud-radio {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Checkbox/radio with its caption on one line. */
+.hud-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  font-size: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Stacked toggles (e.g. a radio group) need a little air between them. */
+.hud-toggle + .hud-toggle {
+  margin-top: 4px;
+}
+
+/* Side-by-side controls, e.g. the hypsometric bounds radios. */
+.hud-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+/* Colour-key rows under a toggle, indented past the checkbox. */
+.hud-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+  margin-left: 22px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.hud-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hud-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.hud-key {
+  font-weight: bold;
+}
+
+/* A group nested under a parent control (indented, slightly smaller). */
+.hud-sub {
+  margin-left: 22px;
+}
+
+.hud-sub .hud-label {
+  font-size: 9px;
+}
+
+.hud-help {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
