@@ -746,8 +746,80 @@ export class TileManager {
   }
 
   /**
+   * Resolve tile texture and metadata from bundleCache or live TileNodes in the scene.
+   * If the child tile itself is subdivided, recursively synthesizes it from its own 4 children.
+   */
+  private getChildTileData(tile: TileId): { texture: THREE.Texture; centerElevation: number; minElevation: number; maxElevation: number; demSource: string } | undefined {
+    const key = tileKey(tile);
+    const b = this.bundleCache.get(key);
+    if (b && b.texture) {
+      return {
+        texture: b.texture,
+        centerElevation: b.centerElevation ?? 0,
+        minElevation: b.minElevation ?? 0,
+        maxElevation: b.maxElevation ?? 0,
+        demSource: b.demSource || "farfield",
+      };
+    }
+
+    // Search transitionNodes and rootNodes for a loaded TileNode matching key
+    const matchInSubtree = (node: TileNode): TileNode | undefined => {
+      if (node.key === key && node.loaded && node.mesh) return node;
+      if (node.children) {
+        for (const c of node.children) {
+          const m = matchInSubtree(c);
+          if (m) return m;
+        }
+      }
+      return undefined;
+    };
+
+    let found: TileNode | undefined;
+    for (const n of this.transitionNodes.values()) {
+      found = matchInSubtree(n);
+      if (found) break;
+    }
+    if (!found) {
+      for (const n of this.rootNodes.values()) {
+        found = matchInSubtree(n);
+        if (found) break;
+      }
+    }
+
+    if (found && found.mesh) {
+      const mat = found.mesh.material as THREE.ShaderMaterial;
+      const tex = mat?.uniforms?.map?.value as THREE.Texture;
+      if (tex) {
+        return {
+          texture: tex,
+          centerElevation: found.centerElevation ?? 0,
+          minElevation: found.minElevation ?? 0,
+          maxElevation: found.maxElevation ?? 0,
+          demSource: found.demSource || "farfield",
+        };
+      }
+    }
+
+    // If the child tile itself was subdivided into deeper tiles, synthesize it recursively from its 4 children
+    if (tile.z < this.maxZoom) {
+      const subSynthesized = this.synthesizeParentBundle(tile);
+      if (subSynthesized && subSynthesized.texture) {
+        return {
+          texture: subSynthesized.texture,
+          centerElevation: subSynthesized.centerElevation ?? 0,
+          minElevation: subSynthesized.minElevation ?? 0,
+          maxElevation: subSynthesized.maxElevation ?? 0,
+          demSource: subSynthesized.demSource || "farfield",
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
    * Client-side parent tile synthesis: if a parent tile (z) is not in cache,
-   * but all 4 of its children (z+1) are loaded in bundleCache, downsample
+   * but all 4 of its children (z+1) are loaded in memory or scene nodes, downsample
    * the 4 children locally into a parent bundle in 0ms without hitting the server.
    */
   private synthesizeParentBundle(tile: TileId): Bundle | undefined {
@@ -755,21 +827,12 @@ export class TileManager {
     const cX = tile.x * 2;
     const cY = tile.y * 2;
 
-    const k0 = `${childZ}/${cX}/${cY}`;
-    const k1 = `${childZ}/${cX + 1}/${cY}`;
-    const k2 = `${childZ}/${cX}/${cY + 1}`;
-    const k3 = `${childZ}/${cX + 1}/${cY + 1}`;
+    const c0 = this.getChildTileData({ z: childZ, x: cX, y: cY });
+    const c1 = this.getChildTileData({ z: childZ, x: cX + 1, y: cY });
+    const c2 = this.getChildTileData({ z: childZ, x: cX, y: cY + 1 });
+    const c3 = this.getChildTileData({ z: childZ, x: cX + 1, y: cY + 1 });
 
-    const b0 = this.bundleCache.get(k0);
-    const b1 = this.bundleCache.get(k1);
-    const b2 = this.bundleCache.get(k2);
-    const b3 = this.bundleCache.get(k3);
-
-    // Require ALL 4 children to be resident in bundleCache to synthesize locally (0 network requests).
-    // If any child is missing, return undefined so TileManager fetches the single parent tile from
-    // the server (1 request) rather than fetching missing child tiles (which would be 3x network requests).
-    if (!b0 || !b1 || !b2 || !b3) return undefined;
-    if (!b0.texture || !b1.texture || !b2.texture || !b3.texture) return undefined;
+    if (!c0 || !c1 || !c2 || !c3) return undefined;
 
     if (typeof OffscreenCanvas === "undefined") return undefined;
     const canvas = new OffscreenCanvas(512, 512);
@@ -789,20 +852,20 @@ export class TileManager {
       }
     };
 
-    const drawQuadrant = (b: Bundle | undefined, dx: number, dy: number) => {
-      if (b && b.texture && isValidImage(b.texture.image)) {
+    const drawQuadrant = (c: { texture: THREE.Texture } | undefined, dx: number, dy: number) => {
+      if (c && c.texture && isValidImage(c.texture.image)) {
         try {
-          ctx.drawImage(b.texture.image as CanvasImageSource, dx, dy, 256, 256);
+          ctx.drawImage(c.texture.image as CanvasImageSource, dx, dy, 256, 256);
         } catch {
           // If ImageBitmap was detached or closed, ignore safely
         }
       }
     };
 
-    drawQuadrant(b0, 0, 0);
-    drawQuadrant(b1, 256, 0);
-    drawQuadrant(b2, 0, 256);
-    drawQuadrant(b3, 256, 256);
+    drawQuadrant(c0, 0, 0);
+    drawQuadrant(c1, 256, 0);
+    drawQuadrant(c2, 0, 256);
+    drawQuadrant(c3, 256, 256);
 
     // Bake label for synthesized tiles: use "S" (lime green) instead of N or U
     if (this.showLabels || this.showSourceLabels) {
@@ -850,10 +913,10 @@ export class TileManager {
     geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
     geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
 
-    const avgCenter = ((b0.centerElevation ?? 0) + (b1.centerElevation ?? 0) + (b2.centerElevation ?? 0) + (b3.centerElevation ?? 0)) / 4;
-    const minElev = Math.min(b0.minElevation ?? 0, b1.minElevation ?? 0, b2.minElevation ?? 0, b3.minElevation ?? 0);
-    const maxElev = Math.max(b0.maxElevation ?? 0, b1.maxElevation ?? 0, b2.maxElevation ?? 0, b3.maxElevation ?? 0);
-    const demSource = b0.demSource || "farfield";
+    const avgCenter = ((c0.centerElevation ?? 0) + (c1.centerElevation ?? 0) + (c2.centerElevation ?? 0) + (c3.centerElevation ?? 0)) / 4;
+    const minElev = Math.min(c0.minElevation ?? 0, c1.minElevation ?? 0, c2.minElevation ?? 0, c3.minElevation ?? 0);
+    const maxElev = Math.max(c0.maxElevation ?? 0, c1.maxElevation ?? 0, c2.maxElevation ?? 0, c3.maxElevation ?? 0);
+    const demSource = c0.demSource || "farfield";
 
     const bytes = meshData.positions.byteLength + meshData.normals.byteLength + meshData.indices.byteLength + (512 * 512 * 4);
 
