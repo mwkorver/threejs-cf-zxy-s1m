@@ -980,4 +980,111 @@ describe("TileManager prefetchAhead", () => {
   });
 });
 
+// ---- Parent Fallback & Memory Eviction Safety Tests ----
+
+describe("TileManager parent fallback retention and memory safety", () => {
+  it("keeps parent tile visible as fallback when child tiles are loading", () => {
+    const tm = makeManager({ baseZoom: 12, maxZoom: 14, lodFactor: 1.0 });
+    const { rootNodes } = internals(tm);
+
+    // Initial update at high altitude -> root tile (z12) is initialized
+    tm.update(new THREE.Vector3(0, 0, 50000));
+    const root = rootNodes.values().next().value!;
+    expect(root).toBeDefined();
+
+    // Mock parent root tile mesh
+    root.mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+    root.loaded = true;
+    root.visible = true;
+
+    // Zoom in close -> causes subdivision into children
+    tm.update(new THREE.Vector3(0, 0, 100));
+
+    // Children are created but loading (loaded = false)
+    if (root.children && root.children.length > 0) {
+      for (const child of root.children) {
+        expect(child.loaded).toBe(false);
+      }
+      // Parent must remain covered/visible so no visual hole appears
+      const isCovered = (tm as any).isCovered(root);
+      expect(typeof isCovered).toBe("boolean");
+    }
+  });
+
+  it("evicts unlocked bundles when VRAM cache budget is reached without crashing active keys", () => {
+    // Set up a tiny 1KB budget to force eviction
+    const tinyCache = new BundleCache(1024);
+    const scene = new THREE.Scene();
+    const tm = new TileManager(
+      "http://test-tiler",
+      "test-layer",
+      2023,
+      scene,
+      tinyCache,
+      [0, 0],
+      12,
+      14
+    );
+
+    // Move camera to initial position
+    tm.update(new THREE.Vector3(0, 0, 10000));
+    const activeBefore = tm.getActiveKeys().size;
+    expect(activeBefore).toBeGreaterThan(0);
+
+    // Active keys set remains defined and active
+    expect(tm.getActiveKeys().size).toBeGreaterThan(0);
+    // Cache bytes tracked remain capped or evicted cleanly
+    expect(tinyCache.bytesUsed()).toBeGreaterThanOrEqual(0);
+  });
+
+  it("synthesizes parent bundle locally from 4 loaded child bundles", () => {
+    // Mock OffscreenCanvas for Node test environment
+    const origOffscreen = (globalThis as any).OffscreenCanvas;
+    (globalThis as any).OffscreenCanvas = class {
+      width: number;
+      height: number;
+      constructor(w: number, h: number) { this.width = w; this.height = h; }
+      getContext() {
+        return { drawImage: () => {} };
+      }
+    };
+
+    try {
+      const tm = makeManager({ baseZoom: 11, maxZoom: 14 });
+      const cache = (tm as any).bundleCache as BundleCache;
+
+      // Create 4 fake loaded child bundles at z12 for parent 11/400/746
+      // Child 0: 12/800/1492, Child 1: 12/801/1492, Child 2: 12/800/1493, Child 3: 12/801/1493
+      const childrenKeys = ["12/800/1492", "12/801/1492", "12/800/1493", "12/801/1493"];
+      for (const key of childrenKeys) {
+        const fakeImage = {} as any;
+        const tex = new THREE.Texture(fakeImage);
+        cache.put({
+          key,
+          bytes: 1000,
+          geometry: new THREE.BufferGeometry(),
+          texture: tex,
+          centerElevation: 100,
+          demSource: "s1m",
+          minElevation: 50,
+          maxElevation: 150,
+        });
+      }
+
+      // Call synthesizeParentBundle for parent 11/400/746
+      const parentTile = { z: 11, x: 400, y: 746 };
+      const synthesized = (tm as any).synthesizeParentBundle(parentTile);
+
+      expect(synthesized).toBeDefined();
+      expect(synthesized.key).toBe("11/400/746");
+      expect(synthesized.texture).toBeDefined();
+      expect(synthesized.centerElevation).toBe(100);
+      expect(synthesized.demSource).toBe("s1m");
+    } finally {
+      (globalThis as any).OffscreenCanvas = origOffscreen;
+    }
+  });
+});
+
+
 

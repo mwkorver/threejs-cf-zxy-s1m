@@ -8,9 +8,13 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
     "@types/three": "^0.171.0",
     "three": "^0.171.0",
     "typescript": "^5.7.0",

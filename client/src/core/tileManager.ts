@@ -643,8 +643,11 @@ export class TileManager {
     node.loading = true;
     const key = node.key;
 
-    // Check if the bundle exists in the cache
-    const cached = this.bundleCache.get(key);
+    // Check if the bundle exists in cache or can be synthesized locally from 4 loaded children
+    let cached = this.bundleCache.get(key);
+    if (!cached) {
+      cached = this.synthesizeParentBundle(node.tile);
+    }
     if (cached) {
       node.centerElevation = cached.centerElevation;
       node.demSource = cached.demSource;
@@ -740,6 +743,82 @@ export class TileManager {
       (texture ? 512 * 512 * 4 : 0);
 
     return { key, bytes, geometry: geom, texture, centerElevation, demSource, minElevation, maxElevation };
+  }
+
+  /**
+   * Client-side parent tile synthesis: if a parent tile (z) is not in cache,
+   * but all 4 of its children (z+1) are loaded in bundleCache, downsample
+   * the 4 children locally into a parent bundle in 0ms without hitting the server.
+   */
+  private synthesizeParentBundle(tile: TileId): Bundle | undefined {
+    const childZ = tile.z + 1;
+    const cX = tile.x * 2;
+    const cY = tile.y * 2;
+
+    const k0 = `${childZ}/${cX}/${cY}`;
+    const k1 = `${childZ}/${cX + 1}/${cY}`;
+    const k2 = `${childZ}/${cX}/${cY + 1}`;
+    const k3 = `${childZ}/${cX + 1}/${cY + 1}`;
+
+    const b0 = this.bundleCache.get(k0);
+    const b1 = this.bundleCache.get(k1);
+    const b2 = this.bundleCache.get(k2);
+    const b3 = this.bundleCache.get(k3);
+
+    if (!b0 || !b1 || !b2 || !b3) return undefined;
+    if (!b0.texture || !b1.texture || !b2.texture || !b3.texture) return undefined;
+
+    if (typeof OffscreenCanvas === "undefined") return undefined;
+    const canvas = new OffscreenCanvas(512, 512);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
+
+    const img0 = b0.texture.image;
+    const img1 = b1.texture.image;
+    const img2 = b2.texture.image;
+    const img3 = b3.texture.image;
+
+    if (!img0 || !img1 || !img2 || !img3) return undefined;
+
+    // Draw 4 children in a 2x2 grid (NW, NE, SW, SE)
+    ctx.drawImage(img0, 0, 0, 256, 256);
+    ctx.drawImage(img1, 256, 0, 256, 256);
+    ctx.drawImage(img2, 0, 256, 256, 256);
+    ctx.drawImage(img3, 256, 256, 256, 256);
+
+    const texture = this.texturePool
+      ? this.texturePool.acquire(canvas as unknown as TexImageSource)
+      : new THREE.CanvasTexture(canvas as unknown as HTMLCanvasElement);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+
+    const parentKey = tileKey(tile);
+    const meshData = buildFlatMesh(tile);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+    geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
+    geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+    geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+    const avgCenter = ((b0.centerElevation ?? 0) + (b1.centerElevation ?? 0) + (b2.centerElevation ?? 0) + (b3.centerElevation ?? 0)) / 4;
+    const minElev = Math.min(b0.minElevation ?? 0, b1.minElevation ?? 0, b2.minElevation ?? 0, b3.minElevation ?? 0);
+    const maxElev = Math.max(b0.maxElevation ?? 0, b1.maxElevation ?? 0, b2.maxElevation ?? 0, b3.maxElevation ?? 0);
+
+    const bytes = meshData.positions.byteLength + meshData.normals.byteLength + meshData.indices.byteLength + (512 * 512 * 4);
+
+    const parentBundle: Bundle = {
+      key: parentKey,
+      bytes,
+      geometry: geom,
+      texture,
+      centerElevation: avgCenter,
+      demSource: b0.demSource || "farfield",
+      minElevation: minElev,
+      maxElevation: maxElev,
+    };
+
+    this.bundleCache.put(parentBundle, this.activeKeys);
+    return parentBundle;
   }
 
   /**

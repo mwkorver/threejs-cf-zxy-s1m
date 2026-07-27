@@ -125,6 +125,7 @@ tileManager.prefetchSamples = PREFETCH_SAMPLES;
 
 // 4. Create floating HUD overlay (styles in hud.css)
 const hud = document.createElement("div");
+hud.id = "hud";
 hud.className = "hud";
 
 /** A labelled slider. Every one pairs `ctrl-<id>` with a `val-<id>` readout. */
@@ -1052,6 +1053,28 @@ function frameLoop() {
   compassRose.style.transform = `rotate(${-bearingDeg}deg)`;
 }
 
+// 7. Expose test state hooks for Playwright & automated UI testing
+if (params.get("test") === "1" || import.meta.env.MODE === "test" || window.location.hostname === "localhost") {
+  window.__VIEWER_STATE__ = {
+    getCameraPos: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
+    getCameraRotation: () => ({ x: camera.rotation.x, y: camera.rotation.y, z: camera.rotation.z }),
+    setCameraPos: (x: number, y: number, z: number) => {
+      camera.position.set(x, y, z);
+    },
+    getTileCount: () => tileManager.getActiveKeys().size,
+    getSpeedKts: () => speedKnots,
+    getAltitudeFt: () => Math.round(camera.position.z),
+    isHudVisible: () => hud.style.display !== "none",
+    stepFrame: (dtMs = 16.6) => {
+      renderer.render(scene, camera);
+    },
+  };
+  window.__STEP_FRAME__ = (dtMs = 16.6) => {
+    renderer.render(scene, camera);
+  };
+}
+
 // Start visual frame loop
 frameLoop();
+
 
