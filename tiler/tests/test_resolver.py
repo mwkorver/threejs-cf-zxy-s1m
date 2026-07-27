@@ -106,7 +106,7 @@ def test_resolve_returns_empty_when_no_region_reaches_the_tile():
 
 def test_requester_pays_flag():
     assert CogAsset("s3://naip-analytic/x.tif", "naip-analytic", 0.6).requester_pays
-    assert not CogAsset("s3://njogis-imagery/x.tif", "njogis-imagery", 0.15).requester_pays
+    assert not CogAsset("s3://prd-tnm/x.tif", "prd-tnm", 10.0).requester_pays
     assert "naip-analytic" in REQUESTER_PAYS_BUCKETS
 
 

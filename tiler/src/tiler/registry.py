@@ -43,6 +43,9 @@ class Layer:
         return maxzoom_for_gsd(self.min_gsd)
 
 
+# NAIP only. State imagery collections (nj-imagery, in-imagery, kyfromabove)
+# live in deckgl-s3-cog-s1m's lake and were dropped here so this tiler reads a
+# single canonical index; see settings.lake_path.
 LAYERS: dict[str, Layer] = {
     # NAIP RGB visualization COGs (3-band uint8, JPEG, requester-pays), keyed to
     # the manifest-index collection=naip-visualization. Plan §5.2 says 60 cm-1 m,
@@ -50,6 +53,4 @@ LAYERS: dict[str, Layer] = {
     # maxzoom keys off that; older years resolve less detail. indexes=(1,2,3) =
     # the RGB bands.
     "naip-visualization": Layer("naip-visualization", "naip-visualization", min_gsd=0.3, indexes=(1, 2, 3)),
-    # NJ statewide, public, ~15 cm, 16-bit samples (registry display.domain).
-    "nj-imagery": Layer("nj-imagery", "nj-imagery", min_gsd=0.15, rescale=(0, 65535)),
 }

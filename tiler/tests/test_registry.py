@@ -18,5 +18,6 @@ def test_512_tiles_shift_maxzoom_down_one():
 def test_phase0_layers_present():
     assert LAYERS["naip-visualization"].maxzoom == 18  # 30 cm vintages (512-px basis)
     assert LAYERS["naip-visualization"].indexes == (1, 2, 3)  # RGB bands
-    assert LAYERS["nj-imagery"].maxzoom == 19
-    assert LAYERS["nj-imagery"].rescale == (0, 65535)  # 16-bit source
+    # NAIP is the only layer: the state imagery collections live in the source
+    # repo's lake, not the canonical NAIP index this tiler reads.
+    assert set(LAYERS) == {"naip-visualization"}

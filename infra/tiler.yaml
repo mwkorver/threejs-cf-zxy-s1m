@@ -17,9 +17,9 @@ Resources:
       PackageType: Image
       Architectures: [arm64] # Graviton: cheaper, builds native on arm64 Macs
       # warp + WebP encode are CPU-bound, and Lambda scales vCPU with memory
-      # (1 vCPU at 1769 MB), so 3072 MB buys ~1.7 vCPU. Only pays off with
+      # (1 vCPU at 1769 MB), so 3008 MB buys ~1.7 vCPU. Only pays off with
       # GDAL_NUM_THREADS below; 2 full vCPU would need ~3538 MB.
-      MemorySize: 3072
+      MemorySize: 3008
       Timeout: 60 # headroom for cold start + basemap child retries
       # Guarantees the tiler a floor of 100 concurrent slots (blunts fast-low-
       # pass spikes, plan §8) and caps it at 100 — a cost ceiling against a
@@ -30,7 +30,7 @@ Resources:
         AuthType: AWS_IAM # CloudFront OAC signs origin requests
       Environment:
         Variables:
-          TILER_LAKE_PATH: "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index"
+          TILER_LAKE_PATH: "s3://naip-geoparquet-index/manifest-index"
           TILER_S1M_INDEX_PATH: "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index/s1m/S1M_Products.parquet"
           # GDAL tuning for COG-over-S3 reads. Names verified against the GDAL
           # shipped in the image — an unrecognised key here is silently ignored,
@@ -57,12 +57,13 @@ Resources:
                 - "arn:aws:s3:::naip-visualization/*"    # NAIP RGB COGs (requester-pays)
                 - "arn:aws:s3:::prd-tnm/*"               # S1M terrain COGs
                 - "arn:aws:s3:::elevation-tiles-prod/*"  # far-field terrain
-                - "arn:aws:s3:::njogis-imagery/*"        # NJ state imagery
                 - "arn:aws:s3:::deckgl-cf-xyz-s1m-us-west-2/*"  # own lake (manifest-index)
+                - "arn:aws:s3:::naip-geoparquet-index/*"        # canonical NAIP lake index
             - Effect: Allow
               Action: ["s3:ListBucket"]
               Resource:
                 - "arn:aws:s3:::deckgl-cf-xyz-s1m-us-west-2"
+                - "arn:aws:s3:::naip-geoparquet-index"
 
 Outputs:
   FunctionUrl:

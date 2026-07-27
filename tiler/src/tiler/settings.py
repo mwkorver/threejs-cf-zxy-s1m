@@ -6,20 +6,24 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     model_config = {"env_prefix": "TILER_"}
 
-    # GeoParquet lake = mosaic index (plan §2 row 5, §7). Consolidated lake in
-    # this project's own bucket (Hive tree: collection=/region=/year=); NAIP is
-    # collection=naip-visualization pointing at the RGB visualization COGs.
-    # Point at a local copy for offline dev.
+    # GeoParquet lake = mosaic index (plan §2 row 5, §7). Hive tree:
+    # collection=/region=/year=. This is the canonical NAIP index, shared with
+    # deckgl-s3-cog-s1m rather than owned by either repo: this tiler reads
+    # collection=naip-visualization (RGB, plan §2 row 5a), while the analytic
+    # RGBIR collection alongside it belongs to that project. Requester-pays,
+    # which duck.py already sets. Point at a local copy for offline dev.
+    lake_path: str = "s3://naip-geoparquet-index/manifest-index"
+
+    # S1M DEM tile lookup (plan §4.2); built by the source repo's
+    # publish-s1m-index.sh. Geometry/bbox are EPSG:6350 Albers.
     #
     # NOTE: the "deckgl-cf-xyz-s1m" bucket name predates the repo rename to
     # threejs-cf-zxy-s1m. S3 buckets can't be renamed in place, so this is
     # deliberate, not a missed rename — don't "fix" it without migrating the
     # bucket (and infra/tiler.yaml's env vars + IAM ARNs, infra/edge.yaml's
-    # StaticBucketName) alongside it.
-    lake_path: str = "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index"
-
-    # S1M DEM tile lookup (plan §4.2); built by the source repo's
-    # publish-s1m-index.sh. Geometry/bbox are EPSG:6350 Albers.
+    # StaticBucketName) alongside it. The imagery lake has since moved to its
+    # own canonical bucket above; this DEM index and the static footprints
+    # still live here.
     s1m_index_path: str = "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index/s1m/S1M_Products.parquet"
 
     # Far-field terrain source, Terrarium 256px (plan §2 row 7, §4.2).
