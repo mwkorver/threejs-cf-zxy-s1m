@@ -765,9 +765,11 @@ export class TileManager {
     const b2 = this.bundleCache.get(k2);
     const b3 = this.bundleCache.get(k3);
 
-    const children = [b0, b1, b2, b3];
-    const availableChildren = children.filter((b) => b && b.texture);
-    if (availableChildren.length === 0) return undefined;
+    // Require ALL 4 children to be resident in bundleCache to synthesize locally (0 network requests).
+    // If any child is missing, return undefined so TileManager fetches the single parent tile from
+    // the server (1 request) rather than fetching missing child tiles (which would be 3x network requests).
+    if (!b0 || !b1 || !b2 || !b3) return undefined;
+    if (!b0.texture || !b1.texture || !b2.texture || !b3.texture) return undefined;
 
     if (typeof OffscreenCanvas === "undefined") return undefined;
     const canvas = new OffscreenCanvas(512, 512);
@@ -845,11 +847,10 @@ export class TileManager {
     geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
     geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
 
-    const validChildren = children.filter((b): b is Bundle => b !== undefined);
-    const avgCenter = validChildren.reduce((sum, b) => sum + (b.centerElevation ?? 0), 0) / (validChildren.length || 1);
-    const minElev = Math.min(...validChildren.map((b) => b.minElevation ?? 0));
-    const maxElev = Math.max(...validChildren.map((b) => b.maxElevation ?? 0));
-    const demSource = validChildren[0]?.demSource || "farfield";
+    const avgCenter = ((b0.centerElevation ?? 0) + (b1.centerElevation ?? 0) + (b2.centerElevation ?? 0) + (b3.centerElevation ?? 0)) / 4;
+    const minElev = Math.min(b0.minElevation ?? 0, b1.minElevation ?? 0, b2.minElevation ?? 0, b3.minElevation ?? 0);
+    const maxElev = Math.max(b0.maxElevation ?? 0, b1.maxElevation ?? 0, b2.maxElevation ?? 0, b3.maxElevation ?? 0);
+    const demSource = b0.demSource || "farfield";
 
     const bytes = meshData.positions.byteLength + meshData.normals.byteLength + meshData.indices.byteLength + (512 * 512 * 4);
 
