@@ -830,8 +830,8 @@ export class TileManager {
       }
     }
 
-    // Collect deeper LOD child tiles around center tile up to maxZoom
-    const maxZ = Math.min(this.maxZoom, targetBaseZoom + 3);
+    // Collect immediate LOD child tiles around center tile capped at targetBaseZoom + 1
+    const maxZ = Math.min(this.maxZoom, targetBaseZoom + 1);
     const collectChildren = (t: TileId) => {
       if (t.z >= maxZ) return;
       const cX = t.x * 2;
