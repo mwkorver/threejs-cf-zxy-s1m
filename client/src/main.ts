@@ -65,13 +65,13 @@ scene.fog = new THREE.FogExp2(fogColor.getHex(), baseFogDensity);
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 10000000);
 camera.up.set(0, 0, 1); // Z-up world
 
-// Estimate initial ground elevation for starting location in Mercator Z units
-// (Wyoming ~3645m, NJ ~50m) so camera starts above ground with proper pitch
+// Position camera comfortably high above terrain (Wyoming mountains up to ~4200m MSL)
+// so startup view clears high mountain ridges with a clear vista over the scene.
 const startMercScale = 1 / Math.cos((startLat * Math.PI) / 180);
-const estGroundZ = (startLat > 42 && startLon < -100) ? 2630 * startMercScale : 50 * startMercScale;
-const initialHeight = estGroundZ + 1500;
-camera.position.set(0, -6000, initialHeight);
-camera.lookAt(new THREE.Vector3(0, 0, estGroundZ + 200));
+const estGroundZ = (startLat > 42 && startLon < -100) ? 3200 * startMercScale : 50 * startMercScale;
+const initialHeight = estGroundZ + 4500;
+camera.position.set(0, -5000, initialHeight);
+camera.lookAt(new THREE.Vector3(0, 0, estGroundZ + 500));
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
