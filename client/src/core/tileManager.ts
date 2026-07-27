@@ -643,7 +643,24 @@ export class TileManager {
     node.loading = true;
     const key = node.key;
 
-    // Check if the bundle exists in cache or can be synthesized locally from 4 loaded children
+    // 1. Check if an exact loaded match exists in transitionNodes
+    const transNode = this.transitionNodes.get(key);
+    if (transNode && transNode.loaded && transNode.mesh) {
+      const mat = transNode.mesh.material as THREE.ShaderMaterial;
+      const tex = mat?.uniforms?.map?.value as THREE.Texture;
+      if (tex) {
+        node.centerElevation = transNode.centerElevation;
+        node.demSource = transNode.demSource;
+        node.minElevation = transNode.minElevation;
+        node.maxElevation = transNode.maxElevation;
+        this.createMeshFromBundle(node, transNode.mesh.geometry, tex);
+        node.loaded = true;
+        node.loading = false;
+        return;
+      }
+    }
+
+    // 2. Check if the bundle exists in cache or can be synthesized locally from 4 loaded children
     let cached = this.bundleCache.get(key);
     if (!cached) {
       cached = this.synthesizeParentBundle(node.tile);
