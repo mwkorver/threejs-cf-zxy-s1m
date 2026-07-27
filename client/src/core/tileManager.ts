@@ -786,6 +786,35 @@ export class TileManager {
     ctx.drawImage(img2, 0, 256, 256, 256);
     ctx.drawImage(img3, 256, 256, 256, 256);
 
+    // Bake label for synthesized tiles: use "S" (lime green) instead of N or U
+    if (this.showLabels || this.showSourceLabels) {
+      const brand = this.showSourceLabels ? { ch: "S", color: "#00ff66" } : null;
+      const coords = this.showLabels ? `${tile.z}/${tile.x}/${tile.y}` : "";
+      const head = coords + (coords && brand ? " - " : "");
+      const tail = brand ? brand.ch : "";
+      const margin = 14;
+      let font = 100;
+      ctx.font = `bold ${font}px monospace`;
+      const fullW = () => ctx.measureText(head + tail).width;
+      const avail = canvas.width - 2 * margin;
+      if (fullW() > avail) {
+        font = Math.max(32, Math.floor((font * avail) / fullW()));
+        ctx.font = `bold ${font}px monospace`;
+      }
+      ctx.lineWidth = Math.max(4, Math.round(font * 0.08));
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+      ctx.textAlign = "left";
+      let x = canvas.width - margin - fullW();
+      const y = canvas.height - margin;
+      for (const [text, color] of [[head, "#ffffff"], [tail, brand?.color ?? "#ffffff"]] as const) {
+        if (!text) continue;
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+        x += ctx.measureText(text).width;
+      }
+    }
+
     const texture = this.texturePool
       ? this.texturePool.acquire(canvas as unknown as TexImageSource)
       : new THREE.CanvasTexture(canvas as unknown as HTMLCanvasElement);
