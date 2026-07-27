@@ -1405,29 +1405,31 @@ export class TileManager {
 
   /** Change dynamic imagery base layer source and force refresh active tiles. */
   setImagerySource(source: "satellite" | "osm"): void {
+    if (this.imagerySource === source) return;
     this.imagerySource = source;
-    // Clear cache to discard current tile textures
-    this.bundleCache.clear();
 
-    // Cancel in-flight worker tasks: requestTile de-dupes by tile key alone,
+    // 1. Cancel in-flight worker tasks: requestTile de-dupes by tile key alone,
     // so without this a re-request would chain onto a task started with the
     // OLD imagery source and cache its texture under the new source.
     this.workerPool.clear();
 
-    // Force reload all nodes in the tree
-    const resetNode = (node: TileNode) => {
-      node.loaded = false;
-      node.loading = false;
-      node.retryAfter = undefined;
-      if (node.children) {
-        for (const child of node.children) {
-          resetNode(child);
-        }
-      }
-    };
-    for (const node of this.rootNodes.values()) {
-      resetNode(node);
+    // 2. Clear transitionNodes and remove their meshes from the scene so old
+    // imagery tiles don't remain rendered alongside new ones during transition.
+    for (const node of this.transitionNodes.values()) {
+      this.pruneNode(node);
     }
+    this.transitionNodes.clear();
+
+    // 3. Clear bundle cache and dispose idle textures in pool to prevent reusing
+    // textures containing previous imagery source data.
+    this.bundleCache.clear();
+    this.texturePool?.dispose();
+
+    // 4. Fully prune and reset all root nodes
+    for (const node of this.rootNodes.values()) {
+      this.pruneNode(node);
+    }
+    this.activeKeys.clear();
   }
 
   private countLoadedNodes(): number {

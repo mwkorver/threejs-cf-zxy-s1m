@@ -70,18 +70,21 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
     numbers this module computes itself.
     """
     sql = f"""
-        select asset_href, source_bucket, gsd
+        select COALESCE(JSON_EXTRACT_STRING(assets, '$.data.href'), JSON_EXTRACT_STRING(assets, '$.visual.href')) as asset_href,
+               regexp_extract(COALESCE(JSON_EXTRACT_STRING(assets, '$.data.href'), JSON_EXTRACT_STRING(assets, '$.visual.href')), 's3://([^/]+)', 1) as source_bucket,
+               CAST(JSON_EXTRACT(properties, '$.gsd') AS DOUBLE) as gsd
         from read_parquet(?, hive_partitioning=true)
-        where bbox_xmin <= {east} and bbox_xmax >= {west}
-          and bbox_ymin <= {north} and bbox_ymax >= {south}
+        where bbox[1] <= {east} and bbox[3] >= {west}
+          and bbox[2] <= {north} and bbox[4] >= {south}
           and ST_Intersects(geometry, ST_MakeEnvelope({west}, {south}, {east}, {north}))
+          and COALESCE(JSON_EXTRACT_STRING(assets, '$.data.href'), JSON_EXTRACT_STRING(assets, '$.visual.href')) LIKE 's3://naip-visualization/%'
           and (region, year) in (
               select region, max(year)
               from read_parquet(?, hive_partitioning=true)
               where year <= {requested_year}
               group by region
           )
-        order by year desc, gsd asc nulls last, source_key asc
+        order by year desc, gsd asc nulls last, id asc
         limit {MAX_ASSETS_PER_TILE}
     """
     # One binding per read_parquet(?), in the order they appear.
@@ -119,8 +122,8 @@ class MosaicResolver:
         glob = f"{self.lake_root.rstrip('/')}/collection={collection}/region=*/year=*/*.parquet"
         sql = """
             select region,
-                   min(bbox_xmin), min(bbox_ymin),
-                   max(bbox_xmax), max(bbox_ymax)
+                   min(bbox[1]), min(bbox[2]),
+                   max(bbox[3]), max(bbox[4])
             from read_parquet(?, hive_partitioning=true)
             group by region
         """

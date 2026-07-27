@@ -39,9 +39,9 @@ const PREFETCH_LOOKAHEAD = Number(params.get("lookahead") ?? 4);
 const PREFETCH_SAMPLES = Number(params.get("samples") ?? 4);
 
 
-// NJ flight corridor center
-const startLon = -74.44;
-const startLat = 40.5;
+// Wyoming S1M tile group center (-109.5750, 43.7584)
+const startLon = Number(params.get("lon") ?? -109.5750);
+const startLat = Number(params.get("lat") ?? 43.7584);
 const worldAnchor = lonLatToMercator(startLon, startLat);
 
 // 2. Setup Three.js scene, camera, lights, and renderer
@@ -65,10 +65,13 @@ scene.fog = new THREE.FogExp2(fogColor.getHex(), baseFogDensity);
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 10000000);
 camera.up.set(0, 0, 1); // Z-up world
 
-// Position camera initially relative to NJ worldAnchor (1500m altitude, offset south)
-const initialHeight = 1500;
+// Estimate initial ground elevation for starting location in Mercator Z units
+// (Wyoming ~3645m, NJ ~50m) so camera starts above ground with proper pitch
+const startMercScale = 1 / Math.cos((startLat * Math.PI) / 180);
+const estGroundZ = (startLat > 42 && startLon < -100) ? 2630 * startMercScale : 50 * startMercScale;
+const initialHeight = estGroundZ + 1500;
 camera.position.set(0, -6000, initialHeight);
-camera.lookAt(new THREE.Vector3(0, 0, 200));
+camera.lookAt(new THREE.Vector3(0, 0, estGroundZ + 200));
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -835,7 +838,13 @@ window.addEventListener("wheel", (e) => {
   // of collapsing to a single notch — street level to CONUS in a few flicks.
   const factor = Math.exp(THREE.MathUtils.clamp(e.deltaY, -400, 400) * 0.0018);
 
-  const target = pickGround(e.clientX, e.clientY);
+  const groundZ = tileManager.groundZAt(
+    camera.position.x + worldAnchor[0],
+    camera.position.y + worldAnchor[1]
+  ) ?? 0;
+
+  // Try mesh raycast first; if miss (or before tiles load), fall back to plane at groundZ.
+  const target = pickGround(e.clientX, e.clientY) ?? rayToPlane(e.clientX, e.clientY, groundZ);
   if (target) {
     const off = tmpV.copy(camera.position).sub(target).multiplyScalar(factor);
     const dist = off.length();
@@ -847,16 +856,17 @@ window.addEventListener("wheel", (e) => {
     camera.position.addScaledVector(fwd, -step);
   }
 
-  // Follow-DEM rewrites camera Z every frame, so without this the zoom's
-  // vertical component is undone before it is ever drawn: the camera slides
-  // horizontally toward the cursor but never gets closer to the ground. Carry
-  // the new clearance into the hold target instead.
+  // Follow-DEM rewrites camera Z every frame, so carry the new clearance into
+  // the hold target. If zooming out past the slider's max AGL, disengage
+  // Follow-DEM so high-altitude flight isn't rubber-banded back down.
   if (ctrlFollowDem.checked) {
-    const groundZ = tileManager.groundZAt(
-      camera.position.x + worldAnchor[0],
-      camera.position.y + worldAnchor[1]
-    );
-    if (groundZ !== null) setAglTarget(camera.position.z - groundZ);
+    const newAgl = camera.position.z - groundZ;
+    const maxAgl = parseFloat(ctrlAglAlt.max);
+    if (newAgl > maxAgl) {
+      ctrlFollowDem.checked = false;
+    } else {
+      setAglTarget(newAgl);
+    }
   }
 }, { passive: false });
 

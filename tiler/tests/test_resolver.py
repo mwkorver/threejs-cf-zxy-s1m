@@ -30,8 +30,8 @@ def test_query_has_prune_and_refine():
     assert params == [paths, paths]
     assert "s3://b/lake" not in sql
     # cheap bbox-column prune against row-group stats...
-    assert "bbox_xmin <= -74.4" in sql and "bbox_xmax >= -74.5" in sql
-    assert "bbox_ymin <= 40.5" in sql and "bbox_ymax >= 40.4" in sql
+    assert "bbox[1] <= -74.4" in sql and "bbox[3] >= -74.5" in sql
+    assert "bbox[2] <= 40.5" in sql and "bbox[4] >= 40.4" in sql
     # ...then exact footprint refine
     assert "ST_Intersects(geometry, ST_MakeEnvelope(-74.5, 40.4, -74.4, 40.5))" in sql
     # latest year first, then finest source
@@ -77,7 +77,7 @@ def test_region_extents_read_from_index_and_cached():
     assert second is first          # cached for the life of the container
     assert len(calls) == 1          # warm invocations pay nothing
     # min/max over the bbox columns, grouped by the hive partition
-    assert "min(bbox_xmin)" in calls[0] and "max(bbox_ymax)" in calls[0]
+    assert "min(bbox[1])" in calls[0] and "max(bbox[4])" in calls[0]
     assert "group by region" in calls[0] and "hive_partitioning=true" in calls[0]
 
 

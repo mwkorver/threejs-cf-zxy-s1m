@@ -144,9 +144,14 @@ ctx.onmessage = async (e: MessageEvent) => {
         if (err instanceof DOMException && err.name === "AbortError") {
           throw err;
         }
-        // Imagery loading failure is non-fatal; the tile renders with fallbackColor
-        console.warn(`Imagery failed to load for tile ${tile.z}/${tile.x}/${tile.y}:`, err);
-        return null;
+        const is404 = err instanceof Error && err.message.includes("404");
+        if (is404) {
+          console.warn(`No imagery coverage for tile ${tile.z}/${tile.x}/${tile.y} (404)`);
+          return null;
+        }
+        // Transient error (5xx, network glitch, timeout): rethrow so TileManager
+        // retries instead of permanently marking the tile loaded with a fallback hole.
+        throw err;
       }
     })();
 

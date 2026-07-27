@@ -19,8 +19,7 @@ USGS 3DEP S1M 1-meter terrain, normalized server-side onto a single EPSG:3857
 > [!IMPORTANT]
 > **Read [FLIGHT-SIM-PLAN.md](FLIGHT-SIM-PLAN.md) first** — it holds the
 > architecture, the locked decisions, and the phased plan. This repo is the
-> Phase 0/1 build: fly a camera over one corridor (New Jersey, NAIP) with
-> server tiles end-to-end.
+> Phase 0/1 build: fly a camera over S1M high-resolution 1-meter terrain (centered on the Wyoming S1M tile group) with server tiles end-to-end.
 
 ## Why this repository exists
 

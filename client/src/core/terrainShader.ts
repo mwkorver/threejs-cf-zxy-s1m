@@ -97,8 +97,14 @@ export const TerrainShader = {
         }
         baseColor = vec4(col, 1.0);
       } else {
-        // Satellite / normal imagery
-        baseColor = useTexture ? texture2D(map, vUv) : vec4(fallbackColor, 1.0);
+        // Satellite / normal imagery: sample texture if present; if 404/absent,
+        // render smooth elevation-tinted terrain color so holes blend seamlessly.
+        if (useTexture) {
+          baseColor = texture2D(map, vUv);
+        } else {
+          vec3 hypCol = getHypsometricColor(vElevation / max(uZScale, 0.0001));
+          baseColor = vec4(hypCol, 1.0);
+        }
       }
       
       // Perform dot product with unexaggerated normal and sun direction

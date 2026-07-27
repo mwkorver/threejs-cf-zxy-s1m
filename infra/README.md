@@ -1,7 +1,7 @@
 # Infrastructure (plan [§3](../FLIGHT-SIM-PLAN.md#3-architecture), [§7](../FLIGHT-SIM-PLAN.md#7-reuse-from-deckgl-s3-cog-s1m))
 
 Deploy shape reused from `deckgl-s3-cog-s1m`: **foundation → tiler → static
-assets**, all in **us-west-2** (same region as `naip-analytic`, `prd-tnm`
+assets**, all in **us-west-2** (same region as `naip-visualization`, `prd-tnm`
 etc., so requester-pays reads are same-region GET pennies — plan [§2 row 10](../FLIGHT-SIM-PLAN.md#2-locked-decisions)).
 
 | Stack | Contents | Status |
