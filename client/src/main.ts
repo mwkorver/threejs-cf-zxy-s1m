@@ -536,11 +536,14 @@ function flyTo(targetGround: THREE.Vector3): void {
   // the camera climbs then descends, mirroring pTolemy3D's cruise_alt.
   const cruiseAlt = Math.max(start.z, targetGround.z) + Math.min(dist * 0.15, 5000);
 
-  // End orientation: look straight down at the target from the arrival altitude.
+  // End orientation: position camera 3000m south of target looking North, top of screen aligned North (+Y).
   const endQuat = new THREE.Quaternion();
   const lookFrom = targetGround.clone();
+  lookFrom.y -= 3000; // offset south so view aims North
   lookFrom.z = targetGround.z + 1500; // arrive 1500m above the clicked point
-  const m = new THREE.Matrix4().lookAt(lookFrom, targetGround, new THREE.Vector3(0, 0, 1));
+  const lookTarget = targetGround.clone();
+  lookTarget.z += 300;
+  const m = new THREE.Matrix4().lookAt(lookFrom, lookTarget, new THREE.Vector3(0, 0, 1));
   endQuat.setFromRotationMatrix(m);
 
   flyToState = {
