@@ -1162,9 +1162,12 @@ export class TileManager {
 
   private isNodeVisible(node: TileNode, frustum?: THREE.Frustum): boolean {
     if (this.cullTiles && frustum) {
+      const zScale = mercatorScale(mercatorToLonLat(node.centerMercator[0], node.centerMercator[1])[1]);
+      const tileMinZ = this.exagZ(-1000) * zScale;
+      const tileMaxZ = this.exagZ(9000) * zScale;
       const bbox = new THREE.Box3(
-        new THREE.Vector3(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], -1000),
-        new THREE.Vector3(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], 9000),
+        new THREE.Vector3(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ),
+        new THREE.Vector3(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ),
       );
       return frustum.intersectsBox(bbox);
     }
