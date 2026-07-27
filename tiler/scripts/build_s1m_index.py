@@ -188,7 +188,7 @@ def main() -> None:
         "bbox_xmin DOUBLE, bbox_xmax DOUBLE, bbox_ymin DOUBLE, bbox_ymax DOUBLE)"
     )
     con.executemany("INSERT INTO t VALUES (?,?,?,?,?,?,?)", rows)
-    con.execute(f"COPY t TO '{out}' (FORMAT PARQUET)")
+    con.execute(f"COPY t TO '{out}' (FORMAT PARQUET, ROW_GROUP_SIZE 2000)")
     print(f"wrote {out} ({Path(out).stat().st_size / 1e3:.0f} KB)")
 
     if args.upload:
