@@ -536,7 +536,7 @@ function flyTo(targetGround: THREE.Vector3): void {
   // End orientation: look straight down at the target from the arrival altitude.
   const endQuat = new THREE.Quaternion();
   const lookFrom = targetGround.clone();
-  lookFrom.z = targetGround.z + 1000; // arrive 1000m above the clicked point
+  lookFrom.z = targetGround.z + 1500; // arrive 1500m above the clicked point
   const m = new THREE.Matrix4().lookAt(lookFrom, targetGround, new THREE.Vector3(0, 0, 1));
   endQuat.setFromRotationMatrix(m);
 
