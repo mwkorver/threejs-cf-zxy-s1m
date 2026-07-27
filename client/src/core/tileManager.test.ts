@@ -961,6 +961,23 @@ describe("TileManager prefetchAhead", () => {
       expect(priority as number).toBeLessThanOrEqual(-1e7);
     }
   });
+
+  it("prefetchTargetGround dispatches destination tiles with top priority (1e8)", () => {
+    const tm = makeManager({ maxZoom: 14 });
+    const pool = (tm as any).workerPool;
+    const requestSpy = vi
+      .spyOn(pool, "requestTile")
+      .mockReturnValue(new Promise(() => {}));
+
+    const targetGround = new THREE.Vector3(1000, 2000, 500);
+    tm.prefetchTargetGround(targetGround, 1500);
+
+    expect(requestSpy).toHaveBeenCalled();
+    const calls = requestSpy.mock.calls as any[][];
+    for (const [, priority] of calls) {
+      expect(priority as number).toBe(1e8);
+    }
+  });
 });
 
 

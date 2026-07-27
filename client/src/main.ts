@@ -525,6 +525,9 @@ function smoothstep(t: number): number {
  * look at the target, then descends. Duration scales with distance.
  */
 function flyTo(targetGround: THREE.Vector3): void {
+  // Pre-warm destination tiles at top-of-queue priority before camera starts moving
+  tileManager.prefetchTargetGround(targetGround, 1500);
+
   const start = camera.position.clone();
   const dist = start.distanceTo(targetGround);
   // Duration scales with distance: ~2s for 1km, ~6s for 100km, capped.

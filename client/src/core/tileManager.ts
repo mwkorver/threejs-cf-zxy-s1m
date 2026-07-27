@@ -798,6 +798,82 @@ export class TileManager {
     }
   }
 
+  /**
+   * High-priority FlyTo prefetch: calculate all destination tiles needed at the arrival
+   * ground point and dispatch them to the top of the worker queue before the flight starts.
+   */
+  prefetchTargetGround(targetGround: THREE.Vector3, arrivalAltAgl: number = 1500): void {
+    const cx = targetGround.x + this.worldAnchor[0];
+    const cy = targetGround.y + this.worldAnchor[1];
+    const arrivalAltitude = targetGround.z + arrivalAltAgl;
+
+    let targetBaseZoom = 11;
+    if (arrivalAltitude > 40000) targetBaseZoom = 8;
+    else if (arrivalAltitude > 20000) targetBaseZoom = 9;
+    else if (arrivalAltitude > 10000) targetBaseZoom = 10;
+    else if (arrivalAltitude > 5000) targetBaseZoom = 11;
+    else targetBaseZoom = 12;
+
+    const centerTile = mercatorToTile(cx, cy, targetBaseZoom);
+    const maxTiles = 2 ** targetBaseZoom;
+
+    const targetTiles: TileId[] = [];
+
+    // Collect 3x3 root grid at destination baseZoom
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const tx = centerTile.x + dx;
+        const ty = centerTile.y + dy;
+        if (tx >= 0 && tx < maxTiles && ty >= 0 && ty < maxTiles) {
+          targetTiles.push({ z: targetBaseZoom, x: tx, y: ty });
+        }
+      }
+    }
+
+    // Collect deeper LOD child tiles around center tile up to maxZoom
+    const maxZ = Math.min(this.maxZoom, targetBaseZoom + 3);
+    const collectChildren = (t: TileId) => {
+      if (t.z >= maxZ) return;
+      const cX = t.x * 2;
+      const cY = t.y * 2;
+      for (let dx = 0; dx <= 1; dx++) {
+        for (let dy = 0; dy <= 1; dy++) {
+          const child: TileId = { z: t.z + 1, x: cX + dx, y: cY + dy };
+          targetTiles.push(child);
+          collectChildren(child);
+        }
+      }
+    };
+    collectChildren(centerTile);
+
+    const options = {
+      baseUrl: this.baseUrl,
+      layer: this.layer,
+      year: this.year,
+      imagerySource: this.imagerySource,
+      terrainMinZoom: this.terrainMinZoom,
+      gridStep: this.gridStep,
+      externalImageryMaxZoom: this.externalImageryMaxZoom,
+    };
+
+    // Priority = 1e8 (super high priority so it jumps to top of pending task queue)
+    for (const tile of targetTiles) {
+      const key = tileKey(tile);
+      if (this.bundleCache.get(key)) continue;
+
+      const capturedKey = key;
+      const capturedTile = { ...tile };
+      this.workerPool.requestTile(capturedTile, 1e8, options)
+        .then((res) => {
+          const bundle = this.buildBundleFromResult(capturedKey, capturedTile, res);
+          this.bundleCache.put(bundle, this.activeKeys);
+        })
+        .catch(() => {
+          // Non-fatal: LOD tree will retry if missing when camera arrives
+        });
+    }
+  }
+
   private buildViewportFootprintsMesh(
     footprints: FootprintCollection
   ): LineSegments2 | undefined {
