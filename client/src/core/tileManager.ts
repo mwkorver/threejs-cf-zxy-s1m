@@ -833,9 +833,12 @@ export class TileManager {
       }
     }
 
+    const imageBitmap = typeof canvas.transferToImageBitmap === "function"
+      ? canvas.transferToImageBitmap()
+      : (canvas as unknown as ImageBitmap);
     const texture = this.texturePool
-      ? this.texturePool.acquire(canvas as unknown as TexImageSource)
-      : new THREE.CanvasTexture(canvas as unknown as HTMLCanvasElement);
+      ? this.texturePool.acquire(imageBitmap as unknown as TexImageSource)
+      : new THREE.CanvasTexture(imageBitmap as unknown as HTMLCanvasElement);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 4;
 

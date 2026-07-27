@@ -1053,6 +1053,9 @@ describe("TileManager parent fallback retention and memory safety", () => {
           fillText: () => {},
         };
       }
+      transferToImageBitmap() {
+        return { width: 512, height: 512 };
+      }
     };
 
     try {
