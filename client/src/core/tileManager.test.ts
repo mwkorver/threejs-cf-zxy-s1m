@@ -1045,7 +1045,13 @@ describe("TileManager parent fallback retention and memory safety", () => {
       height: number;
       constructor(w: number, h: number) { this.width = w; this.height = h; }
       getContext() {
-        return { drawImage: () => {} };
+        return {
+          drawImage: () => {},
+          fillRect: () => {},
+          measureText: () => ({ width: 50 }),
+          strokeText: () => {},
+          fillText: () => {},
+        };
       }
     };
 

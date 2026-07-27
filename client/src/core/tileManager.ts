@@ -765,26 +765,42 @@ export class TileManager {
     const b2 = this.bundleCache.get(k2);
     const b3 = this.bundleCache.get(k3);
 
-    if (!b0 || !b1 || !b2 || !b3) return undefined;
-    if (!b0.texture || !b1.texture || !b2.texture || !b3.texture) return undefined;
+    const children = [b0, b1, b2, b3];
+    const availableChildren = children.filter((b) => b && b.texture);
+    if (availableChildren.length === 0) return undefined;
 
     if (typeof OffscreenCanvas === "undefined") return undefined;
     const canvas = new OffscreenCanvas(512, 512);
     const ctx = canvas.getContext("2d");
     if (!ctx) return undefined;
 
-    const img0 = b0.texture.image;
-    const img1 = b1.texture.image;
-    const img2 = b2.texture.image;
-    const img3 = b3.texture.image;
+    // Fill background with neutral tone as fallback for missing child quadrants
+    ctx.fillStyle = "#2d3436";
+    ctx.fillRect(0, 0, 512, 512);
 
-    if (!img0 || !img1 || !img2 || !img3) return undefined;
+    const isValidImage = (img: any) => {
+      if (!img) return false;
+      try {
+        return img.width > 0 && img.height > 0;
+      } catch {
+        return false;
+      }
+    };
 
-    // Draw 4 children in a 2x2 grid (NW, NE, SW, SE)
-    ctx.drawImage(img0, 0, 0, 256, 256);
-    ctx.drawImage(img1, 256, 0, 256, 256);
-    ctx.drawImage(img2, 0, 256, 256, 256);
-    ctx.drawImage(img3, 256, 256, 256, 256);
+    const drawQuadrant = (b: Bundle | undefined, dx: number, dy: number) => {
+      if (b && b.texture && isValidImage(b.texture.image)) {
+        try {
+          ctx.drawImage(b.texture.image as CanvasImageSource, dx, dy, 256, 256);
+        } catch {
+          // If ImageBitmap was detached or closed, ignore safely
+        }
+      }
+    };
+
+    drawQuadrant(b0, 0, 0);
+    drawQuadrant(b1, 256, 0);
+    drawQuadrant(b2, 0, 256);
+    drawQuadrant(b3, 256, 256);
 
     // Bake label for synthesized tiles: use "S" (lime green) instead of N or U
     if (this.showLabels || this.showSourceLabels) {
@@ -829,9 +845,11 @@ export class TileManager {
     geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
     geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
 
-    const avgCenter = ((b0.centerElevation ?? 0) + (b1.centerElevation ?? 0) + (b2.centerElevation ?? 0) + (b3.centerElevation ?? 0)) / 4;
-    const minElev = Math.min(b0.minElevation ?? 0, b1.minElevation ?? 0, b2.minElevation ?? 0, b3.minElevation ?? 0);
-    const maxElev = Math.max(b0.maxElevation ?? 0, b1.maxElevation ?? 0, b2.maxElevation ?? 0, b3.maxElevation ?? 0);
+    const validChildren = children.filter((b): b is Bundle => b !== undefined);
+    const avgCenter = validChildren.reduce((sum, b) => sum + (b.centerElevation ?? 0), 0) / (validChildren.length || 1);
+    const minElev = Math.min(...validChildren.map((b) => b.minElevation ?? 0));
+    const maxElev = Math.max(...validChildren.map((b) => b.maxElevation ?? 0));
+    const demSource = validChildren[0]?.demSource || "farfield";
 
     const bytes = meshData.positions.byteLength + meshData.normals.byteLength + meshData.indices.byteLength + (512 * 512 * 4);
 
@@ -841,7 +859,7 @@ export class TileManager {
       geometry: geom,
       texture,
       centerElevation: avgCenter,
-      demSource: b0.demSource || "farfield",
+      demSource,
       minElevation: minElev,
       maxElevation: maxElev,
     };
