@@ -263,8 +263,16 @@ export class TileManager {
     if (camera) {
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
       const tileW = EARTH_CIRCUMFERENCE / 2 ** this.baseZoom;
-      gx += fwd.x * 1.5 * tileW;
-      gy += fwd.y * 1.5 * tileW;
+      // Estimate forward ground intersection distance: when looking toward the ground (fwd.z < 0),
+      // ground distance is -h/fwd.z. Cap at 1.0 tileW so the grid stays centered around the actual
+      // view target and never evicts live tiles upon camera rotation.
+      let forwardDist = 1.0 * tileW;
+      if (fwd.z < -0.05) {
+        const distToGround = Math.max(0, -localCameraPos.z / fwd.z);
+        forwardDist = Math.min(1.0 * tileW, distToGround);
+      }
+      gx += fwd.x * forwardDist;
+      gy += fwd.y * forwardDist;
     }
     const centerTile = mercatorToTile(gx, gy, this.baseZoom);
 
