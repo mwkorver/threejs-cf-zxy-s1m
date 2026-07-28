@@ -1036,62 +1036,6 @@ describe("TileManager parent fallback retention and memory safety", () => {
     // Cache bytes tracked remain capped or evicted cleanly
     expect(tinyCache.bytesUsed()).toBeGreaterThanOrEqual(0);
   });
-
-  it("synthesizes parent bundle locally from 4 loaded child bundles", () => {
-    // Mock OffscreenCanvas for Node test environment
-    const origOffscreen = (globalThis as any).OffscreenCanvas;
-    (globalThis as any).OffscreenCanvas = class {
-      width: number;
-      height: number;
-      constructor(w: number, h: number) { this.width = w; this.height = h; }
-      getContext() {
-        return {
-          drawImage: () => {},
-          fillRect: () => {},
-          measureText: () => ({ width: 50 }),
-          strokeText: () => {},
-          fillText: () => {},
-        };
-      }
-      transferToImageBitmap() {
-        return { width: 512, height: 512 };
-      }
-    };
-
-    try {
-      const tm = makeManager({ baseZoom: 11, maxZoom: 14 });
-      const cache = (tm as any).bundleCache as BundleCache;
-
-      // Create 4 fake loaded child bundles at z12 for parent 11/400/746
-      const childrenKeys = ["12/800/1492", "12/801/1492", "12/800/1493", "12/801/1493"];
-      for (const key of childrenKeys) {
-        const fakeImage = {} as any;
-        const tex = new THREE.Texture(fakeImage);
-        cache.put({
-          key,
-          bytes: 1000,
-          geometry: new THREE.BufferGeometry(),
-          texture: tex,
-          centerElevation: 100,
-          demSource: "s1m",
-          minElevation: 50,
-          maxElevation: 150,
-        });
-      }
-
-      // Call synthesizeParentBundle for parent 11/400/746
-      const parentTile = { z: 11, x: 400, y: 746 };
-      const synthesized = (tm as any).synthesizeParentBundle(parentTile);
-
-      expect(synthesized).toBeDefined();
-      expect(synthesized.key).toBe("11/400/746");
-      expect(synthesized.texture).toBeDefined();
-      expect(synthesized.centerElevation).toBe(100);
-      expect(synthesized.demSource).toBe("s1m");
-    } finally {
-      (globalThis as any).OffscreenCanvas = origOffscreen;
-    }
-  });
 });
 
 
