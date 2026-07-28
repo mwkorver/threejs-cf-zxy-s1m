@@ -259,14 +259,12 @@ appDiv.appendChild(hud);
 // to the current heading; clicking it yaws the view back to north-up.
 const compass = document.createElement("div");
 compass.id = "compass";
-compass.title = "Face north (north-up)";
-compass.style.cssText =
-  "position:absolute; top:20px; right:20px; width:56px; height:56px; border-radius:50%;" +
-  "background:rgba(15,23,42,0.85); border:1px solid #475569; box-shadow:0 2px 8px rgba(0,0,0,0.4);" +
-  "cursor:pointer; display:flex; align-items:center; justify-content:center; user-select:none; z-index:10;";
+compass.className = "compass";
+compass.title = "Click to point North";
 compass.innerHTML = `
-  <div id="compass-rose" style="width:100%; height:100%;">
+  <div class="compass-dial" id="compass-rose">
     <svg viewBox="0 0 56 56" width="56" height="56">
+      <circle cx="28" cy="28" r="26" fill="rgba(15, 23, 42, 0.75)" stroke="rgba(148, 163, 184, 0.4)" stroke-width="1.5"></circle>
       <polygon points="28,7 22,29 34,29" fill="#ef4444"></polygon>
       <polygon points="28,49 22,29 34,29" fill="#cbd5e1"></polygon>
       <circle cx="28" cy="29" r="2.5" fill="#0f172a" stroke="#94a3b8" stroke-width="1"></circle>
@@ -288,6 +286,7 @@ compass.addEventListener("click", () => {
   camera.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(worldUp, bearing));
 });
 
+const hudFps = document.getElementById("hud-fps")!;
 const hudPos = document.getElementById("hud-pos")!;
 const hudAlt = document.getElementById("hud-alt")!;
 const hudSpeed = document.getElementById("hud-speed")!;
@@ -893,6 +892,8 @@ window.addEventListener("resize", () => {
 
 // 6. Running frame render and flight controller loop
 let lastFrameTime = performance.now();
+let fpsFrameCount = 0;
+let fpsLastTime = performance.now();
 
 function frameLoop() {
   requestAnimationFrame(frameLoop);
@@ -1029,6 +1030,15 @@ function frameLoop() {
   const globalX = camera.position.x + worldAnchor[0];
   const globalY = camera.position.y + worldAnchor[1];
   const [lon, lat] = mercatorToLonLat(globalX, globalY);
+
+  // Update FPS counter every 250ms for smooth 4Hz readout with 0 jank
+  fpsFrameCount++;
+  if (now - fpsLastTime >= 250) {
+    const fps = Math.round((fpsFrameCount * 1000) / (now - fpsLastTime));
+    hudFps.textContent = fps.toString();
+    fpsFrameCount = 0;
+    fpsLastTime = now;
+  }
 
   hudPos.textContent = `${lat.toFixed(5)} / ${lon.toFixed(5)}`;
   hudAlt.textContent = Math.round(camera.position.z).toString();
