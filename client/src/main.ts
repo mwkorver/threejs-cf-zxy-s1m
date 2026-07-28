@@ -147,6 +147,7 @@ const swatch = (color: string) => `<span class="hud-swatch" style="background:${
 
 hud.innerHTML = `
   <div class="hud-title">✈️ FLIGHT SIM DEMO</div>
+  <div class="hud-readout">FPS: <span id="hud-fps">60</span></div>
   <div class="hud-readout">LAT/LON: <span id="hud-pos">- / -</span></div>
   <div class="hud-readout">ALTITUDE: <span id="hud-alt">0</span> m</div>
   <div class="hud-readout">SPEED: <span id="hud-speed">0</span> kt</div>
