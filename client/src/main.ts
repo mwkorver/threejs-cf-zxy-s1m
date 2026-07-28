@@ -163,43 +163,6 @@ hud.innerHTML = `
   <div>TEX POOL: <span id="hud-texpool">0 new / 0 reused</span></div>
 
   <div class="hud-section">
-    <div class="hud-section-title">🌅 ATMOSPHERE &amp; LIGHTING</div>
-
-    <div class="hud-group">
-      <label class="hud-label" for="ctrl-imagery-source">IMAGERY SOURCE</label>
-      <select class="hud-select" id="ctrl-imagery-source">
-        <option value="satellite">NAIP Aerial (USDA)</option>
-        <option value="osm">OpenStreetMap Roads</option>
-      </select>
-    </div>
-
-    <div class="hud-group">
-      <label class="hud-label" for="ctrl-preset">PRESET MOOD</label>
-      <select class="hud-select" id="ctrl-preset">
-        <option value="midday">Bright Midday (Realism)</option>
-        <option value="golden">Golden Hour (Moody)</option>
-        <option value="overcast">Overcast (Soft)</option>
-        <option value="unlit">Unlit (Pure Photo)</option>
-        <option value="custom" disabled style="display: none;">Custom</option>
-      </select>
-    </div>
-
-    ${slider("hillshade", "HILLSHADE OPACITY", 'min="0" max="1" step="0.05" value="0.25"', "0.25")}
-    ${slider("brightness", "IMAGERY BRIGHTNESS", 'min="0.5" max="2.0" step="0.05" value="1.75"', "1.75")}
-    ${slider("contrast", "IMAGERY CONTRAST", 'min="0.5" max="2.0" step="0.05" value="1.10"', "1.10")}
-    ${slider("saturation", "IMAGERY SATURATION", 'min="0.5" max="2.0" step="0.05" value="1.15"', "1.15")}
-    ${slider("azimuth", "SUN AZIMUTH", 'min="0" max="360" step="5" value="225"', "225°")}
-    ${slider("altitude", "SUN ALTITUDE", 'min="5" max="90" step="5" value="55"', "55°")}
-    ${slider("fog", "FOG DENSITY", 'min="0" max="0.0003" step="0.00001" value="0"', "0.00000")}
-    ${slider("space-alt", "SPACE ALTITUDE", 'min="2" max="60" step="1" value="10"', "10 km")}
-    ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="2.0"', "2.0x")}
-
-    <div class="hud-group">
-      ${toggle('<input type="checkbox" class="hud-check" id="ctrl-follow-dem">', "FOLLOW TERRAIN (AGL hold)")}
-    </div>
-    ${slider("agl-alt", "AGL ALTITUDE", 'min="50" max="5000" step="50" value="1500"', "1500 m")}
-    ${slider("extimagery", "USDA IMAGERY &le; Z (else COG tiler)", 'min="0" max="18" step="1" value="13"', "13")}
-
     <div class="hud-group">
       ${toggle('<input type="checkbox" class="hud-check" id="ctrl-footprints">', "SHOW DEM FOOTPRINTS")}
       <div class="hud-legend">
@@ -239,6 +202,45 @@ hud.innerHTML = `
       </div>
       ${slider("hypblend", "TINT BLEND", 'min="0" max="1" step="0.05" value="0.5"', "50%")}
     </div>
+  </div>
+
+  <div class="hud-section">
+    <div class="hud-section-title">🌅 ATMOSPHERE &amp; LIGHTING</div>
+
+    <div class="hud-group">
+      <label class="hud-label" for="ctrl-imagery-source">IMAGERY SOURCE</label>
+      <select class="hud-select" id="ctrl-imagery-source">
+        <option value="satellite">NAIP Aerial (USDA)</option>
+        <option value="osm">OpenStreetMap Roads</option>
+      </select>
+    </div>
+
+    <div class="hud-group">
+      <label class="hud-label" for="ctrl-preset">PRESET MOOD</label>
+      <select class="hud-select" id="ctrl-preset">
+        <option value="midday">Bright Midday (Realism)</option>
+        <option value="golden">Golden Hour (Moody)</option>
+        <option value="overcast">Overcast (Soft)</option>
+        <option value="unlit">Unlit (Pure Photo)</option>
+        <option value="custom" disabled style="display: none;">Custom</option>
+      </select>
+    </div>
+
+    ${slider("hillshade", "HILLSHADE OPACITY", 'min="0" max="1" step="0.05" value="0.25"', "0.25")}
+    ${slider("brightness", "IMAGERY BRIGHTNESS", 'min="0.5" max="2.0" step="0.05" value="1.75"', "1.75")}
+    ${slider("contrast", "IMAGERY CONTRAST", 'min="0.5" max="2.0" step="0.05" value="1.10"', "1.10")}
+    ${slider("saturation", "IMAGERY SATURATION", 'min="0.5" max="2.0" step="0.05" value="1.15"', "1.15")}
+    ${slider("azimuth", "SUN AZIMUTH", 'min="0" max="360" step="5" value="225"', "225°")}
+    ${slider("altitude", "SUN ALTITUDE", 'min="5" max="90" step="5" value="55"', "55°")}
+    ${slider("fog", "FOG DENSITY", 'min="0" max="0.0003" step="0.00001" value="0"', "0.00000")}
+    ${slider("space-alt", "SPACE ALTITUDE", 'min="2" max="60" step="1" value="10"', "10 km")}
+    ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="2.0"', "2.0x")}
+
+    <div class="hud-group">
+      ${toggle('<input type="checkbox" class="hud-check" id="ctrl-follow-dem">', "FOLLOW TERRAIN (AGL hold)")}
+    </div>
+    ${slider("agl-alt", "AGL ALTITUDE", 'min="50" max="5000" step="50" value="1500"', "1500 m")}
+    ${slider("extimagery", "USDA IMAGERY &le; Z (else COG tiler)", 'min="0" max="18" step="1" value="13"', "13")}
   </div>
 
   <div class="hud-help">

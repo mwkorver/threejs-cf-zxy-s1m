@@ -26,5 +26,9 @@ client/public/tiles/
 # Working notes / review punch-list — local only, not part of the repo's docs.
 CLEANUP.md
 
+# Playwright test output
+client/playwright-report/
+client/test-results/
+
 # OS / editor
 .DS_Store

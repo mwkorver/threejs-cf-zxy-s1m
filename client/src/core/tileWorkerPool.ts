@@ -153,19 +153,19 @@ export class TileWorkerPool {
     minElevation: number,
     maxElevation: number,
     priority: number,
-    options: TileOptions & { showLabels?: boolean; showSourceLabels?: boolean }
-  ): Promise<TileResult> {
+    options: any
+  ): Promise<any> {
     const key = `synth_${this.getTileKey(tile)}`;
-    const requestId = this.nextRequestId++;
+    const requestId = `req_${this.nextRequestId++}`;
 
-    return new Promise<TileResult>((resolve, reject) => {
+    return new Promise<any>((resolve, reject) => {
       const worker = this.pickWorker() || this.workers[0];
       if (!worker) {
         reject(new Error("No worker available"));
         return;
       }
 
-      const task: WorkerTask = {
+      const task: PendingTask = {
         requestId,
         key,
         tile,
@@ -174,6 +174,7 @@ export class TileWorkerPool {
         worker,
         resolve,
         reject,
+        aborted: false,
       };
 
       this.runningTasks.set(key, task);
