@@ -86,10 +86,6 @@ const sun = new THREE.DirectionalLight(0xfff2e0, 0.6);
 sun.position.set(-1, -1, 1.4).normalize();
 scene.add(sun);
 
-// Starfield backdrop; fades in with altitude (see updateSky in the frame loop).
-const stars = createStarfield(2_000_000);
-scene.add(stars);
-
 // 3. Initialize caching and tile management
 // Allocate a 256MB VRAM cache budget for meshes & textures
 const cacheBudget = 256 * 1024 * 1024;
@@ -1011,11 +1007,11 @@ function frameLoop() {
   // Actual ground speed this frame (Mercator m/s -> knots).
   speedKnots = dt > 0 ? Math.round((camera.position.distanceTo(framePrevPos) / dt) * 1.94384) : 0;
 
-  // Sky/fog/stars grade with altitude (pTolemy3D's Sky.horizonAlt).
+  // Sky/fog grade with altitude (pTolemy3D's Sky.horizonAlt).
   updateSky(
     scene,
     camera,
-    stars,
+    undefined,
     groundSkyColor,
     baseFogDensity,
     parseInt(ctrlSpaceAlt.value) * 1000

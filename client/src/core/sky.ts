@@ -74,7 +74,7 @@ export function spaceFactor(altitude: number, spaceAltitude: number): number {
 export function updateSky(
   scene: THREE.Scene,
   camera: THREE.Camera,
-  stars: THREE.Points,
+  stars: THREE.Points | undefined,
   groundSky: THREE.Color,
   baseFogDensity: number,
   spaceAltitude: number
@@ -92,11 +92,12 @@ export function updateSky(
     scene.fog.density = baseFogDensity * (1 - factor);
   }
 
-  const material = stars.material as THREE.PointsMaterial;
-  material.opacity = factor;
-  material.visible = factor > 0.01;
-  // Keep the starfield centred on the viewer: it is a backdrop, not geometry.
-  stars.position.copy(camera.position);
+  if (stars) {
+    const material = stars.material as THREE.PointsMaterial;
+    material.opacity = 0;
+    material.visible = false;
+    stars.position.copy(camera.position);
+  }
 
   return factor;
 }
