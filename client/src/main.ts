@@ -201,7 +201,7 @@ hud.innerHTML = `
     <div class="hud-group">
       ${toggle('<input type="checkbox" class="hud-check" id="ctrl-follow-dem">', "FOLLOW TERRAIN (AGL hold)")}
     </div>
-    ${slider("agl-alt", "AGL ALTITUDE", 'min="50" max="5000" step="50" value="500"', "500 m")}
+    ${slider("agl-alt", "AGL ALTITUDE", 'min="50" max="5000" step="50" value="1500"', "1500 m")}
     ${slider("extimagery", "USDA IMAGERY &le; Z (else COG tiler)", 'min="0" max="18" step="1" value="13"', "13")}
 
     <div class="hud-group">
