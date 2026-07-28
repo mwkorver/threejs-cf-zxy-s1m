@@ -80,6 +80,106 @@ ctx.onmessage = async (e: MessageEvent) => {
   // and post a spurious ERROR for the aborted requestId.
   if (e.data.type === "ABORT") return;
 
+  if (e.data.type === "SYNTHESIZE_PARENT") {
+    const { requestId, tile, images, demSource, centerElevation, minElevation, maxElevation, options } = e.data;
+    try {
+      const canvas = new OffscreenCanvas(512, 512);
+      const cCtx = canvas.getContext("2d");
+      if (cCtx) {
+        cCtx.fillStyle = "#2d3436";
+        cCtx.fillRect(0, 0, 512, 512);
+
+        const drawQ = (img: ImageBitmap | null, dx: number, dy: number) => {
+          if (img && img.width > 0 && img.height > 0) {
+            try {
+              cCtx.drawImage(img, dx, dy, 256, 256);
+            } catch {
+              // ignore closed/detached bitmaps
+            }
+          }
+        };
+
+        if (images) {
+          drawQ(images[0], 0, 0);
+          drawQ(images[1], 256, 0);
+          drawQ(images[2], 0, 256);
+          drawQ(images[3], 256, 256);
+        }
+
+        // Bake "S" label for synthesized tiles
+        if (options && (options.showLabels || options.showSourceLabels)) {
+          const brand = options.showSourceLabels ? { ch: "S", color: "#00ff66" } : null;
+          const coords = options.showLabels ? `${tile.z}/${tile.x}/${tile.y}` : "";
+          const head = coords + (coords && brand ? " - " : "");
+          const tail = brand ? brand.ch : "";
+          const margin = 14;
+          let font = 100;
+          cCtx.font = `bold ${font}px monospace`;
+          const fullW = () => cCtx.measureText(head + tail).width;
+          const avail = canvas.width - 2 * margin;
+          if (fullW() > avail) {
+            font = Math.max(32, Math.floor((font * avail) / fullW()));
+            cCtx.font = `bold ${font}px monospace`;
+          }
+          cCtx.lineWidth = Math.max(4, Math.round(font * 0.08));
+          cCtx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+          cCtx.textAlign = "left";
+          let x = canvas.width - margin - fullW();
+          const y = canvas.height - margin;
+          for (const [text, color] of [[head, "#ffffff"], [tail, brand?.color ?? "#ffffff"]] as const) {
+            if (!text) continue;
+            cCtx.strokeText(text, x, y);
+            cCtx.fillStyle = color;
+            cCtx.fillText(text, x, y);
+            x += cCtx.measureText(text).width;
+          }
+        }
+      }
+
+      const imageBitmap = canvas.transferToImageBitmap();
+      const meshData = buildFlatMesh(tile);
+
+      const transferList: Transferable[] = [
+        meshData.positions.buffer,
+        meshData.uvs.buffer,
+        meshData.normals.buffer,
+        meshData.indices.buffer,
+        imageBitmap,
+      ];
+
+      ctx.postMessage(
+        {
+          type: "SUCCESS",
+          requestId,
+          tile,
+          demSource: demSource || "farfield",
+          centerElevation: centerElevation || 0,
+          meshData: {
+            positions: meshData.positions,
+            uvs: meshData.uvs,
+            normals: meshData.normals,
+            indices: meshData.indices,
+            anchor: meshData.anchor,
+            gridSize: meshData.gridSize,
+          },
+          imageBitmap,
+          minElevation: minElevation || 0,
+          maxElevation: maxElevation || 0,
+        },
+        transferList
+      );
+    } catch (err: any) {
+      ctx.postMessage({ type: "ERROR", requestId, tile, error: err?.message || String(err) });
+    } finally {
+      if (images) {
+        for (const img of images) {
+          if (img && typeof img.close === "function") img.close();
+        }
+      }
+    }
+    return;
+  }
+
   const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom } = e.data;
   
   const abortController = new AbortController();

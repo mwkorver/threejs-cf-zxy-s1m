@@ -142,6 +142,63 @@ export class TileWorkerPool {
     }
   }
 
+  /**
+   * Offload 4-child parent synthesis to a background Web Worker.
+   */
+  synthesizeParentTile(
+    tile: TileId,
+    images: ImageBitmap[],
+    demSource: string,
+    centerElevation: number,
+    minElevation: number,
+    maxElevation: number,
+    priority: number,
+    options: TileOptions & { showLabels?: boolean; showSourceLabels?: boolean }
+  ): Promise<TileResult> {
+    const key = `synth_${this.getTileKey(tile)}`;
+    const requestId = this.nextRequestId++;
+
+    return new Promise<TileResult>((resolve, reject) => {
+      const worker = this.pickWorker() || this.workers[0];
+      if (!worker) {
+        reject(new Error("No worker available"));
+        return;
+      }
+
+      const task: WorkerTask = {
+        requestId,
+        key,
+        tile,
+        priority,
+        options: options as any,
+        worker,
+        resolve,
+        reject,
+      };
+
+      this.runningTasks.set(key, task);
+      this.tasksByRequestId.set(requestId, task);
+      this.workerLoad.set(worker, (this.workerLoad.get(worker) ?? 0) + 1);
+
+      const transferList: Transferable[] = images.filter((img) => img instanceof ImageBitmap);
+
+      worker.postMessage(
+        {
+          type: "SYNTHESIZE_PARENT",
+          requestId,
+          tile,
+          images,
+          demSource,
+          centerElevation,
+          minElevation,
+          maxElevation,
+          options,
+        },
+        transferList
+      );
+    });
+  }
+
   /** Least-loaded worker with a free slot, or null if all are saturated. */
   private pickWorker(): Worker | null {
     let best: Worker | null = null;
