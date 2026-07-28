@@ -660,8 +660,11 @@ export class TileManager {
       }
     }
 
-    // 2. Check if the bundle exists in cache
-    const cached = this.bundleCache.get(key);
+    // 2. Check if the bundle exists in cache or can be synthesized locally from 4 loaded children
+    let cached = this.bundleCache.get(key);
+    if (!cached) {
+      cached = this.synthesizeParentBundle(node.tile);
+    }
     if (cached) {
       node.centerElevation = cached.centerElevation;
       node.demSource = cached.demSource;
@@ -673,39 +676,17 @@ export class TileManager {
       return;
     }
 
-    // 3. Try offloaded parent tile synthesis in background Web Worker
-    this.synthesizeParentBundleAsync(node.tile, priority).then((synthBundle) => {
-      if (synthBundle) {
-        if (!node.loading) {
-          if (synthBundle.texture?.image && typeof (synthBundle.texture.image as ImageBitmap).close === "function") {
-            (synthBundle.texture.image as ImageBitmap).close();
-          }
-          return;
-        }
-        node.centerElevation = synthBundle.centerElevation;
-        node.demSource = synthBundle.demSource;
-        node.minElevation = synthBundle.minElevation;
-        node.maxElevation = synthBundle.maxElevation;
-        this.bundleCache.put(synthBundle, this.activeKeys);
-        this.createMeshFromBundle(node, synthBundle.geometry, synthBundle.texture);
-        node.loaded = true;
-        node.loading = false;
-        node.retryAfter = undefined;
-        return;
-      }
+    const options = {
+      baseUrl: this.baseUrl,
+      layer: this.layer,
+      year: this.year,
+      imagerySource: this.imagerySource,
+      terrainMinZoom: this.terrainMinZoom,
+      gridStep: this.gridStep,
+      externalImageryMaxZoom: this.externalImageryMaxZoom,
+    };
 
-      // Fallback: request parent tile from server if worker synthesis is unavailable
-      const options = {
-        baseUrl: this.baseUrl,
-        layer: this.layer,
-        year: this.year,
-        imagerySource: this.imagerySource,
-        terrainMinZoom: this.terrainMinZoom,
-        gridStep: this.gridStep,
-        externalImageryMaxZoom: this.externalImageryMaxZoom,
-      };
-
-      this.workerPool.requestTile(node.tile, priority, options)
+    this.workerPool.requestTile(node.tile, priority, options)
         .then((res) => {
           if (!node.loading) {
             if (res.imageBitmap) res.imageBitmap.close();
@@ -732,7 +713,6 @@ export class TileManager {
           }
           console.warn(`Failed tile load ${node.key}:`, err);
         });
-    });
   }
 
   /**
@@ -838,11 +818,11 @@ export class TileManager {
   }
 
   /**
-   * Offloaded parent tile synthesis: resolves child tile textures, creates ImageBitmaps
-   * asynchronously without blocking main thread, and delegates 4-to-1 downsampling +
-   * label baking to a background Web Worker.
+   * Client-side parent tile synthesis: if a parent tile (z) is not in cache,
+   * but all 4 of its children (z+1) are loaded in memory or scene nodes, downsample
+   * the 4 children locally into a parent bundle in 0ms without hitting the server.
    */
-  private async synthesizeParentBundleAsync(tile: TileId, priority: number): Promise<Bundle | undefined> {
+  private synthesizeParentBundle(tile: TileId): Bundle | undefined {
     const childZ = tile.z + 1;
     const cX = tile.x * 2;
     const cY = tile.y * 2;
@@ -853,50 +833,96 @@ export class TileManager {
     const c3 = this.getChildTileData({ z: childZ, x: cX + 1, y: cY + 1 });
 
     if (!c0 || !c1 || !c2 || !c3) return undefined;
-    if (typeof createImageBitmap === "undefined") return undefined;
+    if (typeof OffscreenCanvas === "undefined") return undefined;
 
-    try {
-      // Create ImageBitmaps asynchronously (non-blocking) for Web Worker transfer
-      const [img0, img1, img2, img3] = await Promise.all([
-        createImageBitmap(c0.texture.image as CanvasImageSource),
-        createImageBitmap(c1.texture.image as CanvasImageSource),
-        createImageBitmap(c2.texture.image as CanvasImageSource),
-        createImageBitmap(c3.texture.image as CanvasImageSource),
-      ]);
+    const canvas = new OffscreenCanvas(512, 512);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
 
-      const avgCenter = ((c0.centerElevation ?? 0) + (c1.centerElevation ?? 0) + (c2.centerElevation ?? 0) + (c3.centerElevation ?? 0)) / 4;
-      const minElev = Math.min(c0.minElevation ?? 0, c1.minElevation ?? 0, c2.minElevation ?? 0, c3.minElevation ?? 0);
-      const maxElev = Math.max(c0.maxElevation ?? 0, c1.maxElevation ?? 0, c2.maxElevation ?? 0, c3.maxElevation ?? 0);
-      const demSource = c0.demSource || "farfield";
+    ctx.fillStyle = "#2d3436";
+    ctx.fillRect(0, 0, 512, 512);
 
-      const options = {
-        baseUrl: this.baseUrl,
-        layer: this.layer,
-        year: this.year,
-        imagerySource: this.imagerySource,
-        terrainMinZoom: this.terrainMinZoom,
-        gridStep: this.gridStep,
-        externalImageryMaxZoom: this.externalImageryMaxZoom,
-        showLabels: this.showLabels,
-        showSourceLabels: this.showSourceLabels,
-      };
+    const drawQuadrant = (c: { texture: THREE.Texture } | undefined, dx: number, dy: number) => {
+      if (c && c.texture && c.texture.image) {
+        try {
+          ctx.drawImage(c.texture.image as CanvasImageSource, dx, dy, 256, 256);
+        } catch {
+          // Ignore safely if unavailable
+        }
+      }
+    };
 
-      const res = await this.workerPool.synthesizeParentTile(
-        tile,
-        [img0, img1, img2, img3],
-        demSource,
-        avgCenter,
-        minElev,
-        maxElev,
-        priority,
-        options
-      );
+    drawQuadrant(c0, 0, 0);
+    drawQuadrant(c1, 256, 0);
+    drawQuadrant(c2, 0, 256);
+    drawQuadrant(c3, 256, 256);
 
-      const parentKey = tileKey(tile);
-      return this.buildBundleFromResult(parentKey, tile, res);
-    } catch {
-      return undefined;
+    // Bake label for synthesized tiles: use "S" (lime green) instead of N or U
+    if (this.showLabels || this.showSourceLabels) {
+      const brand = this.showSourceLabels ? { ch: "S", color: "#00ff66" } : null;
+      const coords = this.showLabels ? `${tile.z}/${tile.x}/${tile.y}` : "";
+      const head = coords + (coords && brand ? " - " : "");
+      const tail = brand ? brand.ch : "";
+      const margin = 14;
+      let font = 100;
+      ctx.font = `bold ${font}px monospace`;
+      const fullW = () => ctx.measureText(head + tail).width;
+      const avail = canvas.width - 2 * margin;
+      if (fullW() > avail) {
+        font = Math.max(32, Math.floor((font * avail) / fullW()));
+        ctx.font = `bold ${font}px monospace`;
+      }
+      ctx.lineWidth = Math.max(4, Math.round(font * 0.08));
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+      ctx.textAlign = "left";
+      let x = canvas.width - margin - fullW();
+      const y = canvas.height - margin;
+      for (const [text, color] of [[head, "#ffffff"], [tail, brand?.color ?? "#ffffff"]] as const) {
+        if (!text) continue;
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+        x += ctx.measureText(text).width;
+      }
     }
+
+    const imageBitmap = typeof canvas.transferToImageBitmap === "function"
+      ? canvas.transferToImageBitmap()
+      : (canvas as unknown as ImageBitmap);
+    const texture = this.texturePool
+      ? this.texturePool.acquire(imageBitmap as unknown as TexImageSource)
+      : new THREE.CanvasTexture(imageBitmap as unknown as HTMLCanvasElement);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+
+    const parentKey = tileKey(tile);
+    const meshData = buildFlatMesh(tile);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+    geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
+    geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+    geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+    const avgCenter = ((c0.centerElevation ?? 0) + (c1.centerElevation ?? 0) + (c2.centerElevation ?? 0) + (c3.centerElevation ?? 0)) / 4;
+    const minElev = Math.min(c0.minElevation ?? 0, c1.minElevation ?? 0, c2.minElevation ?? 0, c3.minElevation ?? 0);
+    const maxElev = Math.max(c0.maxElevation ?? 0, c1.maxElevation ?? 0, c2.maxElevation ?? 0, c3.maxElevation ?? 0);
+    const demSource = c0.demSource || "farfield";
+
+    const bytes = meshData.positions.byteLength + meshData.normals.byteLength + meshData.indices.byteLength + (512 * 512 * 4);
+
+    const parentBundle: Bundle = {
+      key: parentKey,
+      bytes,
+      geometry: geom,
+      texture,
+      centerElevation: avgCenter,
+      demSource,
+      minElevation: minElev,
+      maxElevation: maxElev,
+    };
+
+    this.bundleCache.put(parentBundle, this.activeKeys);
+    return parentBundle;
   }
 
   /**

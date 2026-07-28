@@ -1037,38 +1037,30 @@ describe("TileManager parent fallback retention and memory safety", () => {
     expect(tinyCache.bytesUsed()).toBeGreaterThanOrEqual(0);
   });
 
-  it("synthesizes parent bundle locally from 4 loaded child bundles", async () => {
-    // Mock createImageBitmap for Node test environment
-    const origCreateImageBitmap = (globalThis as any).createImageBitmap;
-    (globalThis as any).createImageBitmap = async () => ({ width: 256, height: 256 });
+  it("synthesizes parent bundle locally from 4 loaded child bundles", () => {
+    // Mock OffscreenCanvas for Node test environment
+    const origOffscreen = (globalThis as any).OffscreenCanvas;
+    (globalThis as any).OffscreenCanvas = class {
+      width: number;
+      height: number;
+      constructor(w: number, h: number) { this.width = w; this.height = h; }
+      getContext() {
+        return {
+          drawImage: () => {},
+          fillRect: () => {},
+          measureText: () => ({ width: 50 }),
+          strokeText: () => {},
+          fillText: () => {},
+        };
+      }
+      transferToImageBitmap() {
+        return { width: 512, height: 512 };
+      }
+    };
 
     try {
       const tm = makeManager({ baseZoom: 11, maxZoom: 14 });
       const cache = (tm as any).bundleCache as BundleCache;
-
-      // Mock workerPool.synthesizeParentTile
-      (tm as any).workerPool.synthesizeParentTile = async (
-        tile: any,
-        _images: any,
-        demSource: string,
-        centerElevation: number,
-        minElevation: number,
-        maxElevation: number
-      ) => ({
-        meshData: {
-          positions: new Float32Array(9),
-          uvs: new Float32Array(6),
-          normals: new Float32Array(9),
-          indices: new Uint32Array(3),
-          anchor: [0, 0],
-          gridSize: 2,
-        },
-        imageBitmap: { width: 512, height: 512 } as any,
-        demSource,
-        centerElevation,
-        minElevation,
-        maxElevation,
-      });
 
       // Create 4 fake loaded child bundles at z12 for parent 11/400/746
       const childrenKeys = ["12/800/1492", "12/801/1492", "12/800/1493", "12/801/1493"];
@@ -1087,9 +1079,9 @@ describe("TileManager parent fallback retention and memory safety", () => {
         });
       }
 
-      // Call synthesizeParentBundleAsync for parent 11/400/746
+      // Call synthesizeParentBundle for parent 11/400/746
       const parentTile = { z: 11, x: 400, y: 746 };
-      const synthesized = await (tm as any).synthesizeParentBundleAsync(parentTile, 0);
+      const synthesized = (tm as any).synthesizeParentBundle(parentTile);
 
       expect(synthesized).toBeDefined();
       expect(synthesized.key).toBe("11/400/746");
@@ -1097,7 +1089,7 @@ describe("TileManager parent fallback retention and memory safety", () => {
       expect(synthesized.centerElevation).toBe(100);
       expect(synthesized.demSource).toBe("s1m");
     } finally {
-      (globalThis as any).createImageBitmap = origCreateImageBitmap;
+      (globalThis as any).OffscreenCanvas = origOffscreen;
     }
   });
 });
