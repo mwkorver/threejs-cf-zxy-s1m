@@ -11,7 +11,6 @@ import {
 } from "./mercator";
 import { loadStaticFootprints, type FootprintCollection, type FootprintFeature } from "./tileLoader";
 import { resolveImageryKind } from "./tileUrls";
-import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { BundleCache, Bundle } from "./bundleCache";
 import type { TexturePool } from "./texturePool";
 import { TerrainShader } from "./terrainShader";

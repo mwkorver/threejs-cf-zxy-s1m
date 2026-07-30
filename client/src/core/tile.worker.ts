@@ -1,6 +1,5 @@
 import { decodeTerrarium } from "./terrarium";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
-import { type TileId } from "./mercator";
 import { imageryRequest, terrainRequest } from "./tileUrls";
 
 const ctx: any = self;
