@@ -157,6 +157,11 @@ hud.innerHTML = `
   </div>
   ${slider("orbit-speed", "ORBIT SPEED", 'min="1" max="30" step="1" value="6"', "6 °/s")}
 
+  <div class="hud-group">
+    ${toggle('<input type="checkbox" class="hud-check" id="ctrl-follow-dem">', "FOLLOW TERRAIN (AGL hold)")}
+  </div>
+  ${slider("agl-alt", "AGL ALTITUDE", 'min="50" max="5000" step="50" value="1500"', "1500 m")}
+
   <div class="hud-section">ACTIVE TILES: <span id="hud-tiles">0</span></div>
   <div>GPU CACHE: <span id="hud-cache">0.00</span> / 256 MB</div>
   <div>PREFETCH: <span id="hud-prefetch">0 now / 0 total</span></div>
@@ -202,6 +207,9 @@ hud.innerHTML = `
       </div>
       ${slider("hypblend", "TINT BLEND", 'min="0" max="1" step="0.05" value="0.5"', "50%")}
     </div>
+
+    ${slider("extimagery", "USDA SERVER MAX ZOOM (else COG Tiler)", 'min="0" max="18" step="1" value="13"', "13")}
+    ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="2.0"', "2.0x")}
   </div>
 
   <div class="hud-section">
@@ -234,13 +242,6 @@ hud.innerHTML = `
     ${slider("altitude", "SUN ALTITUDE", 'min="5" max="90" step="5" value="55"', "55°")}
     ${slider("fog", "FOG DENSITY", 'min="0" max="0.0003" step="0.00001" value="0"', "0.00000")}
     ${slider("space-alt", "SPACE ALTITUDE", 'min="2" max="60" step="1" value="10"', "10 km")}
-    ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="2.0"', "2.0x")}
-
-    <div class="hud-group">
-      ${toggle('<input type="checkbox" class="hud-check" id="ctrl-follow-dem">', "FOLLOW TERRAIN (AGL hold)")}
-    </div>
-    ${slider("agl-alt", "AGL ALTITUDE", 'min="50" max="5000" step="50" value="1500"', "1500 m")}
-    ${slider("extimagery", "USDA IMAGERY &le; Z (else COG tiler)", 'min="0" max="18" step="1" value="13"', "13")}
   </div>
 
   <div class="hud-help">
