@@ -47,7 +47,7 @@ export class TileManager {
   // Grid step for terrain mesh density (e.g. vertices every N source pixels)
   public gridStep = 8;
   // Vertical exaggeration factor
-  public verticalExaggeration = 2;
+  public verticalExaggeration = 1.5;
   // Reference height (true metres) exaggeration is anchored to: world height is
   // (h - ref)·exag + ref, so ground at the reference holds still and relief
   // amplifies around it (Cesium's terrainExaggerationRelativeHeight idea).

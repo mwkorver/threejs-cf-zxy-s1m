@@ -39,9 +39,10 @@ const PREFETCH_LOOKAHEAD = Number(params.get("lookahead") ?? 4);
 const PREFETCH_SAMPLES = Number(params.get("samples") ?? 4);
 
 
-// Wyoming S1M tile group center (-109.5750, 43.7584)
-const startLon = Number(params.get("lon") ?? -109.5750);
-const startLat = Number(params.get("lat") ?? 43.7584);
+// Wyoming S1M tile group; framing (lat/lon/altitude) read back from the HUD
+// after manually flying to a level, horizon-centered view over the range.
+const startLon = Number(params.get("lon") ?? -109.5294);
+const startLat = Number(params.get("lat") ?? 43.70915);
 const worldAnchor = lonLatToMercator(startLon, startLat);
 
 // 2. Setup Three.js scene, camera, lights, and renderer
@@ -65,13 +66,13 @@ scene.fog = new THREE.FogExp2(fogColor.getHex(), baseFogDensity);
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 10000000);
 camera.up.set(0, 0, 1); // Z-up world
 
-// Position camera comfortably high above terrain (Wyoming mountains up to ~4200m MSL)
-// so startup view clears high mountain ridges with a clear vista over the scene.
-const startMercScale = 1 / Math.cos((startLat * Math.PI) / 180);
-const estGroundZ = (startLat > 42 && startLon < -100) ? 3200 * startMercScale : 50 * startMercScale;
-const initialHeight = estGroundZ + 4500;
-camera.position.set(0, -5000, initialHeight);
-camera.lookAt(new THREE.Vector3(0, 0, estGroundZ + 500));
+// Camera sits directly on worldAnchor (LAT/LON readout on load == startLat/
+// startLon) at a fixed absolute altitude (ALTITUDE readout == initialHeight),
+// looking level and due north so the horizon sits mid-frame rather than the
+// ground-biased pitch a lower/closer start would need.
+const initialHeight = 6460;
+camera.position.set(0, 0, initialHeight);
+camera.lookAt(new THREE.Vector3(0, 1000, initialHeight));
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -234,7 +235,7 @@ hud.innerHTML = `
     </div>
 
     ${slider("extimagery", "USDA SERVER MAX ZOOM (else COG Tiler)", 'min="0" max="18" step="1" value="13"', "13")}
-    ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="2.0"', "2.0x")}
+    ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="1.5"', "1.5x")}
   `)}
 
   ${section("IMAGERY &amp; LIGHTING", `
