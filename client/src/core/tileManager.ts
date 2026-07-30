@@ -158,7 +158,9 @@ export class TileManager {
     useLocalHypso: { value: 1.0 },
     localMinElev: { value: 0.0 },
     localMaxElev: { value: 4000.0 },
-    brightness: { value: 1.75 },
+    // main.ts sets the real starting value per imagery source right after
+    // construction (BRIGHTNESS_BY_SOURCE); this is just the pre-init default.
+    brightness: { value: 1.5 },
     contrast: { value: 1.10 },
     saturation: { value: 1.15 }
   };

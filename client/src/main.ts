@@ -131,6 +131,13 @@ const slider = (id: string, label: string, attrs: string, value: string) => `
     <input type="range" class="hud-slider" id="ctrl-${id}" ${attrs}>
   </div>`;
 
+/**
+ * Per-source imagery brightness. NAIP aerial needs lifting; OSM raster tiles
+ * are already near-white and blow out at the same setting, so switching source
+ * carries its own default rather than leaving the old one applied.
+ */
+const BRIGHTNESS_BY_SOURCE = { satellite: 1.5, osm: 1.0 } as const;
+
 /** A checkbox or radio with its caption. */
 const toggle = (input: string, caption: string) =>
   `<label class="hud-toggle">${input} ${caption}</label>`;
@@ -140,6 +147,18 @@ const key = (mark: string, caption: string) =>
   `<span class="hud-legend-item">${mark} ${caption}</span>`;
 
 const swatch = (color: string) => `<span class="hud-swatch" style="background:${color}"></span>`;
+
+/**
+ * A collapsible section. Native <details>, so open/close costs no JS and is
+ * keyboard-accessible for free. Everything past the flight controls is tuning
+ * you set once, and expanded it ran the panel to 1350px — taller than a laptop
+ * viewport, with no way to scroll it.
+ */
+const section = (title: string, body: string, open = false) => `
+  <details class="hud-details"${open ? " open" : ""}>
+    <summary class="hud-summary">${title}</summary>
+    ${body}
+  </details>`;
 
 hud.innerHTML = `
   <div class="hud-title">✈️ FLIGHT SIM DEMO</div>
@@ -155,19 +174,25 @@ hud.innerHTML = `
   <div class="hud-group">
     ${toggle('<input type="checkbox" class="hud-check" id="ctrl-panorama">', "PANORAMA (auto-orbit)")}
   </div>
-  ${slider("orbit-speed", "ORBIT SPEED", 'min="1" max="30" step="1" value="6"', "6 °/s")}
+  <!-- Only read while panorama is running; main.ts shows it with the mode. -->
+  <div id="container-orbit-speed" style="display: none;">
+    ${slider("orbit-speed", "ORBIT SPEED", 'min="1" max="30" step="1" value="6"', "6 °/s")}
+  </div>
 
   <div class="hud-group">
     ${toggle('<input type="checkbox" class="hud-check" id="ctrl-follow-dem">', "FOLLOW TERRAIN (AGL hold)")}
   </div>
-  ${slider("agl-alt", "AGL ALTITUDE", 'min="50" max="5000" step="50" value="1500"', "1500 m")}
+  <!-- Only read while the AGL hold is on; main.ts shows it with the mode. -->
+  <div id="container-agl-alt" style="display: none;">
+    ${slider("agl-alt", "AGL ALTITUDE", 'min="50" max="5000" step="50" value="1500"', "1500 m")}
+  </div>
 
   <div class="hud-section">ACTIVE TILES: <span id="hud-tiles">0</span></div>
-  <div>GPU CACHE: <span id="hud-cache">0.00</span> / 256 MB</div>
+  <div>GPU CACHE: <span id="hud-cache">0.00</span> / ${Math.round(cacheBudget / (1024 * 1024))} MB</div>
   <div>PREFETCH: <span id="hud-prefetch">0 now / 0 total</span></div>
   <div>TEX POOL: <span id="hud-texpool">0 new / 0 reused</span></div>
 
-  <div class="hud-section">
+  ${section("TERRAIN &amp; OVERLAYS", `
     <div class="hud-group">
       ${toggle('<input type="checkbox" class="hud-check" id="ctrl-footprints">', "SHOW DEM FOOTPRINTS")}
       <div class="hud-legend">
@@ -210,11 +235,9 @@ hud.innerHTML = `
 
     ${slider("extimagery", "USDA SERVER MAX ZOOM (else COG Tiler)", 'min="0" max="18" step="1" value="13"', "13")}
     ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="2.0"', "2.0x")}
-  </div>
+  `)}
 
-  <div class="hud-section">
-    <div class="hud-section-title">🌅 ATMOSPHERE &amp; LIGHTING</div>
-
+  ${section("IMAGERY &amp; LIGHTING", `
     <div class="hud-group">
       <label class="hud-label" for="ctrl-imagery-source">IMAGERY SOURCE</label>
       <select class="hud-select" id="ctrl-imagery-source">
@@ -235,23 +258,24 @@ hud.innerHTML = `
     </div>
 
     ${slider("hillshade", "HILLSHADE OPACITY", 'min="0" max="1" step="0.05" value="0.25"', "0.25")}
-    ${slider("brightness", "IMAGERY BRIGHTNESS", 'min="0.5" max="2.0" step="0.05" value="1.75"', "1.75")}
+    ${slider("brightness", "IMAGERY BRIGHTNESS", `min="0.5" max="2.0" step="0.05" value="${BRIGHTNESS_BY_SOURCE.satellite}"`, BRIGHTNESS_BY_SOURCE.satellite.toFixed(2))}
     ${slider("contrast", "IMAGERY CONTRAST", 'min="0.5" max="2.0" step="0.05" value="1.10"', "1.10")}
     ${slider("saturation", "IMAGERY SATURATION", 'min="0.5" max="2.0" step="0.05" value="1.15"', "1.15")}
     ${slider("azimuth", "SUN AZIMUTH", 'min="0" max="360" step="5" value="225"', "225°")}
     ${slider("altitude", "SUN ALTITUDE", 'min="5" max="90" step="5" value="55"', "55°")}
     ${slider("fog", "FOG DENSITY", 'min="0" max="0.0003" step="0.00001" value="0"', "0.00000")}
     ${slider("space-alt", "SPACE ALTITUDE", 'min="2" max="60" step="1" value="10"', "10 km")}
-  </div>
+  `)}
 
-  <div class="hud-help">
-    Controls:<br>
-    • Drag — Pan<br>
-    • Right-drag — Rotate / Tilt<br>
-    • Scroll — Zoom to cursor<br>
-    • Double-click — Fly to point
-    • [W/A/S/D] Fly · [Q/E] Up/Down · [Shift] Boost
-  </div>
+  ${section("CONTROLS", `
+    <div class="hud-help">
+      • Drag — Pan<br>
+      • Right-drag — Rotate / Tilt<br>
+      • Scroll — Zoom to cursor<br>
+      • Double-click — Fly to point<br>
+      • [W/A/S/D] Fly · [Q/E] Up/Down · [Shift] Boost
+    </div>
+  `, true)}
 `;
 appDiv.appendChild(hud);
 
@@ -317,6 +341,10 @@ const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElemen
 const ctrlShadingModes = document.getElementsByName("ctrl-shading-mode") as NodeListOf<HTMLInputElement>;
 const containerDemLegend = document.getElementById("container-dem-legend") as HTMLDivElement;
 const containerHypsometric = document.getElementById("container-hypsometric") as HTMLDivElement;
+// Rows for sliders their mode ignores when it is off — same disclosure pattern
+// as the two containers above.
+const containerOrbitSpeed = document.getElementById("container-orbit-speed") as HTMLDivElement;
+const containerAglAlt = document.getElementById("container-agl-alt") as HTMLDivElement;
 const ctrlHypBlend = document.getElementById("ctrl-hypblend") as HTMLInputElement;
 const valHypBlend = document.getElementById("val-hypblend")!;
 const ctrlHypBounds = document.getElementsByName("ctrl-hyp-bounds") as NodeListOf<HTMLInputElement>;
@@ -427,10 +455,15 @@ ctrlHillshade.addEventListener("input", () => {
   ctrlPreset.value = "custom";
 });
 
+/** Set imagery brightness from code, keeping slider, readout and uniform together. */
+function setBrightness(value: number): void {
+  ctrlBrightness.value = String(value);
+  valBrightness.textContent = value.toFixed(2);
+  tileManager.globalUniforms.brightness.value = value;
+}
+
 ctrlBrightness.addEventListener("input", () => {
-  const val = parseFloat(ctrlBrightness.value);
-  valBrightness.textContent = val.toFixed(2);
-  tileManager.globalUniforms.brightness.value = val;
+  setBrightness(parseFloat(ctrlBrightness.value));
 });
 
 ctrlContrast.addEventListener("input", () => {
@@ -616,6 +649,14 @@ ctrlPanorama.addEventListener("change", () => {
   } else {
     panoramaPivot = null;
   }
+  containerOrbitSpeed.style.display = ctrlPanorama.checked ? "block" : "none";
+});
+
+// AGL ALTITUDE only drives anything while the hold is engaged. Keep it a live
+// slider rather than disabling it — wheel zoom and Q/E write back to it via
+// setAglTarget(), so it is an output as well as an input.
+ctrlFollowDem.addEventListener("change", () => {
+  containerAglAlt.style.display = ctrlFollowDem.checked ? "block" : "none";
 });
 
 ctrlOutlines.addEventListener("change", () => {
@@ -656,6 +697,7 @@ ctrlHypBounds.forEach((radio) => {
 ctrlImagerySource.addEventListener("change", () => {
   const source = ctrlImagerySource.value as "satellite" | "osm";
   tileManager.setImagerySource(source);
+  setBrightness(BRIGHTNESS_BY_SOURCE[source]);
 });
 
 ctrlPreset.addEventListener("change", () => {
@@ -868,6 +910,8 @@ window.addEventListener("wheel", (e) => {
     const maxAgl = parseFloat(ctrlAglAlt.max);
     if (newAgl > maxAgl) {
       ctrlFollowDem.checked = false;
+      // Setting .checked in code fires no change event, so tell the disclosure.
+      ctrlFollowDem.dispatchEvent(new Event("change"));
     } else {
       setAglTarget(newAgl);
     }
