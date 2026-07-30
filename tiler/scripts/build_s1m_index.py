@@ -80,15 +80,18 @@ def newest_per_location(datasets: list[str]) -> tuple[list[str], int]:
 def read_bounds(dataset: str) -> tuple[str, tuple[float, float, float, float] | None, str | None]:
     """(dataset, bounds, error) — bounds in Albers metres from the COG header."""
     import rasterio
+    from pyproj import CRS
 
     url = f"s3://{BUCKET}/{PREFIX}{dataset}"
     for attempt in range(3):
         try:
             with rasterio.Env(AWS_REQUEST_PAYER="requester"), rasterio.open(url) as ds:
-                crs = ds.crs.to_dict() if ds.crs else {}
-                bad = [k for k, v in EXPECTED_PROJ.items() if crs.get(k) != v]
-                if bad:
-                    return dataset, None, f"unexpected CRS params {bad}"
+                if not ds.crs:
+                    return dataset, None, "missing CRS"
+                parsed_crs = CRS.from_wkt(ds.crs.to_wkt())
+                sub_crs = parsed_crs.sub_crs_list[0] if parsed_crs.is_compound else parsed_crs
+                if sub_crs.to_epsg() != 6350 and "Albers" not in sub_crs.name and "aea" not in sub_crs.to_proj4():
+                    return dataset, None, f"unexpected CRS {sub_crs.name}"
                 b = ds.bounds
                 return dataset, (b.left, b.bottom, b.right, b.top), None
         except Exception as e:  # transient S3/GDAL hiccup
@@ -183,20 +186,23 @@ def main() -> None:
     import duckdb
 
     con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
     con.execute(
-        "CREATE TABLE t (fid BIGINT, dataset VARCHAR, geometry_wkb BLOB, "
+        "CREATE TABLE t (fid BIGINT, dataset VARCHAR, geometry GEOMETRY, "
         "bbox_xmin DOUBLE, bbox_xmax DOUBLE, bbox_ymin DOUBLE, bbox_ymax DOUBLE)"
     )
-    con.executemany("INSERT INTO t VALUES (?,?,?,?,?,?,?)", rows)
+    con.executemany("INSERT INTO t VALUES (?, ?, ST_GeomFromWKB(?), ?, ?, ?, ?)", rows)
     con.execute(f"COPY t TO '{out}' (FORMAT PARQUET, ROW_GROUP_SIZE 2000)")
-    print(f"wrote {out} ({Path(out).stat().st_size / 1e3:.0f} KB)")
+    print(f"wrote GeoParquet {out} ({Path(out).stat().st_size / 1e3:.0f} KB)")
 
     if args.upload:
         import boto3
 
         target = settings.s1m_index_path
         bkt, key = target.replace("s3://", "", 1).split("/", 1)
-        boto3.client("s3", region_name=settings.aws_region).upload_file(out, bkt, key)
+        boto3.client("s3", region_name=settings.aws_region).upload_file(
+            out, bkt, key, ExtraArgs={"RequestPayer": "requester"}
+        )
         print(f"uploaded -> {target}")
         print("NOTE: warm Lambda containers cache the parquet footer; bump a TILER_* env var to force new ones.")
         print("NOTE: refresh the overlay too: python scripts/build_footprints.py --which s1m --invalidate")

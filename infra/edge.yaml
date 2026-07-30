@@ -23,15 +23,16 @@ Parameters:
       template. Empty = open distribution, no function attached.
   StaticBucketName:
     Type: String
-    Default: deckgl-cf-xyz-s1m-us-west-2
+    Default: ""
     Description: >
-      Bucket holding pre-genned static assets served straight from S3 (no
-      Lambda) under /footprints/* — e.g. footprints/{s1m,usgs13}.json built by
-      tiler/scripts/build_footprints.py.
+      Optional custom bucket holding pre-genned static assets served straight from S3
+      under /footprints/* — e.g. footprints/{s1m,usgs13}.json built by
+      tiler/scripts/build_footprints.py. Defaults dynamically to user account bucket
+      threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}.
 
 Conditions:
-  # Attach the gate only when a key was supplied, so a keyless deploy can't
-  # lock the distribution behind a function that rejects everything.
+  HasCustomStaticBucket: !Not [!Equals [!Ref StaticBucketName, ""]]
+  CreateAppStaticBucket: !Equals [!Ref StaticBucketName, ""]
   KeyEnabled: !Not [!Equals [!Ref TileAccessKey, ""]]
 
 Resources:
@@ -116,6 +117,18 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
+  # Account-specific static bucket provisioned dynamically when StaticBucketName is empty.
+  AppStaticBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateAppStaticBucket
+    Properties:
+      BucketName: !Sub "threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
   # Scoped read for CloudFront's OAC: only footprints/*, only from this
   # distribution. Not a "public" policy (service principal + SourceArn), so it's
   # allowed despite the bucket's BlockPublicPolicy. The bucket has no other
@@ -123,7 +136,7 @@ Resources:
   StaticBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref StaticBucketName
+      Bucket: !If [HasCustomStaticBucket, !Ref StaticBucketName, !Ref AppStaticBucket]
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -132,7 +145,10 @@ Resources:
             Principal:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
-            Resource: !Sub "arn:aws:s3:::${StaticBucketName}/footprints/*"
+            Resource: !If
+              - HasCustomStaticBucket
+              - !Sub "arn:aws:s3:::${StaticBucketName}/*"
+              - !Sub "arn:aws:s3:::threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}/*"
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
@@ -161,7 +177,8 @@ Resources:
     Properties:
       DistributionConfig:
         Enabled: true
-        Comment: flight-sim tiles (plan §3)
+        Comment: flight-sim viewer and tile stream
+        DefaultRootObject: index.html
         HttpVersion: http2and3 # multiplexing matters for tile storms (§5.3)
         PriceClass: PriceClass_100
         Origins:
@@ -176,29 +193,60 @@ Resources:
             OriginShield:
               Enabled: true
               OriginShieldRegion: us-west-2
-          # Static footprint files, served straight from S3 (no Lambda). The
-          # regional REST endpoint is required for SigV4/OAC signing.
+          # Static footprint files and web app bundle, served straight from S3 (no Lambda).
           - Id: static
-            DomainName: !Sub "${StaticBucketName}.s3.${AWS::Region}.amazonaws.com"
+            DomainName: !If
+              - HasCustomStaticBucket
+              - !Sub "${StaticBucketName}.s3.${AWS::Region}.amazonaws.com"
+              - !Sub "threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}.s3.${AWS::Region}.amazonaws.com"
             OriginAccessControlId: !GetAtt StaticOAC.Id
             S3OriginConfig:
               OriginAccessIdentity: ""
-        DefaultCacheBehavior: # covers all tiler paths: /imagery/*, /terrain/*, /basemap/*
-          TargetOriginId: tiler
-          ViewerProtocolPolicy: https-only
-          CachePolicyId: !Ref TileCachePolicy
-          ResponseHeadersPolicyId: !Ref TileCorsPolicy
+        DefaultCacheBehavior: # Default root / serves web viewer application (index.html, JS, CSS)
+          TargetOriginId: static
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # CachingOptimized managed policy
           AllowedMethods: [GET, HEAD]
-          Compress: false
-          FunctionAssociations: !If
-            - KeyEnabled
-            - - EventType: viewer-request
-                FunctionARN: !GetAtt TileAuthFunction.FunctionMetadata.FunctionARN
-            - !Ref AWS::NoValue
+          Compress: true
         CacheBehaviors:
-          # /footprints/*.json -> S3 origin. Objects are stored pre-gzipped with
-          # Content-Encoding: gzip and immutable Cache-Control, so the same
-          # path-only cache policy applies and Compress stays off.
+          # Dynamic tile endpoints -> Tiler Lambda Function URL origin
+          - PathPattern: /imagery/*
+            TargetOriginId: tiler
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: !Ref TileCachePolicy
+            ResponseHeadersPolicyId: !Ref TileCorsPolicy
+            AllowedMethods: [GET, HEAD]
+            Compress: false
+            FunctionAssociations: !If
+              - KeyEnabled
+              - - EventType: viewer-request
+                  FunctionARN: !GetAtt TileAuthFunction.FunctionMetadata.FunctionARN
+              - !Ref AWS::NoValue
+          - PathPattern: /terrain/*
+            TargetOriginId: tiler
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: !Ref TileCachePolicy
+            ResponseHeadersPolicyId: !Ref TileCorsPolicy
+            AllowedMethods: [GET, HEAD]
+            Compress: false
+            FunctionAssociations: !If
+              - KeyEnabled
+              - - EventType: viewer-request
+                  FunctionARN: !GetAtt TileAuthFunction.FunctionMetadata.FunctionARN
+              - !Ref AWS::NoValue
+          - PathPattern: /basemap/*
+            TargetOriginId: tiler
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: !Ref TileCachePolicy
+            ResponseHeadersPolicyId: !Ref TileCorsPolicy
+            AllowedMethods: [GET, HEAD]
+            Compress: false
+            FunctionAssociations: !If
+              - KeyEnabled
+              - - EventType: viewer-request
+                  FunctionARN: !GetAtt TileAuthFunction.FunctionMetadata.FunctionARN
+              - !Ref AWS::NoValue
+          # Static footprint vectors and compiled assets -> S3 origin
           - PathPattern: /footprints/*
             TargetOriginId: static
             ViewerProtocolPolicy: https-only
@@ -206,13 +254,17 @@ Resources:
             ResponseHeadersPolicyId: !Ref TileCorsPolicy
             AllowedMethods: [GET, HEAD]
             Compress: false
-            # Same gate as the default behavior — an unguarded behavior would be
-            # an open hole straight to the static bucket.
             FunctionAssociations: !If
               - KeyEnabled
               - - EventType: viewer-request
                   FunctionARN: !GetAtt TileAuthFunction.FunctionMetadata.FunctionARN
               - !Ref AWS::NoValue
+          - PathPattern: /assets/*
+            TargetOriginId: static
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # CachingOptimized managed policy
+            AllowedMethods: [GET, HEAD]
+            Compress: true
 
 Outputs:
   DistributionDomain:

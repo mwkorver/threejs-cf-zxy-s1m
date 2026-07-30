@@ -30,8 +30,10 @@ Resources:
         AuthType: AWS_IAM # CloudFront OAC signs origin requests
       Environment:
         Variables:
+          AWS_REQUEST_PAYER: "requester"
           TILER_LAKE_PATH: "s3://naip-geoparquet-index/manifest-index"
-          TILER_S1M_INDEX_PATH: "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index/s1m/S1M_Products.parquet"
+          TILER_S1M_INDEX_PATH: !Sub "s3://threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}/manifest-index/s1m/S1M_Products.parquet"
+          TILER_SEED_BUCKET_PATH: "s3://mwkorver-foundation-us-west-2/threejs-cf-zxy-s1m/"
           # GDAL tuning for COG-over-S3 reads. Names verified against the GDAL
           # shipped in the image — an unrecognised key here is silently ignored,
           # so a typo reads as a working knob while doing nothing.
@@ -57,12 +59,14 @@ Resources:
                 - "arn:aws:s3:::naip-visualization/*"    # NAIP RGB COGs (requester-pays)
                 - "arn:aws:s3:::prd-tnm/*"               # S1M terrain COGs
                 - "arn:aws:s3:::elevation-tiles-prod/*"  # far-field terrain
-                - "arn:aws:s3:::deckgl-cf-xyz-s1m-us-west-2/*"  # own lake (manifest-index)
+                - "arn:aws:s3:::mwkorver-foundation-us-west-2/*"  # master foundation seed bucket
+                - "arn:aws:s3:::threejs-cf-zxy-s1m-*"             # account-specific user deployment buckets
                 - "arn:aws:s3:::naip-geoparquet-index/*"        # canonical NAIP lake index
             - Effect: Allow
               Action: ["s3:ListBucket"]
               Resource:
-                - "arn:aws:s3:::deckgl-cf-xyz-s1m-us-west-2"
+                - "arn:aws:s3:::mwkorver-foundation-us-west-2"
+                - "arn:aws:s3:::threejs-cf-zxy-s1m-*"
                 - "arn:aws:s3:::naip-geoparquet-index"
 
 Outputs:

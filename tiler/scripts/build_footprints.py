@@ -123,6 +123,7 @@ def upload(bucket: str, key: str, fc: dict, dry_run: bool) -> None:
         ContentType="application/json",
         ContentEncoding="gzip",
         CacheControl="public, max-age=31536000, immutable",
+        RequestPayer="requester",
     )
     print(f"  uploaded {label}")
 
@@ -147,7 +148,7 @@ def main() -> None:
     ap.add_argument("--bucket", default=None, help="target bucket (default: derived from lake_path)")
     ap.add_argument("--prefix", default="footprints", help="S3 key prefix (default: footprints)")
     ap.add_argument("--invalidate", action="store_true", help="create a CloudFront invalidation for the uploaded paths")
-    ap.add_argument("--distribution-id", default=os.environ.get("EDGE_DISTRIBUTION_ID", "E3LR90GGS3JLHY"))
+    ap.add_argument("--distribution-id", default=os.environ.get("EDGE_DISTRIBUTION_ID", None), help="CloudFront Distribution ID to invalidate")
     ap.add_argument("--dry-run", action="store_true", help="build + report sizes without uploading")
     ap.add_argument("--no-conus", dest="conus_only", action="store_false",
                     help="keep footprints outside CONUS (default: drop them — no NAIP there)")
@@ -155,8 +156,13 @@ def main() -> None:
 
     bucket = args.bucket or _bucket_from_lake_path(settings.lake_path)
     targets = ["s1m", "usgs13"] if args.which == "both" else [args.which]
+    s1m_path = settings.s1m_index_path
+    local_s1m = Path(__file__).resolve().parent.parent / "S1M_Products.parquet"
+    if local_s1m.exists() and (not s1m_path.startswith("s3://") or args.dry_run):
+        s1m_path = str(local_s1m)
+
     sources = {
-        "s1m": (settings.s1m_index_path, "s1m"),
+        "s1m": (s1m_path, "s1m"),
         "usgs13": (str(USGS13_INDEX), "usgs13"),
     }
 

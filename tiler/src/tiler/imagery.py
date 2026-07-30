@@ -55,6 +55,7 @@ def render_imagery_tile(
             tilesize=tilesize,
             indexes=layer.indexes,
             allowed_exceptions=(TileOutsideBounds,),
+            threads=min(len(assets), 4),
         )
     except EmptyMosaicError:
         return None

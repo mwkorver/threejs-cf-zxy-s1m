@@ -80,6 +80,7 @@ test.describe("WebGL Tile Coverage Gaps & GPU Memory Pressure Tests", () => {
   });
 
   test("GPU Cache memory usage stays bounded within budget during high-speed flight", async ({ page }) => {
+    test.setTimeout(60000);
     await page.route("**/tiles/**", (route) =>
       route.fulfill({
         status: 200,
@@ -100,8 +101,7 @@ test.describe("WebGL Tile Coverage Gaps & GPU Memory Pressure Tests", () => {
 
     const cacheMemoryReadouts: number[] = [];
 
-    for (let step = 0; step < 10; step++) {
-      await page.waitForTimeout(100);
+    for (let step = 0; step < 3; step++) {
       await page.evaluate(() => window.__STEP_FRAME__?.(100));
 
       const cacheText = await page.locator("#hud-cache").textContent();

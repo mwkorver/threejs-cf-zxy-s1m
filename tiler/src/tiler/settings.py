@@ -14,17 +14,14 @@ class Settings(BaseSettings):
     # which duck.py already sets. Point at a local copy for offline dev.
     lake_path: str = "s3://naip-geoparquet-index/manifest-index"
 
-    # S1M DEM tile lookup (plan §4.2); built by the source repo's
-    # publish-s1m-index.sh. Geometry/bbox are EPSG:6350 Albers.
-    #
-    # NOTE: the "deckgl-cf-xyz-s1m" bucket name predates the repo rename to
-    # threejs-cf-zxy-s1m. S3 buckets can't be renamed in place, so this is
-    # deliberate, not a missed rename — don't "fix" it without migrating the
-    # bucket (and infra/tiler.yaml's env vars + IAM ARNs, infra/edge.yaml's
-    # StaticBucketName) alongside it. The imagery lake has since moved to its
-    # own canonical bucket above; this DEM index and the static footprints
-    # still live here.
-    s1m_index_path: str = "s3://deckgl-cf-xyz-s1m-us-west-2/manifest-index/s1m/S1M_Products.parquet"
+    # Seed source bucket used to bootstrap new account deployments
+    seed_bucket_path: str = "s3://mwkorver-foundation-us-west-2/threejs-cf-zxy-s1m/"
+
+    # S1M DEM tile lookup at runtime (read from deployer's account bucket);
+    # geometry/bbox are EPSG:6350 Albers. Overridden dynamically at runtime by TILER_S1M_INDEX_PATH.
+    s1m_index_path: str = (
+        "s3://threejs-cf-zxy-s1m-us-west-2/manifest-index/s1m/S1M_Products.parquet"
+    )
 
     # Far-field terrain source, Terrarium 256px (plan §2 row 7, §4.2).
     farfield_tiles: str = "s3://elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"

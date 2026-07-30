@@ -39,10 +39,9 @@ const PREFETCH_LOOKAHEAD = Number(params.get("lookahead") ?? 4);
 const PREFETCH_SAMPLES = Number(params.get("samples") ?? 4);
 
 
-// Wyoming S1M tile group; framing (lat/lon/altitude) read back from the HUD
-// after manually flying to a level, horizon-centered view over the range.
-const startLon = Number(params.get("lon") ?? -109.5294);
-const startLat = Number(params.get("lat") ?? 43.70915);
+// Wyoming S1M tile group framing (lat/lon/altitude/heading 056°)
+const startLon = Number(params.get("lon") ?? -109.61683);
+const startLat = Number(params.get("lat") ?? 43.50468);
 const worldAnchor = lonLatToMercator(startLon, startLat);
 
 // 2. Setup Three.js scene, camera, lights, and renderer
@@ -66,13 +65,14 @@ scene.fog = new THREE.FogExp2(fogColor.getHex(), baseFogDensity);
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 10, 10000000);
 camera.up.set(0, 0, 1); // Z-up world
 
-// Camera sits directly on worldAnchor (LAT/LON readout on load == startLat/
-// startLon) at a fixed absolute altitude (ALTITUDE readout == initialHeight),
-// looking level and due north so the horizon sits mid-frame rather than the
-// ground-biased pitch a lower/closer start would need.
-const initialHeight = 6460;
+// Camera sits directly on worldAnchor (LAT/LON readout == 43.50468 / -109.61683)
+// at absolute altitude 6606m, looking level at heading 056°.
+const initialHeight = 6606;
+const headingRad = (56 * Math.PI) / 180;
+const fwdX = Math.sin(headingRad) * 1000;
+const fwdY = Math.cos(headingRad) * 1000;
 camera.position.set(0, 0, initialHeight);
-camera.lookAt(new THREE.Vector3(0, 1000, initialHeight));
+camera.lookAt(new THREE.Vector3(fwdX, fwdY, initialHeight));
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -165,7 +165,7 @@ hud.innerHTML = `
   <div class="hud-title">✈️ FLIGHT SIM DEMO</div>
   <div class="hud-readout">FPS: <span id="hud-fps">60</span></div>
   <div class="hud-readout">LAT/LON: <span id="hud-pos">- / -</span></div>
-  <div class="hud-readout">ALTITUDE: <span id="hud-alt">0</span> m</div>
+  <div class="hud-readout">ALTITUDE: <span id="hud-alt">0</span> m &nbsp;&middot;&nbsp; HEADING: <span id="hud-heading">000&deg;</span></div>
   <div class="hud-readout">SPEED: <span id="hud-speed">0</span> kt</div>
 
   ${slider("speed-ctrl", "FLIGHT SPEED SETTING", 'min="50" max="1000" step="10" value="800"', "800 kt")}
@@ -173,11 +173,11 @@ hud.innerHTML = `
   ${slider("clearance", "MIN GROUND CLEARANCE", 'min="0" max="500" step="10" value="50"', "50 m")}
 
   <div class="hud-group">
-    ${toggle('<input type="checkbox" class="hud-check" id="ctrl-panorama">', "PANORAMA (auto-orbit)")}
+    ${toggle('<input type="checkbox" class="hud-check" id="ctrl-panorama">', "PANORAMA (360° auto-rotate)")}
   </div>
   <!-- Only read while panorama is running; main.ts shows it with the mode. -->
   <div id="container-orbit-speed" style="display: none;">
-    ${slider("orbit-speed", "ORBIT SPEED", 'min="1" max="30" step="1" value="6"', "6 °/s")}
+    ${slider("orbit-speed", "ROTATION SPEED", 'min="1" max="30" step="1" value="6"', "6 °/s")}
   </div>
 
   <div class="hud-group">
@@ -314,6 +314,7 @@ compass.addEventListener("click", () => {
 const hudFps = document.getElementById("hud-fps")!;
 const hudPos = document.getElementById("hud-pos")!;
 const hudAlt = document.getElementById("hud-alt")!;
+const hudHeading = document.getElementById("hud-heading")!;
 const hudSpeed = document.getElementById("hud-speed")!;
 const hudTiles = document.getElementById("hud-tiles")!;
 const hudCache = document.getElementById("hud-cache")!;
@@ -643,12 +644,10 @@ ctrlSpaceAlt.addEventListener("input", () => {
   valSpaceAlt.textContent = `${parseInt(ctrlSpaceAlt.value)} km`;
 });
 
-// Panorama pivots about the ground point under the camera when switched on.
+// Panorama rotates the camera 360° in place at its current position.
 ctrlPanorama.addEventListener("change", () => {
   if (ctrlPanorama.checked) {
-    startPanorama();
-  } else {
-    panoramaPivot = null;
+    cancelFlyTo();
   }
   containerOrbitSpeed.style.display = ctrlPanorama.checked ? "block" : "none";
 });
@@ -725,42 +724,19 @@ let speedKnots = 800; // Default active airspeed simulation
 // behaviour when the INERTIA slider is 0.
 const velocity = new THREE.Vector3();
 
-// Auto-orbit (pTolemy3D's panorama()): pivot stays fixed while the camera
-// sweeps around it. Null when the mode is off.
-let panoramaPivot: THREE.Vector3 | null = null;
+const tmpQuat = new THREE.Quaternion();
 
-/**
- * Begin auto-orbit about whatever the camera is looking at.
- *
- * Deliberately not the ground directly beneath the camera: that pivot has zero
- * horizontal radius, so rotating about it moves the camera nowhere.
- */
-function startPanorama(): void {
-  cancelFlyTo();
-  velocity.set(0, 0, 0);
-
-  const cx = window.innerWidth / 2;
-  const cy = window.innerHeight / 2;
-  // Terrain under the view centre, else where that ray crosses sea level.
-  let pivot = pickGround(cx, cy) ?? rayToPlane(cx, cy, 0);
-
-  if (!pivot) {
-    // Camera is looking up: orbit a point ahead along the ground track instead.
-    const forward = tmpV.set(0, 0, -1).applyQuaternion(camera.quaternion);
-    forward.z = 0;
-    if (forward.lengthSq() < 1e-9) forward.set(0, 1, 0);
-    forward.normalize().multiplyScalar(Math.max(camera.position.z, 1000) * 2);
-    pivot = new THREE.Vector3(camera.position.x + forward.x, camera.position.y + forward.y, 0);
-  }
-
-  panoramaPivot = pivot.clone();
-}
-
-// Track keyboard state — any movement key cancels an in-flight FlyTo trajectory.
+// Track keyboard state — movement key cancels FlyTo or Panorama.
 const movementCodes = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ShiftLeft", "ShiftRight"]);
 window.addEventListener("keydown", (e) => {
   activeKeys.add(e.code);
-  if (movementCodes.has(e.code)) cancelFlyTo();
+  if (movementCodes.has(e.code)) {
+    cancelFlyTo();
+    if (ctrlPanorama.checked) {
+      ctrlPanorama.checked = false;
+      ctrlPanorama.dispatchEvent(new Event("change"));
+    }
+  }
 });
 window.addEventListener("keyup", (e) => activeKeys.delete(e.code));
 
@@ -960,17 +936,12 @@ function frameLoop() {
   if (updateFlyTo()) {
     // Skip manual movement; still update LOD and render.
     velocity.set(0, 0, 0);
-  } else if (panoramaPivot) {
-    // Auto-orbit: swing the camera around the fixed pivot, holding its radius
-    // and height, and keep it aimed at the pivot.
+  } else if (ctrlPanorama.checked) {
+    // True Panorama: camera remains stationary at its current location and rotates 360° in place around world Z (+Z).
     const omega = (parseInt(ctrlOrbitSpeed.value) * Math.PI) / 180;
-    const offset = tmpV.copy(camera.position).sub(panoramaPivot);
-    const cos = Math.cos(omega * dt);
-    const sin = Math.sin(omega * dt);
-    const ox = offset.x * cos - offset.y * sin;
-    const oy = offset.x * sin + offset.y * cos;
-    camera.position.set(panoramaPivot.x + ox, panoramaPivot.y + oy, camera.position.z);
-    camera.lookAt(panoramaPivot);
+    const yawQuat = tmpQuat.setFromAxisAngle(worldUp, omega * dt);
+    camera.quaternion.premultiply(yawQuat);
+    velocity.set(0, 0, 0);
   } else {
     // Process movement input relative to camera heading
     const direction = new THREE.Vector3();
@@ -1100,9 +1071,11 @@ function frameLoop() {
   hudTexPool.textContent = `${pool.created} new / ${pool.reused} reused`;
 
 
-  // Rotate the compass rose so the red N points to where north is on screen.
+  // Rotate compass rose and update HUD heading readout (000° .. 359°)
   compassFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
   const bearingDeg = (Math.atan2(compassFwd.x, compassFwd.y) * 180) / Math.PI;
+  const headingDeg = Math.round((bearingDeg + 360) % 360);
+  hudHeading.textContent = `${headingDeg.toString().padStart(3, "0")}°`;
   compassRose.style.transform = `rotate(${-bearingDeg}deg)`;
 }
 

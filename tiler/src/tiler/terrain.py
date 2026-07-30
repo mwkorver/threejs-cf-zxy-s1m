@@ -81,6 +81,7 @@ def _mosaic_elev(hrefs: list[str], z: int, x: int, y: int, tilesize: int) -> "np
             hrefs, _s1m_tile, x, y, z,
             tilesize=tilesize,
             allowed_exceptions=(TileOutsideBounds,),
+            threads=min(len(hrefs), 4),
         )
     except EmptyMosaicError:
         # Footprints intersected but no pixels covered the tile: genuine

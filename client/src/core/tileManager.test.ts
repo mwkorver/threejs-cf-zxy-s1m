@@ -1031,6 +1031,11 @@ describe("TileManager parent fallback retention and memory safety", () => {
     const activeBefore = tm.getActiveKeys().size;
     expect(activeBefore).toBeGreaterThan(0);
 
+    // Rapidly shift camera across multiple coordinates to trigger cache eviction
+    for (let offset = 0; offset < 50000; offset += 10000) {
+      tm.update(new THREE.Vector3(offset, offset, 10000));
+    }
+
     // Active keys set remains defined and active
     expect(tm.getActiveKeys().size).toBeGreaterThan(0);
     // Cache bytes tracked remain capped or evicted cleanly

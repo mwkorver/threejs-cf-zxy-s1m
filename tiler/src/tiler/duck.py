@@ -43,6 +43,10 @@ def connect(region: str) -> duckdb.DuckDBPyConnection:
     # NAIP lake partitions live behind requester-pays buckets; harmless for
     # public ones. Same setting the existing repo runs in production.
     con.execute("SET s3_requester_pays=true;")
+
+    # Configure memory safety limits to prevent Lambda container OOM kills
+    con.execute("SET max_memory='1.5GB';")
+    con.execute("SET threads=2;")
     return con
 
 

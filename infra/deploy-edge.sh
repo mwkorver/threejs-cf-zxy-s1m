@@ -44,6 +44,21 @@ aws cloudformation deploy \
     "TilerFunctionArn=$ARN" \
     "TileAccessKey=$KEY"
 
+# Seed the user's account bucket from the master foundation seed bucket if not yet populated
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+USER_BUCKET="threejs-cf-zxy-s1m-${ACCOUNT_ID}-${REGION}"
+
+if ! aws s3 ls "s3://${USER_BUCKET}/manifest-index/s1m/S1M_Products.parquet" >/dev/null 2>&1; then
+  echo "-- seeding user account bucket s3://${USER_BUCKET}/ from s3://mwkorver-foundation-us-west-2/threejs-cf-zxy-s1m/..."
+  aws s3 sync s3://mwkorver-foundation-us-west-2/threejs-cf-zxy-s1m/ "s3://${USER_BUCKET}/" --request-payer requester
+fi
+
+echo "-- building web viewer application bundle..."
+(cd "$ROOT/client" && npm run build)
+
+echo "-- uploading web viewer application assets (index.html, JS, CSS) to s3://${USER_BUCKET}/..."
+aws s3 sync "$ROOT/client/dist/" "s3://${USER_BUCKET}/"
+
 # Keep the client in lockstep. .env.local is gitignored; Vite inlines these
 # into both the main bundle and the tile worker at build time:
 #   VITE_TILE_KEY      - dev gate key, must match the edge function
