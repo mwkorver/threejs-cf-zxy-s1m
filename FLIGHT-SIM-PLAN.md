@@ -5,7 +5,62 @@ viewer over NAIP (and other state COG imagery), USGS 3DEP S1M terrain, and
 Overture buildings. Based on learnings and data from
 [`deckgl-s3-cog-s1m`](https://github.com/mwkorver/deckgl-s3-cog-s1m).
 
-Status: **planning only** — no code yet. 2026-07-08.
+Written 2026-07-08 as a planning document, before any code existed. It is kept
+as the design record — the reasoning in §2, §6 and §10 is why the thing is
+shaped the way it is, and that reasoning is still the interesting part.
+
+**It is not a description of what runs.** For that, read [README.md](README.md)
+(as-built architecture) and [infra/README.md](infra/README.md) (deployment).
+§0 below reconciles the two: what shipped, what shipped differently, and what
+was never built. Individual sections are annotated where they say something no
+longer true.
+
+Last reconciled against the code: **2026-07-31**.
+
+---
+
+## 0. Status — plan vs. as-built
+
+### Held as planned
+
+Every locked decision in [§2](#2-locked-decisions) survived contact except
+buildings (row 8, never built). The flat Mercator world, the single 3857
+quadtree, path-only immutable cache keys, WebP 512, Terrarium terrain,
+three.js, and us-west-2 are all exactly as specified. Phase 0 shipped in full
+and its measurements are recorded in [§9](#9-phased-plan). All five open
+questions in [§10](#10-open-questions-settle-in-phase-0) were settled and none
+were reopened.
+
+### Shipped, but not as drawn
+
+| Area | Plan | As built |
+|---|---|---|
+| DEM tiers | Two: S1M near-field, `elevation-tiles-prod` far-field | **Three**: S1M → USGS 1/3" (10 m) → far-field. The 1/3" tier also void-fills S1M's ragged coverage edges, which [§4.2](#42-terrain) had hand-waved as "void fill or transparent" |
+| Low-zoom imagery | Pre-genned z0–z12 static pyramid on S3 | **`/basemap/{z}/{x}/{y}.webp`** — a live endpoint stitching four USDA NAIP ImageServer cache tiles into one 512. The COG mosaic fan-out was too slow and coverage-capped down there, and this needed no pre-gen job at all. The pyramid was never built |
+| Coverage fallback | "Client renders no-data as fallback-LOD terrain" ([§8](#8-cost--risk-notes)) | **`/footprints/{s1m,usgs13}.json`** — two static vectors (~360 KB gzipped) the client fetches once and clips against, so it knows where coverage ends before requesting. Not in the plan at all |
+| Client hosting | Implicit; CloudFront served tiles only | The **same distribution serves the compiled app**, so there is one origin story for the whole demo |
+| Access control | Not considered | A viewer-request CloudFront Function gates everything on `?k=<key>`, to keep crawlers off requester-pays reads. Not a real secret — it ships in the bundle |
+| Imagery sources | Multiple COG layers (`nj-imagery`, `kyfromabove`, …) | One COG layer plus an **OSM roads** basemap toggle — a different axis than planned (see below) |
+| Infra shape | SAM/CFN, `foundation → tiler → static assets` ([§7](#7-reuse-from-deckgl-s3-cog-s1m)) | **AWS CDK (TypeScript)**, `tiler → edge`. No foundation stack: CDK bootstrap covers ECR/staging, and the edge stack owns the per-account static bucket, seeded from one shared public requester-pays bucket |
+
+### Never built
+
+- **Buildings, entirely.** [§2 row 8](#2-locked-decisions), [§4.3](#43-buildings--not-built),
+  the `/buildings/*` behavior in [§3](#3-architecture)'s diagram, and the last
+  bullet of Phase 1. No Overture ingest, no tippecanoe, no PMTiles, no
+  terrain-seated extrusions. The terrain-sampling seating API that [§4.3](#43-buildings--not-built)
+  depends on (`getElevationAt`) does exist — it drives the follow-terrain
+  camera instead.
+- **Any second imagery layer.** The registry holds exactly one entry,
+  `naip-visualization`. `nj-imagery`, `kyfromabove` and `in-imagery` were never
+  onboarded, so the `{layer}` path segment is real but single-valued and the
+  per-layer ceilings table in [§5.2](#52-per-layer-zoom-ceilings-256-px-basis--seclat-for-ground-mpx)
+  is still aspirational. Per-layer maxzoom logic is implemented and exercised —
+  just never against a second layer.
+- **All of Phase 2 and Phase 3**, except coverage-aware fallback (shipped as
+  footprints, above) and time-of-day *lighting* (sun azimuth/altitude and
+  preset moods are client-side controls; the planned NAIP-vintage "season"
+  toggle is not built).
 
 ---
 
@@ -34,12 +89,12 @@ universal contract**:
 | 1 | Coverage | **CONUS only** | Bounds precision & projection choices; matches NAIP/S1M coverage |
 | 2 | Tile grid | **EPSG:3857 (Web Mercator) XYZ** | Every tool speaks it (TiTiler, tippecanoe, PMTiles, deck.gl); path-based CDN keys; distortion handled as scale factor, not reprojection |
 | 3 | World model | **Flat Mercator-meter world, Z-up** | No ellipsoid, no ENU rotations, trivial physics. Ground-truth via `sec(lat)` scale (see [§5.1](#51-coordinates--precision-bake-in-from-day-one)) |
-| 4 | Imagery tiles | **WebP, 512 px, dynamic TiTiler + pre-genned low/mid zooms (z0–z12)** | Full pre-gen of CONUS to z17+ is tens of TB for sparse access; dynamic-behind-CDN fills organically; small pre-genned pyramid guarantees instant cold start |
+| 4 | Imagery tiles | **WebP, 512 px, dynamic TiTiler** + ~~pre-genned low/mid zooms (z0–z12)~~ — *pyramid never built; low zoom is the live `/basemap/*` stitch instead ([§0](#0-status--plan-vs-as-built))* | Full pre-gen of CONUS to z17+ is tens of TB for sparse access; dynamic-behind-CDN fills organically; small pre-genned pyramid guarantees instant cold start |
 | 5 | Mosaic resolver | **GeoParquet lake as the mosaic index** | Biggest reuse from the existing repo: "which COGs intersect tile z/x/y" *is* `/search`. Year-pinned mosaics = path parameter. Sourced from STAC GeoParquet index bucket `s3://naip-geoparquet-index/manifest-index` |
 | 5a | NAIP source | **`naip-visualization` RGB COGs** (not `naip-analytic` RGBIR) | 3-band uint8 JPEG COGs, display-ready — the tiler dropped the IR band anyway; smaller reads. Lake collection = `naip-visualization`, served at `/imagery/naip-visualization/...` |
 | 6 | Terrain payload | **Terrain-RGB (Terrarium-style) raster tiles from S1M**, quantized-mesh deferred | One pipeline with imagery (same tiler, same quadtree); client meshes regular grids (simpler than the current drape mesher). Revisit quantized-mesh only if client meshing shows up in profiles |
 | 7 | Far-field terrain | **AWS Open Data `s3://elevation-tiles-prod` (Mapzen Terrarium)** | Already tiled in exactly this scheme, global, free; S1M kicks in below a screen-space-error threshold |
-| 8 | Buildings | **Overture → tippecanoe → PMTiles on S3 + CloudFront** | Fully static, zero servers, range-read friendly, zoom-graded simplification for free |
+| 8 | Buildings | ~~**Overture → tippecanoe → PMTiles on S3 + CloudFront**~~ — **never built** ([§0](#0-status--plan-vs-as-built)) | Fully static, zero servers, range-read friendly, zoom-graded simplification for free |
 | 9 | Rendering engine | **three.js — not CesiumJS** (settled [§10.2](#10-open-questions-settle-in-phase-0), 2026-07-09) | See [§6](#6-engine-decision-custom-renderer-vs-cesiumjs). Cesium = globe engine overhead for pre-aligned tiles; custom pipeline keeps the GPU raster/mesh control and velocity prefetch. three won the Phase 0 spike (least friction, native free-fly camera); luma.gl kept as WebGPU fallback. Backend stays engine-agnostic so Cesium/luma remain fallback consumers |
 | 10 | Region | **us-west-2** | Same as sources (`naip-visualization`, `prd-tnm` etc., per RODA); requester-pays reads become same-region GET pennies. All reads signed via the execution role; requester-pays scoped per-bucket |
 
@@ -84,6 +139,14 @@ graph TD
     S3STATIC -. batch build .- OVERTURE
 ```
 
+> **This diagram is the plan, not the deployment.** Two of its nodes were
+> never built: `/buildings/*` (with its Overture source) and the static
+> `z0–z12` pyramid. Three things it doesn't show did get built: `/basemap/*`
+> (live low-zoom stitch), `/footprints/*` (coverage vectors), the compiled web
+> app served from the same distribution, and a USGS 1/3" DEM tier between S1M
+> and the far field. See [§0](#0-status--plan-vs-as-built); the as-built
+> diagram is in [README.md](README.md).
+
 Client (browser): custom renderer, one LOD manager over `z/x/y` "tile bundles"
 (imagery texture + terrain mesh + buildings), byte-budgeted LRU cache,
 frustum + velocity-vector prefetch. No reprojection, no COG parsing, no
@@ -104,8 +167,9 @@ signing.
     requester-pays scoped per-asset to the buckets that need it ([§2 row 5a](#2-locked-decisions)).
   - Per-layer `maxzoom` from registry `gsd` (see table [§5.2](#52-per-layer-zoom-ceilings-256-px-basis--seclat-for-ground-mpx)); requests beyond
     it 404 (client clamps; CDN never caches upsampled junk).
-- Pre-generated static pyramid z0–z12 written to S3 once per layer/year
-  (small; this is what every session hits constantly).
+- ~~Pre-generated static pyramid z0–z12 written to S3 once per layer/year~~
+  **Not built.** Low zoom is served live by `/basemap/{z}/{x}/{y}.webp`
+  instead — see [§0](#0-status--plan-vs-as-built).
 
 ### 4.2 Terrain
 
@@ -125,7 +189,7 @@ signing.
     data product and belong serverside; skirt texture stretch tuned via
     per-zoom skirt height (Cesium's published formula as starting point);
     building seating samples the height raster, never mesh raycasts, so skirt
-    geometry can't pollute picking ([§4.3](#43-buildings) already does this).
+    geometry can't pollute picking ([§4.3](#43-buildings--not-built) already does this).
   - Source: S1M COGs via `S1M_Products.parquet` lookup; `-999999` nodata → void
     fill or transparent.
   - `maxzoom` ≈ 15–16 (1 m source at 512 px); below-threshold zooms can
@@ -137,7 +201,7 @@ signing.
   - Optional later: pack server-computed normals into a parallel tile layer (or
     alpha) for free sun-angle shading.
 
-### 4.3 Buildings
+### 4.3 Buildings — not built
 
 - One-time (per Overture release) batch: Overture buildings GeoParquet →
   GeoJSONSeq → tippecanoe → `buildings.pmtiles` on S3.
@@ -218,7 +282,7 @@ stalls.
 | Requester-pays / signing knowledge | Tiler S3 config (simpler: one role, zero browser signing) |
 | Drape mesher (`SimpleMeshLayer` path) | Basis for terrain-tile mesher, simplified to regular grids |
 | Byte-budget cache, concurrency=16, bottom-first sort learnings | Client bundle cache & fetch scheduler |
-| Foundation/seed stack pattern | Same deploy shape: foundation → tiler → static assets |
+| Foundation/seed stack pattern | Adapted: `tiler → edge` in CDK, no separate foundation stack. The edge stack owns the per-account static bucket and seeds it from one shared public requester-pays bucket |
 | Ingest pipeline | Unchanged — it feeds the lake the tiler resolves against |
 
 ## 8. Cost & risk notes
@@ -279,32 +343,52 @@ z0–z12 pyramid (Phase 2) is the prescribed mitigation.
   and LOD distance.
 - Second layer (`nj-imagery`, ~15 cm, same corridor) + layer switching;
   per-layer maxzoom clamps exercised for real (NAIP z17–18 vs NJ z19–20).
-  Tiler layer registered; client UI toggle still needed.
+  **Not done.** An earlier revision of this line claimed the tiler layer was
+  registered and only the client toggle was missing; that was wrong. The
+  registry has one entry, `naip-visualization`. What did ship is a different
+  axis of switching — NAIP aerial vs. an OSM roads basemap — which exercises
+  the source-routing plumbing but not per-layer maxzoom against a finer source.
 - Basic flight model (even arcade physics) to drive the prefetcher honestly.
-- **Follow-DEM camera mode** (ported from pTolemy3D's `setFollowDem`):
+  **Partial** — free-fly with a speed setting, inertia/glide damping and a
+  minimum ground clearance, which is enough to drive the prefetcher off a real
+  velocity vector. No aerodynamics: no lift, stall, bank-to-turn or gravity.
+- ~~**Follow-DEM camera mode** (ported from pTolemy3D's `setFollowDem`):
   maintain constant above-ground clearance instead of above-sea-level
-  altitude. `TileManager.getElevationAt()` already samples terrain under
-  the camera; wire it into the camera controller so the plane follows
-  terrain instead of flying through mountains.
-- **FlyTo animated trajectories** (ported from pTolemy3D's `flyTo` /
-  `flyToPositionSpeed`): smooth camera transitions with accel/decel curves,
-  cruise-altitude arc, and quaternion rotation interpolation. Replaces the
-  current instant `lerp(point, 0.5)` double-click with a cinematic flight
-  path.
-- Buildings: Overture → PMTiles, terrain-seated extrusions.
+  altitude.~~ **Done** — "FOLLOW TERRAIN (AGL hold)" in the HUD, fed by
+  `TileManager.getElevationAt()`. The AGL target is also an *output*: wheel
+  zoom and Q/E write back to it, so the two controls can't disagree.
+- ~~**FlyTo animated trajectories** (ported from pTolemy3D's `flyTo` /
+  `flyToPositionSpeed`)~~ **Done** — double-click flies an arc that climbs to
+  a cruise altitude and descends onto the target, replacing the instant
+  `lerp(point, 0.5)` jump.
+- Buildings: Overture → PMTiles, terrain-seated extrusions. **Not built** —
+  see [§0](#0-status--plan-vs-as-built). This is the single largest piece of
+  the plan that never happened.
 
 ### Phase 2 — scale & polish
+
+Not started, except where noted.
+
 - Pre-gen z0–z12 pyramids per layer/year; static-first origin routing.
+  **Superseded** by the live `/basemap/*` stitch ([§0](#0-status--plan-vs-as-built)).
 - Hot-tile write-behind (only if Phase 0/1 metrics demand).
 - Server-side normal tiles → sun-angle shading.
 - CONUS-wide terrain (full S1M maxzoom map), coverage-aware fallbacks.
+  **Coverage-aware fallback done** via the static footprint vectors; the
+  full maxzoom map is not.
 - Cost dashboard: CloudFront/Lambda/S3 per flight-hour.
 
 ### Phase 3 — evaluate upgrades (data-driven, not speculative)
+
+Not started. Nothing here was ever triggered by a measurement, which is the
+point — these were gated on evidence that did not appear.
+
 - Quantized-mesh vs Terrain-RGB (only if client meshing is a measured
   bottleneck).
 - WebGPU renderer path.
 - Time-of-day / seasonal layers (NAIP vintage as "season" toggle).
+  Time-of-day *lighting* shipped (sun azimuth/altitude, preset moods); the
+  vintage toggle did not.
 - Multiplayer/state sync, if it's ever more than a viewer.
 
 ## 10. Open questions (settle in Phase 0)
