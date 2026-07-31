@@ -2,13 +2,13 @@
 
 from pydantic_settings import BaseSettings
 
-# Master copy new account deployments seed their own bucket from
-# (infra/deploy-edge.sh syncs this -> threejs-cf-zxy-s1m-${AccountId}-${Region}
-# at deploy time). Hoisted to a constant so seed_bucket_path and the
-# s1m_index_path default below can't drift apart the way they did when they
-# were two independent literals: settings.py said "-us-west-2" while
-# infra/tiler.yaml's !Sub said "-${AWS::AccountId}-${AWS::Region}" -- neither
-# bucket that implies actually exists yet, this migration hasn't been run.
+# Master copy that a new account's deployment seeds its own bucket from: the
+# deploy syncs this -> threejs-cf-zxy-s1m-${AccountId}-${Region}, which the
+# edge stack provisions. Public-read with requester-pays, so any account can
+# bootstrap from it, not just this one. Hoisted to a constant so seed_bucket_path
+# and the s1m_index_path default below can't drift apart the way they did when
+# they were two independent literals -- settings.py said "-us-west-2" while the
+# infra template said "-${AWS::AccountId}-${AWS::Region}".
 _SEED_BUCKET_ROOT = "s3://mwkorver-foundation-us-west-2/threejs-cf-zxy-s1m/"
 
 
@@ -27,13 +27,13 @@ class Settings(BaseSettings):
     seed_bucket_path: str = _SEED_BUCKET_ROOT
 
     # S1M DEM tile lookup; geometry/bbox are EPSG:6350 Albers. In production
-    # this is always overridden by TILER_S1M_INDEX_PATH -- infra/tiler.yaml
-    # sets it to the deployer's own account bucket
-    # (threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}), which this class
-    # can't compute (no AWS::AccountId outside CloudFormation). The default
-    # below is only what local dev / tests / scripts get without that env var,
-    # so it points at the seed bucket directly rather than guessing an
-    # account-specific name that would just be wrong.
+    # this is always overridden by TILER_S1M_INDEX_PATH -- the tiler stack sets
+    # it to the deployer's own account bucket, threejs-cf-zxy-s1m-<account
+    # id>-<region>, which this class can't compute (it doesn't know the account
+    # it will run in). The default below is only what local dev / tests /
+    # scripts get without that env var, so it points at the seed bucket
+    # directly rather than guessing an account-specific name that would just be
+    # wrong.
     s1m_index_path: str = _SEED_BUCKET_ROOT + "manifest-index/s1m/S1M_Products.parquet"
 
     # Far-field terrain source, Terrarium 256px (plan §2 row 7, §4.2).

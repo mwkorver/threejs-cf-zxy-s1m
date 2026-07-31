@@ -46,7 +46,7 @@ def connect(region: str) -> duckdb.DuckDBPyConnection:
 
     # DuckDB shares this container with GDAL/rasterio, which hold the other
     # major allocations (warp buffers, WebP encode) in the same process. Cap
-    # DuckDB at half the Lambda's configured memory (infra/tiler.yaml
+    # DuckDB at half the Lambda's configured memory (infra/lib/tiler-stack.ts
     # MemorySize: 3008 MB) rather than let it grow unbounded and leave GDAL to
     # fight over what's left. threads=2 similarly bounds DuckDB's own query
     # parallelism -- independent of GDAL_NUM_THREADS (a different library's

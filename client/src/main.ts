@@ -20,7 +20,7 @@ const params = new URLSearchParams(window.location.search);
 const useLocal = params.get("src") === "local";
 const useLocalTiler = params.get("src") === "tiler-local";
 
-// Deployed tile CDN. Mirrored into client/.env.local by infra/deploy-edge.sh
+// Deployed tile CDN. Mirrored into client/.env.local by infra/deploy.sh
 // from the edge stack's DistributionDomain output — same lockstep trick as
 // VITE_TILE_KEY — so a recreated distribution doesn't need a source edit. The
 // fallback is the current distribution, so an unset var behaves as before.

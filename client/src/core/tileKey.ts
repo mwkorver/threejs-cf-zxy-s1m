@@ -2,12 +2,12 @@
  * Dev access key for the tile CDN.
  *
  * CloudFront runs a viewer-request function that 403s any request without
- * `?k=<key>` (infra/edge.yaml). The key is NOT a real secret — it ships in the
+ * `?k=<key>` (infra/lib/edge-stack.ts). The key is NOT a real secret — it ships in the
  * client bundle and is visible in devtools — it just keeps crawlers and shared
  * URLs from burning requester-pays reads on the dev distribution.
  *
  * The value comes from VITE_TILE_KEY in `client/.env.local`, which is
- * gitignored and written by infra/deploy-edge.sh from the repo-root `.tile-key`
+ * gitignored and written by infra/deploy.sh from the repo-root `.tile-key`
  * file, so the edge and the client can never drift apart. Empty = no key is
  * appended, which is also how the stack behaves when TileAccessKey is unset.
  *

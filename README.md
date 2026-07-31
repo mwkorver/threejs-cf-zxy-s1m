@@ -296,30 +296,35 @@ Deploys to **`us-west-2`**, the region holding the GeoParquet lake and the
 source COG buckets (`naip-visualization`, `prd-tnm`), keeping compute and the
 bulk of imagery reads in-region.
 
-```bash
-# 1. tiler stack (Lambda container behind an IAM-auth Function URL).
-#    On a machine running colima rather than Docker Desktop, point SAM at
-#    colima's socket first, e.g.:
-#    export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock
-sam build -t infra/tiler.yaml
-sam deploy --stack-name flight-sim-tiler --region us-west-2 \
-  --resolve-s3 --resolve-image-repos --capabilities CAPABILITY_IAM \
-  --no-confirm-changeset --no-fail-on-empty-changeset
+Infrastructure is two AWS CDK (TypeScript) stacks under [infra/](infra/) —
+`flight-sim-tiler` then `flight-sim-edge`, the second consuming the first's
+Function URL directly rather than having it read back out at deploy time.
 
-# 2. edge stack (CloudFront), wired to the tiler stack's outputs
-infra/deploy-edge.sh
+```bash
+# One-time per account:
+#   npx cdk bootstrap aws://<account-id>/us-west-2
+# On a machine running colima rather than Docker Desktop, point Docker at
+# colima's socket first — CDK builds the tiler image locally:
+#   export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock
+infra/deploy.sh
 ```
+
+That builds the client, deploys both stacks, seeds the static bucket on first
+run, uploads the bundle, invalidates the app entry points, and writes
+`client/.env.local`. `.github/workflows/deploy.yml` does the same from CI on
+manual dispatch.
 
 The Function URL is `AWS_IAM`-authed (CloudFront OAC signs origin requests), so
 it can't be `curl`ed directly — smoke-test by invoking the Lambda with a
 Function-URL event instead. See [infra/README.md](infra/README.md) for that,
-the footprint rebuild, and the runtime gotchas baked into the code.
+the footprint rebuild, the runtime gotchas baked into the code, and what to
+check in `cdk diff` before deploying over the live stacks.
 
-`deploy-edge.sh` reads the dev access key from the gitignored repo-root
-`.tile-key`, passes it to CloudFormation as a `NoEcho` parameter, and mirrors
-both the key and the distribution domain into `client/.env.local` so the
-browser and the edge can't drift apart. With no key present the distribution
-deploys open — which is also the escape hatch if you lock yourself out.
+`deploy.sh` reads the dev access key from the gitignored repo-root `.tile-key`,
+passes it to CloudFormation as a `NoEcho` parameter, and mirrors both the key
+and the distribution domain into `client/.env.local` so the browser and the
+edge can't drift apart. With no key present the distribution deploys open —
+which is also the escape hatch if you lock yourself out.
 
 The key is **not** a real secret: it ships in the client bundle and is visible
 in devtools. It exists to keep crawlers and shared URLs from burning
@@ -351,10 +356,11 @@ so origin-side auth would leave every already-cached tile open.
 | File | What |
 |---|---|
 | [FLIGHT-SIM-PLAN.md](FLIGHT-SIM-PLAN.md) | Architecture, locked decisions, and the phased plan — read first |
+| [README-PTOLEMY3D.md](README-PTOLEMY3D.md) | What this demo inherits from pTolemy3D, and what two decades changed |
+| [infra/README.md](infra/README.md) | Deploying the tiler and edge stacks, plus the runtime gotchas |
 | [CHANGELOG.md](CHANGELOG.md) | Notable changes, [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format |
 | [SECURITY.md](SECURITY.md) | How to report a vulnerability privately, and what's in scope |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Short version: this is a prototype, fork freely |
-| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
 
 ## License
 

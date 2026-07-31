@@ -13,7 +13,7 @@ They're kept separate on purpose: usgs13 never changes, S1M grows, so only
 s1m.json needs regenerating when new COGs are indexed. Each file is compact
 GeoJSON with coords rounded to ~1 m (5 dp), gzipped, uploaded with
 Content-Encoding: gzip and immutable Cache-Control. Served via CloudFront's
-/footprints/* S3-origin behavior (infra/edge.yaml).
+/footprints/* S3-origin behavior (infra/lib/edge-stack.ts).
 
     # rebuild + upload just S1M after new coverage lands, then bust the CDN copy
     python scripts/build_footprints.py --which s1m --invalidate
