@@ -1,14 +1,21 @@
 # Infrastructure (plan [§3](../FLIGHT-SIM-PLAN.md#3-architecture), [§7](../FLIGHT-SIM-PLAN.md#7-reuse-from-deckgl-s3-cog-s1m))
 
-Deploy shape reused from `deckgl-s3-cog-s1m`: **foundation → tiler → static
-assets**, all in **us-west-2** (same region as `naip-visualization`, `prd-tnm`
-etc., so requester-pays reads are same-region GET pennies — plan [§2 row 10](../FLIGHT-SIM-PLAN.md#2-locked-decisions)).
+Deploy shape ended up as **tiler → edge**, all in **us-west-2** (same region
+as `naip-visualization`, `prd-tnm` etc., so requester-pays reads are
+same-region GET pennies — plan [§2 row 10](../FLIGHT-SIM-PLAN.md#2-locked-decisions)).
+The original plan called for a separate `foundation.yaml` to provision a
+shared ECR repo and tile/static bucket up front; that stack was never built.
+SAM's `--resolve-s3 --resolve-image-repos` covers the ECR/build-artifact side
+per account, and `edge.yaml`'s `AppStaticBucket` provisions the per-account
+static/DEM-index bucket itself (`threejs-cf-zxy-s1m-<account id>-<region>`),
+seeded on first deploy from one shared, public, requester-pays bucket
+(`mwkorver-foundation-us-west-2`) that holds the master DEM index and
+footprints. No standalone foundation stack needed.
 
 | Stack | Contents | Status |
 |---|---|---|
-| `foundation.yaml` | ECR repo, tile/static S3 bucket, shared IAM | TODO — port foundation pattern from existing repo |
 | `tiler.yaml` | Lambda container (arm64) + IAM-auth Function URL | **deployed** (`flight-sim-tiler`, us-west-2); SAM builds + pushes the image to a managed ECR repo |
-| `edge.yaml` | One CloudFront distribution: tiler Function URL origin via OAC, path-only immutable cache policy. `/buildings/*` + static pyramid → S3 origin come in Phase 1/2 | **deployed** (`flight-sim-edge`); tiles served unsigned over HTTPS, warm CDN hits ~0.1s |
+| `edge.yaml` | One CloudFront distribution: tiler Function URL origin via OAC, path-only immutable cache policy, plus the account's static/DEM-index bucket (`AppStaticBucket`). `/buildings/*` + static pyramid → S3 origin come in Phase 1/2 | **deployed** (`flight-sim-edge`); tiles served unsigned over HTTPS, warm CDN hits ~0.1s |
 
 ## Deploying the tiler
 
@@ -30,20 +37,25 @@ Runtime gotchas baked into the code (all Lambda-specific, worked locally):
 - `duck.py` sets DuckDB `home_directory=/tmp` on Lambda (HOME is empty; only /tmp is writable).
 - `terrain.py` reads far-field `elevation-tiles-prod` (us-east-1) via `/vsicurl/` over the global
   endpoint — the us-west-2 Lambda otherwise gets a 301 GDAL won't follow.
-- No `ReservedConcurrentExecutions`: this account's total concurrency limit is 10.
+- `ReservedConcurrentExecutions: 100` needs account concurrency > 110; this
+  account's limit was raised from the 10 new-account default to 1000
+  (`aws lambda get-account-settings`).
 
 ## Deploying the edge (CloudFront)
 
 ```sh
-# params come from the tiler stack outputs (FunctionUrlDomain, FunctionArn)
-DOMAIN=$(aws cloudformation describe-stacks --stack-name flight-sim-tiler --region us-west-2 \
-  --query "Stacks[0].Outputs[?OutputKey=='FunctionUrlDomain'].OutputValue" --output text)
-ARN=$(aws cloudformation describe-stacks --stack-name flight-sim-tiler --region us-west-2 \
-  --query "Stacks[0].Outputs[?OutputKey=='FunctionArn'].OutputValue" --output text)
-aws cloudformation deploy --template-file infra/edge.yaml --stack-name flight-sim-edge \
-  --region us-west-2 --capabilities CAPABILITY_IAM \
-  --parameter-overrides "TilerFunctionUrlDomain=$DOMAIN" "TilerFunctionArn=$ARN"
+infra/deploy-edge.sh
 ```
+
+Reads tiler stack outputs itself (`flight-sim-tiler` must already be
+deployed), deploys `edge.yaml` — provisioning a fresh account/region bucket
+(`threejs-cf-zxy-s1m-<account id>-<region>`) when `StaticBucketName` isn't
+overridden — seeds that bucket's DEM index + footprints from the shared
+`mwkorver-foundation-us-west-2` seed bucket on first run, builds the client,
+and uploads `client/dist/`. See the script's header comment for the
+`.tile-key` dev-gate setup. Don't run the raw `aws cloudformation deploy`
+by hand: it only stands up the distribution and skips the bucket seed / client
+build / upload steps above, leaving the site unreachable.
 
 Then tiles are public over unsigned HTTPS at
 `https://<DistributionDomain>/terrain/{z}/{x}/{y}.webp` etc.

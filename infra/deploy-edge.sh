@@ -34,6 +34,11 @@ DOMAIN=$(aws cloudformation describe-stacks --stack-name flight-sim-tiler --regi
 ARN=$(aws cloudformation describe-stacks --stack-name flight-sim-tiler --region "$REGION" \
   --query "Stacks[0].Outputs[?OutputKey=='FunctionArn'].OutputValue" --output text)
 
+# StaticBucketName must be passed explicitly every run, even though "" is the
+# template default -- `cloudformation deploy` carries forward the PREVIOUS
+# stack value for any parameter left out of --parameter-overrides on an
+# update, so omitting it would pin an existing stack to whatever bucket it
+# happened to use before, forever, and CreateAppStaticBucket would never fire.
 aws cloudformation deploy \
   --template-file "$ROOT/infra/edge.yaml" \
   --stack-name flight-sim-edge \
@@ -42,7 +47,8 @@ aws cloudformation deploy \
   --parameter-overrides \
     "TilerFunctionUrlDomain=$DOMAIN" \
     "TilerFunctionArn=$ARN" \
-    "TileAccessKey=$KEY"
+    "TileAccessKey=$KEY" \
+    "StaticBucketName="
 
 # Seed the user's account bucket from the master foundation seed bucket if not yet populated
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
