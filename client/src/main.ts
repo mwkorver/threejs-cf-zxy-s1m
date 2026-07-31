@@ -20,15 +20,46 @@ const params = new URLSearchParams(window.location.search);
 const useLocal = params.get("src") === "local";
 const useLocalTiler = params.get("src") === "tiler-local";
 
-// Deployed tile CDN. Mirrored into client/.env.local by infra/deploy.sh
-// from the edge stack's DistributionDomain output — same lockstep trick as
-// VITE_TILE_KEY — so a recreated distribution doesn't need a source edit. The
-// fallback is the current distribution, so an unset var behaves as before.
-const CDN_BASE_URL = import.meta.env.VITE_TILE_BASE_URL ?? "https://REDACTED.cloudfront.net";
+// Deployed tile CDN. Mirrored into client/.env.local by infra/deploy.sh from
+// the edge stack's DistributionDomain output — same lockstep trick as
+// VITE_TILE_KEY — so a recreated distribution doesn't need a source edit.
+//
+// Deliberately no fallback. This used to default to the author's own
+// distribution, left over from before the env var existed. In a public repo
+// that default is actively wrong: a fresh clone with no .env.local would point
+// at someone else's deployment, which is broken for the newcomer (no key, so
+// every tile 403s at the edge) and unwanted traffic for the owner. Failing
+// here instead names the three real options.
+const CDN_BASE_URL: string | undefined = import.meta.env.VITE_TILE_BASE_URL;
 
 const BASE_URL = useLocal
   ? "/tiles"
   : (useLocalTiler ? "http://localhost:8000" : CDN_BASE_URL);
+
+if (!BASE_URL) {
+  // Rendered into the page, not just thrown. Without a tile source this file
+  // never reaches the point of creating a canvas, so the alternative is a
+  // black screen whose only explanation is in devtools — which is exactly the
+  // first thing someone sees after cloning and running `npm run dev`.
+  const help = [
+    "No tile source configured.",
+    "",
+    "Pick one:",
+    "  • Deploy your own stacks — infra/deploy.sh writes VITE_TILE_BASE_URL",
+    "    into client/.env.local for you.",
+    "  • Append ?src=local to fly the baked tiles in client/public/tiles.",
+    "  • Append ?src=tiler-local to point at a tiler running on :8000.",
+  ].join("\n");
+
+  const pre = document.createElement("pre");
+  pre.textContent = help; // textContent, not innerHTML — no markup in, none out
+  pre.style.cssText =
+    "position:fixed;inset:0;margin:0;padding:2rem;background:#0b0e13;color:#8ab4f8;" +
+    "font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap";
+  document.body.appendChild(pre);
+
+  throw new Error(help);
+}
 
 const LAYER = params.get("layer") ?? "naip-visualization";
 const YEAR = Number(params.get("year") ?? 2023);
