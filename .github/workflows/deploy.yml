@@ -62,6 +62,17 @@ jobs:
         working-directory: infra
         run: npm ci
 
+      # The tiler image is linux/arm64 (Graviton) and this runner is x86_64, so
+      # the build needs binfmt handlers registered or every RUN step in the
+      # Dockerfile dies with "exec format error". Free ARM runners are public-
+      # repo only and this repo is private, so emulation is the option —
+      # expect this build to take considerably longer than it does locally on
+      # an arm64 Mac. pip pulls prebuilt aarch64 wheels rather than compiling,
+      # which is the only reason it's tolerable at all.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       # The runner has Docker, so the tiler image asset builds here rather than
       # on someone's laptop — which is the main thing this workflow buys.
       - name: Deploy
