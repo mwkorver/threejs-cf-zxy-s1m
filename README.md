@@ -79,16 +79,35 @@ and every viewer shares one immutable object per tile. Adopting TiTiler would
 mean locking down most of what makes it worth adopting.
 
 [**cogeo-mosaic**](https://github.com/developmentseed/cogeo-mosaic) is the
-closer call, and its MosaicJSON model is a good fit for a fixed set of assets.
-The mismatch is that the asset set here isn't fixed: NAIP is re-flown per state
-per year, and S1M coverage grows as USGS publishes. The resolver answers "newest
-year at or before the requested one, per region, finest gsd first" as a query
-against a Hive-partitioned GeoParquet index, so new COGs appear by writing
-Parquet rather than by regenerating and republishing a MosaicJSON. That's one
-~20-line SQL builder ([`resolver.py`](tiler/src/tiler/resolver.py)), and
-rio-tiler's `mosaic_reader` still does the pixel work.
+closer call, and the honest answer is narrower than "the asset set is dynamic."
 
-If the asset set were static, cogeo-mosaic would win outright.
+That defence doesn't hold up. NAIP is re-flown per state every year or two, and
+S1M grows in batches — the last index rebuild added 1,536 tiles and retired 128
+out of ~11.7k. That's a periodic batch job, not a stream, and a MosaicJSON
+regenerated on the same cadence would track it perfectly well. The
+newest-vintage-per-region rule isn't the differentiator either: it can be baked
+in at build time, one mosaic per requested year, each carrying every region's
+newest vintage at or before it. On the merits of the data alone, cogeo-mosaic
+would do this job.
+
+The actual reason is ownership. The GeoParquet lake is shared, canonical
+infrastructure this repo *reads but does not write* — the ingest pipeline in
+[`deckgl-s3-cog-s1m`](https://github.com/mwkorver/deckgl-s3-cog-s1m) maintains
+it, and the analytic RGBIR collection sitting beside `naip-visualization`
+belongs to that project. It already answers "which COGs intersect this tile,"
+which is precisely `/search`. Adopting MosaicJSON would mean deriving and
+republishing a second index from an upstream this repo doesn't control, then
+keeping the two in step forever. Querying the index directly is one ~20-line
+SQL builder ([`resolver.py`](tiler/src/tiler/resolver.py)); rio-tiler's
+`mosaic_reader` still does the pixel work either way.
+
+That choice has a real cost, worth stating plainly: DuckDB rides along in the
+Lambda (extensions baked into the image so the cold path doesn't pay a
+download), the SQL is mine to maintain, and the index has to be written with a
+row-group size small enough that statistics-based pruning does anything at all
+— a regression there is invisible until you profile. cogeo-mosaic is less code
+and far better tested. This is a reuse decision, not a capability one: without
+an existing shared lake, MosaicJSON wins.
 
 ## Architecture
 

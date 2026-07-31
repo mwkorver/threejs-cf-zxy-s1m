@@ -4,15 +4,19 @@ Region pruning to shrink the S3 LIST, a cheap bbox-column prune, then an exact
 ST_Intersects refine. Lake geometry/bbox columns are EPSG:4326; tile bounds come
 from morecantile's geographic bounds, so no CRS juggling.
 
-Not cogeo-mosaic (whose MosaicJSON model covers this exact job) because the
-asset set isn't fixed: NAIP is re-flown per state per year and S1M coverage
-grows as USGS publishes, so "newest year at or before the requested one, per
-region, finest gsd first" is answered as a query against a Hive-partitioned
-GeoParquet index. New COGs then appear by writing Parquet instead of
-regenerating and republishing a MosaicJSON. rio-tiler's mosaic_reader still
-does the pixel work (see imagery.py); this module only decides *which* assets.
-Were the asset set static, cogeo-mosaic would be the better choice — the README
-has the longer version.
+Not cogeo-mosaic, but not because the asset set is too dynamic for MosaicJSON —
+it isn't. NAIP is re-flown per state every year or two and S1M grows in batches,
+so a mosaic regenerated on the same cadence as the index would track it fine,
+and the newest-vintage-per-region rule could be baked in at build time.
+
+The reason is ownership: the lake is shared infrastructure this repo reads but
+does not write (deckgl-s3-cog-s1m's ingest pipeline maintains it), and it
+already answers "which COGs intersect this tile." MosaicJSON would mean
+deriving and republishing a second index from an upstream this repo doesn't
+control, and keeping the two in step. The cost of querying directly is DuckDB
+in the Lambda plus the SQL below being ours to maintain. rio-tiler's
+mosaic_reader still does the pixel work (see imagery.py); this module only
+decides *which* assets. The README has the longer version.
 """
 
 import logging
