@@ -1,0 +1,90 @@
+name: Deploy
+
+# Manual only. This deploys real infrastructure and costs real money, and the
+# demo has exactly one operator — auto-deploying every push to master would
+# mean a CloudFront update (and a ~15 minute propagation) on every README typo.
+on:
+  workflow_dispatch:
+    inputs:
+      stacks:
+        description: Which stacks to deploy
+        required: true
+        default: --all
+        type: choice
+        options:
+          - --all
+          - flight-sim-tiler
+          - flight-sim-edge
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false # never interrupt an in-flight CloudFormation update
+
+permissions:
+  id-token: write # OIDC: mint short-lived creds, no stored access keys
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: us-west-2
+    steps:
+      - uses: actions/checkout@v4
+
+      # Requires a GitHub OIDC provider and a deploy role in the account,
+      # trusting this repo. See infra/README.md for the one-time setup.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            client/package-lock.json
+            infra/package-lock.json
+
+      # The edge stack serves whatever is in client/dist, so build before synth.
+      - name: Build client
+        working-directory: client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install CDK deps
+        working-directory: infra
+        run: npm ci
+
+      # The runner has Docker, so the tiler image asset builds here rather than
+      # on someone's laptop — which is the main thing this workflow buys.
+      - name: Deploy
+        working-directory: infra
+        run: |
+          npx cdk deploy ${{ inputs.stacks }} \
+            --require-approval never \
+            --parameters "flight-sim-edge:TileAccessKey=${TILE_ACCESS_KEY}"
+        env:
+          TILE_ACCESS_KEY: ${{ secrets.TILE_ACCESS_KEY }}
+
+      - name: Publish web app
+        run: |
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          BUCKET="threejs-cf-zxy-s1m-${ACCOUNT_ID}-${AWS_REGION}"
+          # NOT --delete: this bucket also holds the seeded manifest-index/ and
+          # footprints/ trees, which client/dist knows nothing about.
+          aws s3 sync client/dist/ "s3://${BUCKET}/"
+
+      - name: Invalidate app entry points
+        run: |
+          DIST_ID="$(aws cloudformation describe-stack-resources \
+            --stack-name flight-sim-edge --region "$AWS_REGION" \
+            --query "StackResources[?LogicalResourceId=='Distribution'].PhysicalResourceId" \
+            --output text)"
+          # Only the app entry points. NOT /* — that would evict every cached
+          # tile, and each one costs a cold Lambda render to rebuild.
+          aws cloudfront create-invalidation --distribution-id "$DIST_ID" \
+            --paths "/index.html" "/assets/*"
