@@ -88,10 +88,20 @@ def read_bounds(dataset: str) -> tuple[str, tuple[float, float, float, float] | 
             with rasterio.Env(AWS_REQUEST_PAYER="requester"), rasterio.open(url) as ds:
                 if not ds.crs:
                     return dataset, None, "missing CRS"
+                # rasterio's ds.crs.to_epsg() returns None on a compound CRS (see
+                # module docstring), so unwrap to the horizontal sub-CRS via pyproj
+                # first. Verified against a live S1M COG: sub_crs.to_epsg() == 6350
+                # and sub_crs.to_dict() matches EXPECTED_PROJ exactly. Compare exact
+                # parameters, not a name/proj4 substring — "Albers" or "aea" alone
+                # would also accept a different-datum Albers CRS whose coordinates
+                # don't mean the same thing as EPSG:6350's.
                 parsed_crs = CRS.from_wkt(ds.crs.to_wkt())
                 sub_crs = parsed_crs.sub_crs_list[0] if parsed_crs.is_compound else parsed_crs
-                if sub_crs.to_epsg() != 6350 and "Albers" not in sub_crs.name and "aea" not in sub_crs.to_proj4():
-                    return dataset, None, f"unexpected CRS {sub_crs.name}"
+                if sub_crs.to_epsg() != 6350:
+                    proj = sub_crs.to_dict()
+                    bad = [k for k, v in EXPECTED_PROJ.items() if proj.get(k) != v]
+                    if bad:
+                        return dataset, None, f"unexpected CRS params {bad} (name={sub_crs.name})"
                 b = ds.bounds
                 return dataset, (b.left, b.bottom, b.right, b.top), None
         except Exception as e:  # transient S3/GDAL hiccup

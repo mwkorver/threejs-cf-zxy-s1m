@@ -101,7 +101,8 @@ test.describe("WebGL Tile Coverage Gaps & GPU Memory Pressure Tests", () => {
 
     const cacheMemoryReadouts: number[] = [];
 
-    for (let step = 0; step < 3; step++) {
+    for (let step = 0; step < 10; step++) {
+      await page.waitForTimeout(100);
       await page.evaluate(() => window.__STEP_FRAME__?.(100));
 
       const cacheText = await page.locator("#hud-cache").textContent();

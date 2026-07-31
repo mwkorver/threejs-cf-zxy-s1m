@@ -44,7 +44,13 @@ def connect(region: str) -> duckdb.DuckDBPyConnection:
     # public ones. Same setting the existing repo runs in production.
     con.execute("SET s3_requester_pays=true;")
 
-    # Configure memory safety limits to prevent Lambda container OOM kills
+    # DuckDB shares this container with GDAL/rasterio, which hold the other
+    # major allocations (warp buffers, WebP encode) in the same process. Cap
+    # DuckDB at half the Lambda's configured memory (infra/tiler.yaml
+    # MemorySize: 3008 MB) rather than let it grow unbounded and leave GDAL to
+    # fight over what's left. threads=2 similarly bounds DuckDB's own query
+    # parallelism -- independent of GDAL_NUM_THREADS (a different library's
+    # pool), but both draw from the same ~1.7 vCPU that memory size buys.
     con.execute("SET max_memory='1.5GB';")
     con.execute("SET threads=2;")
     return con

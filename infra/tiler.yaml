@@ -30,7 +30,10 @@ Resources:
         AuthType: AWS_IAM # CloudFront OAC signs origin requests
       Environment:
         Variables:
-          AWS_REQUEST_PAYER: "requester"
+          # No blanket AWS_REQUEST_PAYER here: requester-pays is scoped per-asset
+          # in imagery.py/terrain.py via rasterio.Env(...), matching the comment
+          # on the policy below. A process-wide env var would send the header on
+          # every GDAL read regardless, making that per-asset check dead code.
           TILER_LAKE_PATH: "s3://naip-geoparquet-index/manifest-index"
           TILER_S1M_INDEX_PATH: !Sub "s3://threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}/manifest-index/s1m/S1M_Products.parquet"
           TILER_SEED_BUCKET_PATH: "s3://mwkorver-foundation-us-west-2/threejs-cf-zxy-s1m/"
@@ -60,13 +63,17 @@ Resources:
                 - "arn:aws:s3:::prd-tnm/*"               # S1M terrain COGs
                 - "arn:aws:s3:::elevation-tiles-prod/*"  # far-field terrain
                 - "arn:aws:s3:::mwkorver-foundation-us-west-2/*"  # master foundation seed bucket
-                - "arn:aws:s3:::threejs-cf-zxy-s1m-*"             # account-specific user deployment buckets
+                # Exact bucket, not a "threejs-cf-zxy-s1m-*" prefix wildcard: S3
+                # names are globally unique across ALL AWS accounts, so a prefix
+                # wildcard here would also match any bucket anyone else ever
+                # names starting with this prefix, not just this deployment's own.
+                - !Sub "arn:aws:s3:::threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}/*"
                 - "arn:aws:s3:::naip-geoparquet-index/*"        # canonical NAIP lake index
             - Effect: Allow
               Action: ["s3:ListBucket"]
               Resource:
                 - "arn:aws:s3:::mwkorver-foundation-us-west-2"
-                - "arn:aws:s3:::threejs-cf-zxy-s1m-*"
+                - !Sub "arn:aws:s3:::threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}"
                 - "arn:aws:s3:::naip-geoparquet-index"
 
 Outputs:

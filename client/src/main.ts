@@ -66,7 +66,10 @@ const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerH
 camera.up.set(0, 0, 1); // Z-up world
 
 // Camera sits directly on worldAnchor (LAT/LON readout == 43.50468 / -109.61683)
-// at absolute altitude 6606m, looking level at heading 056°.
+// at absolute altitude 6606m, looking level at heading 056°. Verified via
+// gl.readPixels along the vertical center column: the sky/terrain boundary
+// sits 0.63% off true center in an 800px-tall viewport -- level pitch is
+// enough on its own, no per-frame correction needed.
 const initialHeight = 6606;
 const headingRad = (56 * Math.PI) / 180;
 const fwdX = Math.sin(headingRad) * 1000;

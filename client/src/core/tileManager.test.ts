@@ -1038,8 +1038,15 @@ describe("TileManager parent fallback retention and memory safety", () => {
 
     // Active keys set remains defined and active
     expect(tm.getActiveKeys().size).toBeGreaterThan(0);
-    // Cache bytes tracked remain capped or evicted cleanly
-    expect(tinyCache.bytesUsed()).toBeGreaterThanOrEqual(0);
+    // The 1KB budget above is unenforceable on its own -- pinned/active tiles
+    // are exempt from eviction (bundleCache.test.ts covers that directly), and
+    // this test's fake tiler host makes every fetch fail, so bundleCache never
+    // receives a put() and bytesUsed() stays 0 regardless of whether eviction
+    // works (verified: asserting >=0 on it passes unconditionally and proves
+    // nothing). What rapid camera churn CAN blow up is the active-tile count
+    // itself, which is what actually bounds the cache budget in practice
+    // (tileManager.ts:512) -- assert that cap held under the churn instead.
+    expect(tm.getActiveKeys().size).toBeLessThanOrEqual(tm.maxActiveTiles);
   });
 });
 

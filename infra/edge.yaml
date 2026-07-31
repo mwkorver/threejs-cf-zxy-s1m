@@ -27,13 +27,23 @@ Parameters:
     Description: >
       Optional custom bucket holding pre-genned static assets served straight from S3
       under /footprints/* — e.g. footprints/{s1m,usgs13}.json built by
-      tiler/scripts/build_footprints.py. Defaults dynamically to user account bucket
-      threejs-cf-zxy-s1m-${AWS::AccountId}-${AWS::Region}.
+      tiler/scripts/build_footprints.py, and the compiled web app. Empty (the
+      default) provisions an account- and region-specific bucket instead, named
+      threejs-cf-zxy-s1m-<account id>-<region> (see AppStaticBucket below).
 
 Conditions:
   HasCustomStaticBucket: !Not [!Equals [!Ref StaticBucketName, ""]]
   CreateAppStaticBucket: !Equals [!Ref StaticBucketName, ""]
   KeyEnabled: !Not [!Equals [!Ref TileAccessKey, ""]]
+
+Mappings:
+  # AWS-managed CloudFront cache policies have no CloudFormation resource to
+  # !Ref -- their IDs are permanent, AWS-documented constants, referenced
+  # here by name instead of repeating the bare GUID at each use site.
+  # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html
+  CloudFrontManagedPolicies:
+    CachingOptimized:
+      Id: 658327ea-f89d-4fab-a63d-7e88639e58f6
 
 Resources:
   # Dev gate. MUST run on viewer-request, not at the origin: CloudFront serves
@@ -129,10 +139,16 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
-  # Scoped read for CloudFront's OAC: only footprints/*, only from this
-  # distribution. Not a "public" policy (service principal + SourceArn), so it's
-  # allowed despite the bucket's BlockPublicPolicy. The bucket has no other
-  # policy, so this stack owns it outright.
+  # Whole-bucket read for CloudFront's OAC, only from this distribution. Not
+  # footprints/*-only: there is one "static" origin (below) for both the
+  # compiled web app (index.html, /assets/*) and footprints/*.json, whether
+  # it's the auto-created AppStaticBucket or a custom StaticBucketName, so
+  # OAC needs the whole tree in either case. Still not a "public" policy
+  # (service principal + SourceArn condition), so it's allowed despite the
+  # bucket's BlockPublicPolicy; the auto-created bucket has no other policy,
+  # so this stack owns it outright, but a custom bucket may have other
+  # objects this grants read on too -- BYO-bucket callers should account
+  # for that.
   StaticBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -140,7 +156,7 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: AllowCloudFrontOACReadFootprints
+          - Sid: AllowCloudFrontOACRead
             Effect: Allow
             Principal:
               Service: cloudfront.amazonaws.com
@@ -205,7 +221,7 @@ Resources:
         DefaultCacheBehavior: # Default root / serves web viewer application (index.html, JS, CSS)
           TargetOriginId: static
           ViewerProtocolPolicy: redirect-to-https
-          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # CachingOptimized managed policy
+          CachePolicyId: !FindInMap [CloudFrontManagedPolicies, CachingOptimized, Id]
           AllowedMethods: [GET, HEAD]
           Compress: true
         CacheBehaviors:
@@ -262,7 +278,7 @@ Resources:
           - PathPattern: /assets/*
             TargetOriginId: static
             ViewerProtocolPolicy: https-only
-            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # CachingOptimized managed policy
+            CachePolicyId: !FindInMap [CloudFrontManagedPolicies, CachingOptimized, Id]
             AllowedMethods: [GET, HEAD]
             Compress: true
 
