@@ -8,7 +8,7 @@
 > **Public prototype, released under [MIT](LICENSE) — use, fork, and adapt it freely.**
 > It is provided as-is, with no support or active maintenance; issues and pull
 > requests aren't monitored, so please fork rather than wait on changes here.
-> It is the companion to
+> This demo builds off of
 > [deckgl-s3-cog-s1m](https://github.com/mwkorver/deckgl-s3-cog-s1m), which
 > renders the same federal datasets with the opposite architecture.
 
@@ -23,13 +23,13 @@ USGS 3DEP S1M 1-meter terrain, normalized server-side onto a single EPSG:3857
 
 ## Why this repository exists
 
-Its sibling project, [deckgl-s3-cog-s1m](https://github.com/mwkorver/deckgl-s3-cog-s1m),
+It's sibling project, [deckgl-s3-cog-s1m](https://github.com/mwkorver/deckgl-s3-cog-s1m),
 reads Cloud-Optimized GeoTIFFs **directly in the browser** over HTTP range
 requests — no tile server, no terrain server. That architecture is excellent
 for inspecting a viewport: you see exactly the source pixels, and the only
 backend is a small index lookup.
 
-It is a poor fit for *flight*. A camera moving at 800 knots crosses tile
+But that is a poor fit for *flight*. A camera moving at 800 knots crosses tile
 boundaries several times a second, and every new COG means fresh range reads,
 fresh TIFF decode, and a per-source CRS warp on the client — all while the
 frame budget is 16 ms. The client also has to understand every source's
@@ -40,7 +40,7 @@ So this repository inverts the design. Every source — 1 m or 10 m DEM, COG
 mosaic or proxied pyramid — is normalized **server-side** onto the same 512 px
 `z/x/y` grid and encoding, so the client speaks exactly one tile contract and
 never learns which source produced a tile. Warm tiles are CloudFront edge hits;
-only misses invoke a Lambda. The browser gets to spend its budget on rendering.
+only misses invoke Lambda. The browser gets to focus on rendering.
 
 The trade is explicit: you give up direct-from-source pixels and accept a
 render tier, in exchange for a client simple enough to fly.
@@ -48,11 +48,10 @@ render tier, in exchange for a client simple enough to fly.
 ### A twenty-year callback
 
 Part of the interest in building this was to find out whether anything we built
-into [**pTolemy3D**](https://github.com/mwkorver/ptolemy3d) twenty years ago
+into [**pTolemy3D**](https://github.com/mwkorver/ptolemy3d) over twenty years ago
 still holds up. That viewer solved
 streaming-terrain flight in Java and JOGL, against JPEG2000 imagery and a very
-different web — but the hard parts of flying a camera over tiles it does not
-have yet turn out not to have changed much.
+different web — but the hard parts of flying a camera over tiles have not changed much.
 
 Several of its ideas came across intact: a background loading pipeline so the
 render loop never stalls, nearest-tile-first scheduling so the closest terrain
@@ -66,7 +65,7 @@ original implementation to where it now lives in `client/src/core/`.
 
 ### Why not TiTiler or cogeo-mosaic?
 
-Fair question, since both exist and this repo leans on
+Good question, since both exist and this repo leans on
 [rio-tiler](https://github.com/cogeotiff/rio-tiler) for the actual reads.
 
 [**TiTiler**](https://github.com/developmentseed/titiler) is a more capable
