@@ -42,9 +42,38 @@ at colima's socket first — CDK builds the tiler image locally:
 export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock
 ```
 
-`.github/workflows/deploy.yml` does the same from CI (manual dispatch only). It
-needs a GitHub OIDC provider plus a deploy role in the account, with the role
-ARN in the `AWS_DEPLOY_ROLE_ARN` secret and the dev key in `TILE_ACCESS_KEY`.
+`.github/workflows/deploy.yml` does the same from CI (manual dispatch only),
+authenticating through GitHub OIDC — no stored AWS access keys.
+
+### CI deploy setup (one time)
+
+`flight-sim-github-oidc` (`lib/github-oidc-stack.ts`) holds the OIDC provider
+and the role CI assumes. Deploy it **from a workstation** — it creates the role
+CI logs in with, so CI can't be what creates it — and it is deliberately not
+part of `deploy.sh` or the workflow's stack choices:
+
+```bash
+cd infra && npx cdk deploy flight-sim-github-oidc
+```
+
+Then set two repo secrets from its `DeployRoleArn` output and your `.tile-key`:
+
+```bash
+gh secret set AWS_DEPLOY_ROLE_ARN --body "arn:aws:iam::<account>:role/flight-sim-github-deploy"
+gh secret set TILE_ACCESS_KEY --body "$(tr -d '[:space:]' < .tile-key)"
+```
+
+Two things the trust policy depends on, both easy to break:
+
+- The role trusts exactly `repo:<owner>/<repo>:environment:production`, matched
+  with `StringEquals`. **Removing `environment: production` from the workflow
+  job changes the OIDC subject claim and auth will start failing** with an
+  unhelpful STS error. Wildcards are avoided on purpose here — `repo:owner/*`
+  would let any repo under the account's owner assume this role.
+- The role itself holds no managed policies. It can assume the CDK bootstrap
+  roles and do the workflow's own S3/CloudFormation/CloudFront steps, nothing
+  more. Its effective ceiling is still what `cdk-hnb659fds-cfn-exec-role` can
+  do, which is inherent to how CDK bootstrap works.
 
 ## Working on the stacks
 

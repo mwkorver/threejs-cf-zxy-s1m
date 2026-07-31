@@ -42,12 +42,13 @@ USER_BUCKET="threejs-cf-zxy-s1m-${ACCOUNT_ID}-${REGION}"
 echo "-- building web viewer application bundle..."
 (cd "$ROOT/client" && npm run build)
 
-# Tiler first — the edge stack imports its Function URL and ARN.
+# Tiler first — the edge stack imports its Function URL and ARN. Named
+# explicitly rather than --all: flight-sim-github-oidc is one-time setup that
+# creates the role CI logs in with, and has no business in a routine deploy.
 echo "-- deploying stacks..."
-(cd "$ROOT/infra" && npx cdk deploy \
+(cd "$ROOT/infra" && npx cdk deploy flight-sim-tiler flight-sim-edge \
   --require-approval never \
-  --parameters "flight-sim-edge:TileAccessKey=${KEY}" \
-  --all)
+  --parameters "flight-sim-edge:TileAccessKey=${KEY}")
 
 # One-time data seed. The static bucket holds the DEM index and footprints as
 # well as the web app; a fresh account starts empty, so pull them from the

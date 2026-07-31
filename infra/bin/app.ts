@@ -2,6 +2,7 @@
 import { App } from "aws-cdk-lib";
 import { TilerStack } from "../lib/tiler-stack.js";
 import { EdgeStack } from "../lib/edge-stack.js";
+import { GithubOidcStack } from "../lib/github-oidc-stack.js";
 
 const app = new App();
 
@@ -43,4 +44,15 @@ new EdgeStack(app, "flight-sim-edge", {
   tilerFunctionUrlDomain: tiler.functionUrlDomain,
   tilerFunctionArn: tiler.functionArn,
   description: "flight-sim edge: CloudFront distribution over the tiler and the static app bucket",
+});
+
+// Deployed from a workstation, not by CI — it creates the role CI logs in
+// with. Kept out of `--all` deploys (infra/deploy.sh) for the same reason:
+// it's one-time setup, not part of shipping a change.
+new GithubOidcStack(app, "flight-sim-github-oidc", {
+  env,
+  staticBucket,
+  repo: app.node.tryGetContext("githubRepo") ?? "mwkorver/threejs-cf-zxy-s1m",
+  environment: app.node.tryGetContext("githubEnvironment") ?? "production",
+  description: "GitHub Actions OIDC provider and the deploy role it assumes",
 });

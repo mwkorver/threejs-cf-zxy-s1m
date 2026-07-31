@@ -9,10 +9,13 @@ on:
       stacks:
         description: Which stacks to deploy
         required: true
-        default: --all
+        default: flight-sim-tiler flight-sim-edge
         type: choice
         options:
-          - --all
+          # Never --all: that would include flight-sim-github-oidc, the stack
+          # holding the role this workflow authenticates with. It is one-time
+          # setup, deployed from a workstation.
+          - flight-sim-tiler flight-sim-edge
           - flight-sim-tiler
           - flight-sim-edge
 
