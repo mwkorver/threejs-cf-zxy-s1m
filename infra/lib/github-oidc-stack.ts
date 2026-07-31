@@ -3,13 +3,27 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import type { Construct } from "constructs";
 
 export interface GithubOidcStackProps extends StackProps {
-  /** "owner/repo" allowed to assume the deploy role. */
+  /** "owner/repo", for human-readable descriptions only — not the trust match. */
   readonly repo: string;
   /**
-   * GitHub environment the workflow job declares. The OIDC subject claim is
-   * `repo:<owner>/<repo>:environment:<name>` for a job with an `environment:`,
-   * so this scopes the trust to that job specifically rather than to any
-   * workflow in the repo.
+   * The repo's OIDC subject prefix, verbatim. Read it from GitHub rather than
+   * assuming the familiar `repo:<owner>/<repo>` shape:
+   *
+   *   gh api repos/<owner>/<repo>/actions/oidc/customization/sub \
+   *     -q .sub_claim_prefix
+   *
+   * GitHub now issues ID-qualified subjects for repos like this one —
+   * `repo:owner@<user id>/<repo>@<repo id>`. Guessing the plain form produces
+   * a trust policy that looks correct, deploys clean, and then fails every run
+   * with "Not authorized to perform sts:AssumeRoleWithWebIdentity" and no clue
+   * as to why. The embedded IDs are worth having: they survive a rename, so
+   * nobody can claim the old name and inherit this trust.
+   */
+  readonly subjectPrefix: string;
+  /**
+   * GitHub environment the workflow job declares. The subject claim is
+   * `<subjectPrefix>:environment:<name>` for a job with an `environment:`, so
+   * this scopes trust to that job rather than to any workflow in the repo.
    */
   readonly environment: string;
   /** Static bucket the workflow syncs the built client into. */
@@ -28,7 +42,7 @@ export class GithubOidcStack extends Stack {
   constructor(scope: Construct, id: string, props: GithubOidcStackProps) {
     super(scope, id, props);
 
-    const { repo, environment, staticBucket } = props;
+    const { repo, subjectPrefix, environment, staticBucket } = props;
 
     // L1 with explicit thumbprints rather than the L2, which provisions a
     // custom-resource Lambda purely to fetch them. AWS stopped validating the
@@ -52,13 +66,12 @@ export class GithubOidcStack extends Stack {
     const role = new iam.Role(this, "GithubDeployRole", {
       roleName: "flight-sim-github-deploy",
       description: `Assumed by GitHub Actions in ${repo} (environment: ${environment}) to deploy the flight-sim stacks`,
-      maxSessionDuration: undefined,
       assumedBy: new iam.FederatedPrincipal(
         provider.attrArn,
         {
           StringEquals: {
             "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-            "token.actions.githubusercontent.com:sub": `repo:${repo}:environment:${environment}`,
+            "token.actions.githubusercontent.com:sub": `${subjectPrefix}:environment:${environment}`,
           },
         },
         "sts:AssumeRoleWithWebIdentity",

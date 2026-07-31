@@ -53,6 +53,12 @@ new GithubOidcStack(app, "flight-sim-github-oidc", {
   env,
   staticBucket,
   repo: app.node.tryGetContext("githubRepo") ?? "mwkorver/threejs-cf-zxy-s1m",
+  // Verbatim from GitHub, NOT assembled from the repo name — see the prop's
+  // doc comment. Re-read it with:
+  //   gh api repos/<owner>/<repo>/actions/oidc/customization/sub -q .sub_claim_prefix
+  subjectPrefix:
+    app.node.tryGetContext("githubSubjectPrefix") ??
+    "repo:mwkorver@810781/threejs-cf-zxy-s1m@1297975106",
   environment: app.node.tryGetContext("githubEnvironment") ?? "production",
   description: "GitHub Actions OIDC provider and the deploy role it assumes",
 });
