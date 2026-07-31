@@ -3,6 +3,7 @@ import re
 from unittest.mock import patch
 
 from tiler.resolver import (
+    MAX_ASSETS_PER_TILE,
     REQUESTER_PAYS_BUCKETS,
     DEM_INDEX_EPSG,
     CogAsset,
@@ -26,18 +27,32 @@ def test_query_has_prune_and_refine():
     paths = ["s3://b/lake/collection=naip/region=nj/year=*/*.parquet"]
     sql, params = build_tile_query(paths, west=-74.5, south=40.4, east=-74.4,
                                    north=40.5, requested_year=2021)
-    # Paths are bound, not spliced into the SQL text.
-    assert params == [paths, paths]
+    # Nothing variable is spliced into the SQL text — the query string is the
+    # same for every tile so DuckDB can reuse one prepared statement.
     assert "s3://b/lake" not in sql
+    assert "-74.5" not in sql and "40.4" not in sql and "2021" not in sql
+    # Bindings, in placeholder order: paths, bbox prune (E,W,N,S), envelope
+    # refine (W,S,E,N), paths again for the year subquery, year, row cap.
+    assert params == [
+        paths,
+        -74.4, -74.5, 40.5, 40.4,
+        -74.5, 40.4, -74.4, 40.5,
+        paths,
+        2021,
+        MAX_ASSETS_PER_TILE,
+    ]
     # cheap bbox-column prune against row-group stats...
-    assert "bbox[1] <= -74.4" in sql and "bbox[3] >= -74.5" in sql
-    assert "bbox[2] <= 40.5" in sql and "bbox[4] >= 40.4" in sql
+    assert "bbox[1] <= ? and bbox[3] >= ?" in sql
+    assert "bbox[2] <= ? and bbox[4] >= ?" in sql
     # ...then exact footprint refine
-    assert "ST_Intersects(geometry, ST_MakeEnvelope(-74.5, 40.4, -74.4, 40.5))" in sql
+    assert "ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))" in sql
+    # the asset href is derived once, not repeated per use site
+    assert sql.count("JSON_EXTRACT_STRING") == 2  # the one COALESCE pair
+    assert "regexp_extract(asset_href" in sql
     # latest year first, then finest source
     assert "order by year desc, gsd asc" in sql
     # year filter and group-by-region cross-year fallback subquery
-    assert "year <= 2021" in sql
+    assert "where year <= ?" in sql
     assert "group by region" in sql
     assert "hive_partitioning=true" in sql
 

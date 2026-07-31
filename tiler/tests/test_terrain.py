@@ -1,6 +1,7 @@
 """Terrain rendering tests. S3 reads are mocked; the encoding round-trip and
 tile assembly are exercised for real."""
 
+from collections import Counter
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -193,7 +194,14 @@ def test_farfield_transient_child_fails_tile_after_retry():
     ):
         with pytest.raises(terrain.TransientTerrainError):
             terrain.render_farfield_tile(7, 1, 1, 512)
-    assert len(calls) == terrain._FARFIELD_ATTEMPTS  # first child retried, then raised
+    # The four children are read concurrently, so all four are in flight before
+    # any failure is known — unlike the old sequential loop, which gave up after
+    # the first child and left the other three untouched. Assert every child was
+    # attempted AND each one retried, which pins the retry behaviour per child
+    # rather than only for whichever child happened to run first.
+    assert len(calls) == 4 * terrain._FARFIELD_ATTEMPTS
+    assert set(Counter(calls).values()) == {terrain._FARFIELD_ATTEMPTS}
+    assert len(set(calls)) == 4  # one distinct URL per quadrant
 
 
 def test_mosaic_read_errors_propagate():

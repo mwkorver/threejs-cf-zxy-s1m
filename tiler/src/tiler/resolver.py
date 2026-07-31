@@ -65,30 +65,52 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
     Finds the latest available year up to the requested year for each state/region,
     and layers the more recent year on top.
 
-    Returns the SQL and its bound parameters. Paths are bound rather than
-    interpolated so nothing has to hand-escape quotes; the envelope and year are
-    numbers this module computes itself.
+    Returns the SQL and its bound parameters. Everything variable is bound, so
+    the SQL text is identical for every tile and DuckDB can reuse one prepared
+    statement instead of re-parsing and re-planning a freshly formatted string
+    per request. (This is not an injection defence: `year` arrives as an int
+    from FastAPI's path validation and the envelope is floats this module
+    computes from morecantile. Binding also keeps float repr — exponent
+    notation, precision — out of the query text.)
+
+    The asset href is derived once in a CTE rather than repeating the same
+    COALESCE(JSON_EXTRACT_STRING(...)) in the select list, the bucket regex and
+    the LIKE filter, which had it evaluated four times per candidate row.
     """
-    sql = f"""
-        select COALESCE(JSON_EXTRACT_STRING(assets, '$.data.href'), JSON_EXTRACT_STRING(assets, '$.visual.href')) as asset_href,
-               regexp_extract(COALESCE(JSON_EXTRACT_STRING(assets, '$.data.href'), JSON_EXTRACT_STRING(assets, '$.visual.href')), 's3://([^/]+)', 1) as source_bucket,
-               CAST(JSON_EXTRACT(properties, '$.gsd') AS DOUBLE) as gsd
-        from read_parquet(?, hive_partitioning=true)
-        where bbox[1] <= {east} and bbox[3] >= {west}
-          and bbox[2] <= {north} and bbox[4] >= {south}
-          and ST_Intersects(geometry, ST_MakeEnvelope({west}, {south}, {east}, {north}))
-          and COALESCE(JSON_EXTRACT_STRING(assets, '$.data.href'), JSON_EXTRACT_STRING(assets, '$.visual.href')) LIKE 's3://naip-visualization/%'
+    sql = """
+        with candidates as (
+            select COALESCE(JSON_EXTRACT_STRING(assets, '$.data.href'),
+                            JSON_EXTRACT_STRING(assets, '$.visual.href')) as asset_href,
+                   CAST(JSON_EXTRACT(properties, '$.gsd') AS DOUBLE) as gsd,
+                   region, year, id
+            from read_parquet(?, hive_partitioning=true)
+            where bbox[1] <= ? and bbox[3] >= ?
+              and bbox[2] <= ? and bbox[4] >= ?
+              and ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))
+        )
+        select asset_href,
+               regexp_extract(asset_href, 's3://([^/]+)', 1) as source_bucket,
+               gsd
+        from candidates
+        where asset_href LIKE 's3://naip-visualization/%'
           and (region, year) in (
               select region, max(year)
               from read_parquet(?, hive_partitioning=true)
-              where year <= {requested_year}
+              where year <= ?
               group by region
           )
         order by year desc, gsd asc nulls last, id asc
-        limit {MAX_ASSETS_PER_TILE}
+        limit ?
     """
-    # One binding per read_parquet(?), in the order they appear.
-    return sql, [read_paths, read_paths]
+    # Positional, in the order the ? placeholders appear above.
+    return sql, [
+        read_paths,
+        east, west, north, south,          # bbox-column prune
+        west, south, east, north,          # ST_MakeEnvelope refine
+        read_paths,
+        requested_year,
+        MAX_ASSETS_PER_TILE,
+    ]
 
 
 class MosaicResolver:

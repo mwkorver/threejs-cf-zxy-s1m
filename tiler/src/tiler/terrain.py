@@ -13,6 +13,7 @@ Two regimes behind one endpoint so the client speaks one terrain contract:
 
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import rasterio
@@ -134,11 +135,18 @@ def render_terrain_tile(
 
 def _read_farfield_child(url: str) -> "np.ndarray | None":
     """(3, 256, 256) RGB, or None if the child genuinely doesn't exist (edge of
-    coverage). Raises TransientTerrainError after retries on anything else."""
+    coverage). Raises TransientTerrainError after retries on anything else.
+
+    Enters its own rasterio.Env rather than inheriting one from the caller:
+    GDAL config is thread-local, and render_farfield_tile fans these reads out
+    across a thread pool, so an Env opened on the calling thread would not
+    apply inside the workers — the us-east-1 endpoint/region pin in
+    _FARFIELD_ENV would silently be lost and every read would 301.
+    """
     last = "unknown"
     for attempt in range(_FARFIELD_ATTEMPTS):
         try:
-            with rasterio.open(url) as ds:
+            with rasterio.Env(**_FARFIELD_ENV), rasterio.open(url) as ds:
                 return ds.read(indexes=[1, 2, 3])
         except RasterioIOError as e:
             msg = str(e)
@@ -160,16 +168,42 @@ def render_farfield_tile(z: int, x: int, y: int, tilesize: int) -> bytes | None:
     src = tilesize // 2  # upstream tiles are 256px
     canvas = np.zeros((tilesize, tilesize, 3), dtype=np.uint8)
     canvas[..., 0] = 128  # sea-level default so gaps decode to 0 m
+
+    # The four children are independent cross-region range reads (this runs in
+    # us-west-2, elevation-tiles-prod is in us-east-1), so they go out together
+    # instead of paying four serial round trips on the cold path. Threads, not
+    # asyncio: rasterio exposes no async API and GDAL releases the GIL while
+    # blocked on I/O. Each worker opens its own rasterio.Env — see
+    # _read_farfield_child on why a shared one wouldn't reach them.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        pending = {
+            pool.submit(_read_farfield_child, FARFIELD_TEMPLATE.format(z=z + 1, x=cx, y=cy)): (dj, di)
+            for dj, cy in enumerate((2 * y, 2 * y + 1))
+            for di, cx in enumerate((2 * x, 2 * x + 1))
+        }
+        # Key every result off the quadrant it was SUBMITTED for. Completion
+        # order is nondeterministic, so consuming these in finish order would
+        # scatter children into the wrong quadrants.
+        children: dict[tuple[int, int], "np.ndarray | None"] = {}
+        transient: TransientTerrainError | None = None
+        for fut, pos in pending.items():
+            try:
+                children[pos] = fut.result()
+            except TransientTerrainError as e:
+                # Keep draining: every worker must be joined before we bail, and
+                # one transient child still fails the WHOLE tile (-> 503) rather
+                # than baking a sea-level hole into a tile cached for a year.
+                transient = transient or e
+    if transient is not None:
+        raise transient
+
     got_any = False
-    with rasterio.Env(**_FARFIELD_ENV):
-        for dj, cy in enumerate((2 * y, 2 * y + 1)):
-            for di, cx in enumerate((2 * x, 2 * x + 1)):
-                arr = _read_farfield_child(FARFIELD_TEMPLATE.format(z=z + 1, x=cx, y=cy))
-                if arr is None:
-                    continue  # missing child (edge of coverage) -> sea-level fill
-                got_any = True
-                r0, c0 = dj * src, di * src
-                canvas[r0:r0 + src, c0:c0 + src, :] = np.transpose(arr, (1, 2, 0))
+    for (dj, di), arr in children.items():
+        if arr is None:
+            continue  # missing child (edge of coverage) -> sea-level fill
+        got_any = True
+        r0, c0 = dj * src, di * src
+        canvas[r0:r0 + src, c0:c0 + src, :] = np.transpose(arr, (1, 2, 0))
     if not got_any:
         return None
     return render(np.transpose(canvas, (2, 0, 1)), img_format="WEBP", lossless=True)

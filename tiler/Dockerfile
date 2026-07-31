@@ -10,10 +10,11 @@ RUN dnf install -y expat && dnf clean all
 # --- Dependency layer -------------------------------------------------------
 # Install only the third-party deps from pyproject, BEFORE copying the app, so
 # this (expensive GDAL/rasterio) layer stays cached across code changes — a src
-# edit no longer triggers a full reinstall. Deps are written to a file (path
-# passed as a py arg, not shell-interpolated) so the '>=' version pins survive.
+# edit no longer triggers a full reinstall. scripts/deps_to_requirements.py
+# reformats pyproject's dependency list; pyproject stays the source of truth.
 COPY pyproject.toml ${LAMBDA_TASK_ROOT}/
-RUN python -c "import tomllib, pathlib, sys; pathlib.Path('/tmp/requirements.txt').write_text('\n'.join(tomllib.load(open(sys.argv[1], 'rb'))['project']['dependencies']))" ${LAMBDA_TASK_ROOT}/pyproject.toml \
+COPY scripts/deps_to_requirements.py /tmp/
+RUN python /tmp/deps_to_requirements.py ${LAMBDA_TASK_ROOT}/pyproject.toml /tmp/requirements.txt \
     && pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Bake the DuckDB extensions into the image (built here for linux/arm64,
