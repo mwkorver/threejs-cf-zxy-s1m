@@ -357,7 +357,6 @@ so origin-side auth would leave every already-cached tile open.
 | [FLIGHT-SIM-PLAN.md](FLIGHT-SIM-PLAN.md) | Architecture, locked decisions, and the phased plan — read first |
 | [README-PTOLEMY3D.md](README-PTOLEMY3D.md) | What this demo inherits from pTolemy3D, and what two decades changed |
 | [infra/README.md](infra/README.md) | Deploying the tiler and edge stacks, plus the runtime gotchas |
-| [CHANGELOG.md](CHANGELOG.md) | Notable changes, [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format |
 | [SECURITY.md](SECURITY.md) | How to report a vulnerability privately, and what's in scope |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Short version: this is a prototype, fork freely |
 
