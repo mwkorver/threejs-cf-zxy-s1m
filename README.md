@@ -23,7 +23,7 @@ USGS 3DEP S1M 1-meter terrain, normalized server-side onto a single EPSG:3857
 
 ## Why this repository exists
 
-It's sibling project, [deckgl-s3-cog-s1m](https://github.com/mwkorver/deckgl-s3-cog-s1m),
+Its sibling project, [deckgl-s3-cog-s1m](https://github.com/mwkorver/deckgl-s3-cog-s1m),
 reads Cloud-Optimized GeoTIFFs **directly in the browser** over HTTP range
 requests — no tile server, no terrain server. That architecture is excellent
 for inspecting a viewport: you see exactly the source pixels, and the only
