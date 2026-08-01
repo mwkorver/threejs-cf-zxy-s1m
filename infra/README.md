@@ -25,9 +25,36 @@ infra/deploy.sh
 ```
 
 Builds the client, deploys both stacks, seeds the static bucket on first run,
-uploads `client/dist/`, invalidates the app entry points, and mirrors the
-access key and distribution domain into `client/.env.local`. Reads the dev key
-from `$TILE_ACCESS_KEY` or the gitignored repo-root `.tile-key`.
+uploads `client/dist/`, and mirrors the access key and distribution domain into
+`client/.env.local`. Reads the dev key from `$TILE_ACCESS_KEY` or the gitignored
+repo-root `.tile-key`.
+
+### The distribution is disabled by default
+
+`deploy.sh` deploys the CloudFront distribution **not serving**. Turn it on only
+while you need it:
+
+```bash
+DEMO_ENABLED=true infra/deploy.sh          # deploy and serve
+infra/deploy.sh                            # deploy and stop serving
+```
+
+Or without a full deploy:
+
+```bash
+cd infra && npx cdk deploy flight-sim-edge -c demoEnabled=true \
+  --parameters "flight-sim-edge:TileAccessKey=$(tr -d '[:space:]' < ../.tile-key)"
+```
+
+Why off by default: the `?k=` gate stops crawlers, not people. `index.html` and
+`/assets/*` are ungated and the key is baked into the bundle they serve, so
+anyone holding the distribution domain has a working demo, and every tile miss
+is a requester-pays read billed here. Being reachable is a deliberate act.
+
+Disabled costs nothing and keeps the stack, the bucket and the seeded DEM index
+intact, so re-enabling is one deploy rather than a rebuild. It is also the
+required first step before a distribution can be deleted at all. Either flip
+takes **~15 minutes** to propagate — do it before the meeting, not during it.
 
 First time in a new account, bootstrap CDK once:
 

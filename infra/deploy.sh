@@ -45,9 +45,23 @@ echo "-- building web viewer application bundle..."
 # Tiler first — the edge stack imports its Function URL and ARN. Named
 # explicitly rather than --all: flight-sim-github-oidc is one-time setup that
 # creates the role CI logs in with, and has no business in a routine deploy.
+#
+# DEMO_ENABLED is passed through on every run rather than left to default,
+# because leaving it out would silently take a serving distribution down. Off
+# unless you ask: the demo is reachable by anyone holding the domain, and its
+# tile misses are requester-pays reads on this account.
+#   DEMO_ENABLED=true infra/deploy.sh    # deploy AND serve
+DEMO_ENABLED="${DEMO_ENABLED:-false}"
+if [[ "$DEMO_ENABLED" == "true" ]]; then
+  echo "-- distribution will be ENABLED (publicly reachable)"
+else
+  echo "-- distribution will be DISABLED (DEMO_ENABLED=true to serve it)"
+fi
+
 echo "-- deploying stacks..."
 (cd "$ROOT/infra" && npx cdk deploy flight-sim-tiler flight-sim-edge \
   --require-approval never \
+  -c "demoEnabled=${DEMO_ENABLED}" \
   --parameters "flight-sim-edge:TileAccessKey=${KEY}")
 
 # One-time data seed. The static bucket holds the DEM index and footprints as
@@ -73,10 +87,14 @@ DIST_DOMAIN="$(aws cloudformation describe-stacks --stack-name flight-sim-edge -
 # and is served under CachingOptimized, so without this a deploy silently
 # serves the previous app. Deliberately NOT /* — that would also evict every
 # cached tile, each of which costs a cold Lambda render to rebuild.
-if [[ -n "$DIST_ID" && "$DIST_ID" != "None" ]]; then
+# Skipped when the distribution is disabled: it serves nothing, so there is no
+# stale cached copy to evict, and invalidations are billed per path.
+if [[ "$DEMO_ENABLED" == "true" && -n "$DIST_ID" && "$DIST_ID" != "None" ]]; then
   echo "-- invalidating /index.html and /assets/* on ${DIST_ID}..."
   aws cloudfront create-invalidation --distribution-id "$DIST_ID" \
     --paths "/index.html" "/assets/*" --query "Invalidation.Id" --output text
+elif [[ "$DEMO_ENABLED" != "true" ]]; then
+  echo "-- distribution disabled; skipping invalidation"
 fi
 
 # Keep the client in lockstep. .env.local is gitignored; Vite inlines these

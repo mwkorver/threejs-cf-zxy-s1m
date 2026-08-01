@@ -43,6 +43,11 @@ new EdgeStack(app, "flight-sim-edge", {
   // dependency is declared rather than reconstructed at deploy time.
   tilerFunctionUrlDomain: tiler.functionUrlDomain,
   tilerFunctionArn: tiler.functionArn,
+  // Off unless explicitly asked for. Anyone holding the distribution domain can
+  // drive the demo — the ?k= gate stops crawlers, not people — and every tile
+  // miss is a requester-pays read on this account. So serving is opt-in:
+  //   npx cdk deploy flight-sim-edge -c demoEnabled=true
+  demoEnabled: app.node.tryGetContext("demoEnabled") === "true",
   description: "flight-sim edge: CloudFront distribution over the tiler and the static app bucket",
 });
 

@@ -1,4 +1,4 @@
-import { CfnCondition, CfnOutput, CfnParameter, Fn, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
+import { Annotations, CfnCondition, CfnOutput, CfnParameter, Fn, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -18,6 +18,15 @@ export interface EdgeStackProps extends StackProps {
   readonly tilerFunctionArn: string;
   /** Static/DEM-index bucket name this stack owns. */
   readonly staticBucket: string;
+  /**
+   * Whether the distribution actually serves. Defaults off (see bin/app.ts).
+   *
+   * A disabled distribution answers nothing and bills nothing, while the stack,
+   * the bucket and the seeded DEM index stay intact — so turning the demo back
+   * on is one deploy rather than a rebuild. It is also the required first step
+   * before a distribution can ever be deleted.
+   */
+  readonly demoEnabled: boolean;
 }
 
 /**
@@ -35,7 +44,7 @@ export class EdgeStack extends Stack {
   constructor(scope: Construct, id: string, props: EdgeStackProps) {
     super(scope, id, props);
 
-    const { tilerFunctionUrlDomain, tilerFunctionArn, staticBucket } = props;
+    const { tilerFunctionUrlDomain, tilerFunctionArn, staticBucket, demoEnabled } = props;
 
     // Still a deploy-time NoEcho parameter rather than a synth-time value:
     // inlining it in TypeScript would bake the key into cdk.out and into the
@@ -178,7 +187,13 @@ export class EdgeStack extends Stack {
     // --- Distribution -----------------------------------------------------
     const distribution = new cloudfront.CfnDistribution(this, "Distribution", {
       distributionConfig: {
-        enabled: true,
+        // Off by default. The ?k= gate deters crawlers, not people: index.html
+        // and /assets/* are ungated and the key is baked into the bundle they
+        // serve, so anyone with the domain has a working demo on this account's
+        // bill. Being reachable is therefore a deliberate act, not a resting
+        // state — and this is the switch that decides it, not the secrecy of
+        // the URL.
+        enabled: demoEnabled,
         comment: "flight-sim viewer and tile stream",
         defaultRootObject: "index.html",
         httpVersion: "http2and3", // multiplexing matters for tile storms
@@ -289,5 +304,21 @@ export class EdgeStack extends Stack {
     invokePermission.overrideLogicalId("TilerInvokePermission");
 
     new CfnOutput(this, "DistributionDomain", { value: distribution.getAtt("DomainName").toString() });
+
+    // Say which way the switch is set, every deploy. A distribution that
+    // silently stopped serving is a bad thing to discover from a blank page.
+    new CfnOutput(this, "DemoEnabled", {
+      value: String(demoEnabled),
+      description: demoEnabled
+        ? "Distribution is SERVING — reachable by anyone with the domain"
+        : "Distribution is DISABLED — redeploy with -c demoEnabled=true to serve",
+    });
+    if (!demoEnabled) {
+      Annotations.of(this).addInfo(
+        "Distribution deploys DISABLED (demo off). To serve it: " +
+          "npx cdk deploy flight-sim-edge -c demoEnabled=true. " +
+          "CloudFront takes ~15 min to propagate either way.",
+      );
+    }
   }
 }
