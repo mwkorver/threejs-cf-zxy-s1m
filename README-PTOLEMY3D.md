@@ -2,7 +2,9 @@
 
 This document logs the core architectural patterns and algorithms adapted from the [**pTolemy3D**](https://github.com/mwkorver/ptolemy3d) viewer project (specifically its `Jp2TileLoader.java` and related rendering subsystems) to achieve high-performance, stutter-free flight simulation in our WebGL client.
 
-Part of the point of building this app was to see whether anything we built into pTolemy3D twenty years ago was still of value. The stack has turned over completely — Java and JOGL to TypeScript and WebGL, JPEG2000 to WebP, a bespoke server to COGs behind a CDN — so the interesting question was which ideas were about the *problem* rather than the technology of the day. The sections below are the answer: what carried across, what changed shape on the way, and what turned out to be wrong. Section 4 is the most useful of the three categories, since it records an idea we had to take back out.
+Ptolemy3D was originally named Jetstream3D and was developed by Alchemedia Inc. in Tokyo Japan.
+
+Part of the point of building this app was to see whether anything we built into pTolemy3D back in was still of value. The stack has turned over completely — Java and JOGL to TypeScript and WebGL, JPEG2000 to WebP, a bespoke server to COGs behind a CDN — so the interesting question was which ideas were about the *problem* rather than the technology of the day. The sections below are the answer: what carried across, what changed shape on the way, and what turned out to be wrong. Section 4 is the most useful of the three categories, since it records an idea we had to take back out.
 
 ---
 
