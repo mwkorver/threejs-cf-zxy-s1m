@@ -80,6 +80,26 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
     The asset href is derived once in a CTE rather than repeating the same
     COALESCE(JSON_EXTRACT_STRING(...)) in the select list, the bucket regex and
     the LIKE filter, which had it evaluated four times per candidate row.
+
+    The bbox predicates are a per-row PREFILTER, not row-group pruning, and the
+    distinction is worth stating because the obvious simplification here costs
+    3x. This lake declares no GeoParquet `covering`, and its `bbox` is STAC's
+    plain DOUBLE[]: Parquet keeps statistics on one leaf that mixes all four
+    dimensions together (measured on the nj/2023 partition, min -75.56 is a
+    longitude and max 41.37 a latitude), so they skip nothing from metadata.
+    What they do instead is cheap and effective -- on the ca/2022 partition
+    they cut 11,070 rows to 4-26 before a single geometry is decoded, measured
+    3.2x faster end to end than ST_Intersects alone, same results.
+
+    ST_Intersects is the correctness half. NAIP quarter-quads are axis-aligned
+    in UTM, so reprojected to CRS84 they come out slightly skewed -- none of
+    those 11,070 footprints equals its own bbox -- and a tile can clip the bbox
+    corner without touching the quad.
+
+    Note this is the opposite arrangement to DemIndexResolver.resolve below,
+    whose bbox columns really are stats-bearing: that index is built here with
+    separate bbox_xmin/xmax/ymin/ymax DOUBLEs and carries no native geo_bbox,
+    while this lake is the reverse. Near-identical SQL, opposite mechanisms.
     """
     sql = """
         with candidates as (
