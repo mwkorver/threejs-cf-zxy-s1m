@@ -1,7 +1,8 @@
 import * as path from "node:path";
-import { CfnOutput, Duration, Fn, Stack, type StackProps } from "aws-cdk-lib";
+import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as logs from "aws-cdk-lib/aws-logs";
 import { Platform } from "aws-cdk-lib/aws-ecr-assets";
 import type { Construct } from "constructs";
 
@@ -78,7 +79,23 @@ export class TilerStack extends Stack {
       },
     });
 
+    // Lambda's own default log group (/aws/lambda/<function name>) is created
+    // implicitly and keeps logs forever -- CDK cannot set retention on it,
+    // which is the whole reason to declare one here instead. A tiler logs a
+    // line per tile, so "forever" is a slow leak rather than a cliff: the
+    // implicit group had already reached 213 MB.
+    //
+    // Two weeks is enough to debug something that happened last sprint, and
+    // DESTROY rather than CDK's RETAIN default because these are diagnostic
+    // logs for a demo -- retaining them would strand an unbounded group behind
+    // every teardown, which is exactly the situation being fixed.
+    const logGroup = new logs.LogGroup(this, "TilerFunctionLogs", {
+      retention: logs.RetentionDays.TWO_WEEKS,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
     const fn = new lambda.DockerImageFunction(this, "TilerFunction", {
+      logGroup,
       code: lambda.DockerImageCode.fromImageAsset(path.join(__dirname, "..", "..", "tiler"), {
         platform: Platform.LINUX_ARM64,
       }),
