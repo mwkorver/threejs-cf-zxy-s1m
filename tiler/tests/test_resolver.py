@@ -155,3 +155,34 @@ def test_bundled_usgs_index_footprints_match_tile_names():
         # NW-corner naming: cell spans [nw_lat-1, nw_lat] N, [nw_lon, nw_lon+1] E.
         assert abs(s - (nw_lat - 1)) < 1e-6 and abs(n - nw_lat) < 1e-6
         assert abs(w - nw_lon) < 1e-6 and abs(e - (nw_lon + 1)) < 1e-6
+
+
+# --- a broken DEM index must not look like empty coverage ---
+#
+# resolve() returning [] sends app.py down the s1m -> usgs13 -> far-field
+# cascade, which serves a coarser tile under a normal-looking x-dem-source.
+# So an unreadable index has to raise, not come back empty, or a broken index
+# degrades the whole terrain layer silently. This is the DEM counterpart of the
+# imagery fix that stopped read errors masquerading as "no coverage".
+
+def test_dem_index_read_failure_raises_rather_than_reporting_no_coverage(caplog):
+    import logging
+
+    import pytest
+
+    from tiler.resolver import DemIndexResolver
+
+    with patch("tiler.resolver.duck.connect"):
+        r = DemIndexResolver("s3://nope/missing.parquet")
+
+    class Boom:
+        def execute(self, *a, **k):
+            raise RuntimeError("index unreadable")
+
+    r._con = Boom()
+    with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError):
+        r.resolve(15, 6588, 12172)
+
+    # and it says which index and which tile, so the log is actionable
+    assert "missing.parquet" in caplog.text
+    assert "15/6588/12172" in caplog.text

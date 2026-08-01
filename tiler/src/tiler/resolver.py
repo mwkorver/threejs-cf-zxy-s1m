@@ -265,15 +265,29 @@ class DemIndexResolver:
         # row groups from metadata without decoding any geometry. ST_Intersects
         # then refines only the survivors, since a bbox hit is not a footprint
         # hit. Dropping the bbox predicate would force a full geometry scan.
-        rows = self._con.execute(
-            """
-            SELECT dataset
-            FROM read_parquet(?)
-            WHERE bbox_xmin <= ? AND bbox_xmax >= ?
-              AND bbox_ymin <= ? AND bbox_ymax >= ?
-              AND ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))
-            """,
-            [self.index_path, axmax, axmin, aymax, aymin, axmin, aymin, axmax, aymax],
-        ).fetchall()
+        try:
+            rows = self._con.execute(
+                """
+                SELECT dataset
+                FROM read_parquet(?)
+                WHERE bbox_xmin <= ? AND bbox_xmax >= ?
+                  AND bbox_ymin <= ? AND bbox_ymax >= ?
+                  AND ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))
+                """,
+                [self.index_path, axmax, axmin, aymax, aymin, axmin, aymin, axmax, aymax],
+            ).fetchall()
+        except Exception:
+            # Deliberately no "treat as no coverage" branch, unlike
+            # MosaicResolver.resolve above. That one is reading a partition glob
+            # that legitimately matches nothing for a state/year with no
+            # imagery; this is one known index file, so a failed read means
+            # broken, not empty. Returning [] here would drop the tile to the
+            # next DEM tier (app.py's s1m -> usgs13 -> far-field cascade) and
+            # serve coarser terrain under an x-dem-source header that looks
+            # perfectly normal -- the same silent degradation the imagery
+            # resolver was fixed to stop. Say which index and which tile, then
+            # let it 500 where someone will see it.
+            logger.exception("DEM index query failed for %s at %d/%d/%d", self.index_path, z, x, y)
+            raise
 
         return [f"s3://{TNM_BUCKET}/StagedProducts/Elevation/{dataset}" for (dataset,) in rows]
