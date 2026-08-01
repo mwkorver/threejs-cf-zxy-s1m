@@ -47,9 +47,9 @@ COORD_DP = 5  # ~1 m at these latitudes; footprint edges don't need more.
 CONUS_BBOX = (-125.0, 24.0, -66.5, 49.5)
 
 
-def _bucket_from_lake_path(lake_path: str) -> str:
-    # "s3://<bucket>/manifest-index" -> "<bucket>"
-    return lake_path.split("//", 1)[1].split("/", 1)[0]
+def _bucket_from_s3_uri(uri: str) -> str:
+    # "s3://<bucket>/some/key" -> "<bucket>"
+    return uri.split("//", 1)[1].split("/", 1)[0]
 
 
 def _round_coords(coords):
@@ -156,7 +156,12 @@ def main() -> None:
                     help="keep footprints outside CONUS (default: drop them — no NAIP there)")
     args = ap.parse_args()
 
-    bucket = args.bucket or _bucket_from_lake_path(settings.lake_path)
+    # Derived from the DEM index, not the imagery lake. Footprints are served
+    # by this deployment's own static bucket (the one CloudFront's /footprints/*
+    # behavior points at), which is where the DEM index lives too. The lake is
+    # a shared, requester-pays bucket this repo reads and does not own, so
+    # defaulting there aimed uploads at someone else's storage.
+    bucket = args.bucket or _bucket_from_s3_uri(settings.s1m_index_path)
     targets = ["s1m", "usgs13"] if args.which == "both" else [args.which]
     s1m_path = settings.s1m_index_path
     local_s1m = Path(__file__).resolve().parent.parent / "S1M_Products.parquet"
