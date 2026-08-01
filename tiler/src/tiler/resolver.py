@@ -81,20 +81,31 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
     COALESCE(JSON_EXTRACT_STRING(...)) in the select list, the bucket regex and
     the LIKE filter, which had it evaluated four times per candidate row.
 
-    The bbox predicates are a per-row PREFILTER, not row-group pruning, and the
-    distinction is worth stating because the obvious simplification here costs
-    3x. This lake declares no GeoParquet `covering`, and its `bbox` is STAC's
-    plain DOUBLE[]: Parquet keeps statistics on one leaf that mixes all four
-    dimensions together (measured on the nj/2023 partition, min -75.56 is a
-    longitude and max 41.37 a latitude), so they skip nothing from metadata.
-    What they do instead is cheap and effective -- on the ca/2022 partition
-    they cut 11,070 rows to 4-26 before a single geometry is decoded, measured
-    3.2x faster end to end than ST_Intersects alone, same results.
+    The two spatial predicates are one filter-and-refine pass, not a belt and
+    braces. read_parquet is already scoped to a state's quads by the partition
+    glob, so the bbox test casts a deliberately generous net over that state --
+    it may over-select but must never miss -- and ST_Intersects then prunes the
+    much smaller survivor set down to real hits. Keep both.
 
-    ST_Intersects is the correctness half. NAIP quarter-quads are axis-aligned
-    in UTM, so reprojected to CRS84 they come out slightly skewed -- none of
-    those 11,070 footprints equals its own bbox -- and a tile can clip the bbox
-    corner without touching the quad.
+    The bbox half is a per-row prefilter, NOT row-group pruning: this lake
+    declares no GeoParquet `covering`, and its `bbox` is STAC's plain DOUBLE[],
+    whose Parquet statistics sit on one leaf mixing all four dimensions (on
+    nj/2023 the min is a longitude and the max a latitude), so nothing is
+    skipped from metadata. It earns its place on volume instead -- on ca/2022 it
+    takes 11,070 quads down to 4-26 before a single geometry is decoded, 3.2x
+    faster end to end than ST_Intersects alone, identical results.
+
+    The refine half is not belt-and-braces because those bboxes genuinely
+    over-select. NAIP quarter-quads are axis-aligned in UTM, so in CRS84 they
+    are rotated by the grid convergence, arctan(tan(lon-lon0) * sin(lat)):
+    zero on a zone's central meridian, +/-2 deg at its edges. Measured over the
+    11,070 ca/2022 quads that matches to a correlation of 1.000 (zone 10 mean
+    -0.80 deg vs -0.80 predicted, zone 11 +0.31 vs +0.30). A rotated quad's
+    bbox is bigger than the quad by 0.4% mid-zone rising to 6.7% at the edges,
+    and that margin is exactly where a tile clips the bbox but misses the quad.
+    So the false-positive rate is a function of distance from the central
+    meridian: near-nil for a corridor over a zone centre, material for one out
+    at the seam.
 
     Note this is the opposite arrangement to DemIndexResolver.resolve below,
     whose bbox columns really are stats-bearing: that index is built here with
