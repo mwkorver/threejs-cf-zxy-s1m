@@ -1,4 +1,4 @@
-import { Annotations, CfnCondition, CfnOutput, CfnParameter, Fn, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
+import { Annotations, CfnCondition, CfnOutput, CfnParameter, Duration, Fn, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -71,6 +71,23 @@ export class EdgeStack extends Stack {
       bucketName: staticBucket,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: RemovalPolicy.RETAIN,
+      // The DEM index lives here and build_s1m_index.py --upload overwrites it
+      // at one fixed key. Without versioning a bad rebuild destroys the good
+      // index and the only recovery is another full rebuild against whatever
+      // upstream happens to look like then — and a bad index is not obvious:
+      // the row-group regression that silently disabled statistics pruning
+      // produced a file that worked, just slowly.
+      versioned: true,
+      lifecycleRules: [
+        {
+          // Versioning here is an undo buffer, not an archive. client/dist is
+          // re-synced on every deploy, so without this the old bundles pile up
+          // forever. 30 days is far longer than it takes to notice a bad index.
+          id: "expire-noncurrent-versions",
+          noncurrentVersionExpiration: Duration.days(30),
+          abortIncompleteMultipartUploadAfter: Duration.days(7),
+        },
+      ],
     });
 
     // --- Origin access controls -------------------------------------------
