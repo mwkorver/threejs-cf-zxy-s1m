@@ -95,9 +95,9 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
     takes 11,070 quads down to 4-26 before a single geometry is decoded, 3.2x
     faster end to end than ST_Intersects alone, identical results.
 
-    The refine half is not belt-and-braces because those bboxes genuinely
-    over-select. NAIP quarter-quads are axis-aligned in UTM, so in CRS84 they
-    are rotated by the grid convergence, arctan(tan(lon-lon0) * sin(lat)):
+    The refine half matters because those bboxes genuinely over-select. NAIP
+    quarter-quads are axis-aligned in UTM, so in CRS84 they are rotated by the
+    grid convergence, arctan(tan(lon-lon0) * sin(lat)):
     zero on a zone's central meridian, +/-2 deg at its edges. Measured over the
     11,070 ca/2022 quads that matches to a correlation of 1.000 (zone 10 mean
     -0.80 deg vs -0.80 predicted, zone 11 +0.31 vs +0.30). A rotated quad's
