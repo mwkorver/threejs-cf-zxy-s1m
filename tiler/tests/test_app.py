@@ -39,7 +39,20 @@ def test_beyond_maxzoom_404_without_touching_lake():
 
 
 def test_tile_out_of_range_404():
-    assert client.get("/imagery/naip-visualization/2021/3/8/0.webp").status_code == 404  # x >= 2^3
+    # z14 not z3: below imagery_min_zoom the band check fires first and this
+    # would 404 for the wrong reason, testing nothing.
+    assert client.get("/imagery/naip-visualization/2021/14/16384/0.webp").status_code == 404  # x >= 2^14
+
+
+def test_below_imagery_minzoom_404_without_touching_lake():
+    # Low z belongs to /basemap. The client already routes it there, so this
+    # only fires on a hand-built URL -- which is the request that would
+    # otherwise fan the lake query across many region partitions.
+    with patch.object(app_module, "get_resolver") as resolver:
+        r = client.get("/imagery/naip-visualization/2021/13/2000/3000.webp")
+        assert r.status_code == 404
+        assert "basemap" in r.json()["detail"]
+        resolver.assert_not_called()
 
 
 def test_no_coverage_404():

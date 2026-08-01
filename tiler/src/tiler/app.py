@@ -63,6 +63,14 @@ def imagery_tile(layer: str, year: int, z: int, x: int, y: int) -> Response:
         # Beyond the source's resolution: 404 so the CDN never caches
         # upsampled junk; the client clamps (plan §4.1, §5.2).
         raise HTTPException(404, f"z {z} beyond layer maxzoom {lyr.maxzoom}")
+    if z < settings.imagery_min_zoom:
+        # Below the mosaic band. /basemap serves this range from the USDA cache;
+        # down here one tile spans whole states, so resolving it against the
+        # lake would fan out across region partitions and pull dozens of COGs
+        # for a single tile. The client already routes low z to /basemap, so
+        # this only catches hand-built URLs -- but that is exactly the request
+        # that would otherwise be expensive.
+        raise HTTPException(404, f"z {z} below imagery minzoom {settings.imagery_min_zoom}; use /basemap")
     n = 2**z
     if not (0 <= x < n and 0 <= y < n):
         raise HTTPException(404, "tile out of range")

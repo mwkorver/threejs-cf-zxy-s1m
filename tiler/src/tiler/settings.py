@@ -42,6 +42,19 @@ class Settings(BaseSettings):
     tile_size: int = 512  # both imagery and terrain (plan §2 row 4, §4.2)
     imagery_webp_quality: int = 75  # plan §4.1
 
+    # Zoom at/above which /imagery resolves the COG mosaic. Below it the client
+    # asks /basemap instead (the USDA cache stitch), because down there a tile
+    # envelope covers whole states: the lake query fans out across many region
+    # partitions and the mosaic read pulls dozens of COGs to fill one tile.
+    #
+    # Enforced server-side for the same reason the DEM bands are: the client
+    # routing rule (resolveImageryKind in client/src/core/tileUrls.ts) is the
+    # only thing that currently keeps low-z requests off this endpoint, and a
+    # hand-built URL would otherwise trigger a CONUS-scale query. Must stay one
+    # above that module's externalImageryMaxZoom (13) -- they are two constants
+    # describing one boundary, so moving either alone opens a gap or a dead band.
+    imagery_min_zoom: int = 14
+
     # Zoom at/above which S1M is used instead of USGS 1/3" DEM.
     s1m_min_zoom: int = 15
 

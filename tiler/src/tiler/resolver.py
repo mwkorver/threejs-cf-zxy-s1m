@@ -81,6 +81,11 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
     COALESCE(JSON_EXTRACT_STRING(...)) in the select list, the bucket regex and
     the LIKE filter, which had it evaluated four times per candidate row.
 
+    Only high zoom reaches here. z below settings.imagery_min_zoom is served by
+    /basemap from the USDA cache, so this query never runs on the continent-wide
+    envelopes where it would fan out across many region partitions -- the
+    numbers below were taken at the zooms that actually arrive.
+
     The two spatial predicates are one filter-and-refine pass, not a belt and
     braces. read_parquet is already scoped to a state's quads by the partition
     glob, so the bbox test casts a deliberately generous net over that state --
