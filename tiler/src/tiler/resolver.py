@@ -200,9 +200,14 @@ class DemIndexResolver:
 
     Ported from deckgl-s3-cog-s1m's s1m.py. Unlike the imagery lake, these
     indexes store geometry/bbox in EPSG:6350 Albers, so we transform the tile's
-    geographic bounds to an Albers envelope, do the cheap bbox-range prune in
-    DuckDB, then refine with shapely (the index has no ST_Intersects). COGs
-    live in the public prd-tnm bucket (anonymous reads).
+    geographic bounds to an Albers envelope, do the cheap bbox-range prune from
+    row-group statistics, then refine against the footprint exactly.
+
+    Both prune and refine run in DuckDB. That is only possible because the
+    indexes now carry a real GEOMETRY column: they used to store footprints as
+    an opaque geometry_wkb BLOB, which forced every candidate row to be shipped
+    back and re-parsed with shapely just to answer "does it actually overlap".
+    COGs live in the public prd-tnm bucket (anonymous reads).
     """
 
     def __init__(self, index_path: str, region: str = "us-west-2"):
@@ -224,22 +229,20 @@ class DemIndexResolver:
             ys.append(ay)
         axmin, axmax, aymin, aymax = min(xs), max(xs), min(ys), max(ys)
 
+        # The bbox columns stay even though ST_Intersects alone would be
+        # correct: they carry Parquet min/max statistics, so DuckDB skips whole
+        # row groups from metadata without decoding any geometry. ST_Intersects
+        # then refines only the survivors, since a bbox hit is not a footprint
+        # hit. Dropping the bbox predicate would force a full geometry scan.
         rows = self._con.execute(
             """
-            SELECT dataset, geometry_wkb
+            SELECT dataset
             FROM read_parquet(?)
             WHERE bbox_xmin <= ? AND bbox_xmax >= ?
               AND bbox_ymin <= ? AND bbox_ymax >= ?
+              AND ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))
             """,
-            [self.index_path, axmax, axmin, aymax, aymin],
+            [self.index_path, axmax, axmin, aymax, aymin, axmin, aymin, axmax, aymax],
         ).fetchall()
 
-        from shapely import from_wkb
-        from shapely.geometry import box
-
-        envelope = box(axmin, aymin, axmax, aymax)
-        hrefs = []
-        for dataset, wkb in rows:
-            if from_wkb(wkb).intersects(envelope):
-                hrefs.append(f"s3://{TNM_BUCKET}/StagedProducts/Elevation/{dataset}")
-        return hrefs
+        return [f"s3://{TNM_BUCKET}/StagedProducts/Elevation/{dataset}" for (dataset,) in rows]

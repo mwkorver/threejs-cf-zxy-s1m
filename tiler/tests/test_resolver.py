@@ -141,8 +141,9 @@ def test_bundled_usgs_index_footprints_match_tile_names():
 
     to_wgs84 = Transformer.from_crs(DEM_INDEX_EPSG, 4326, always_xy=True)
     con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")  # the index carries a real GEOMETRY column
     rows = con.execute(
-        f"SELECT dataset, geometry_wkb FROM read_parquet('{USGS_INDEX}') "
+        f"SELECT dataset, ST_AsWKB(geometry) FROM read_parquet('{USGS_INDEX}') "
         "WHERE dataset LIKE '%n41w074%' OR dataset LIKE '%n42w074%'"
     ).fetchall()
     assert len(rows) == 2  # both NJ-corridor cells are present

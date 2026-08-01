@@ -34,6 +34,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from tiler.resolver import DEM_INDEX_EPSG  # the CRS the reader assumes; declare exactly that
 from tiler.settings import settings
 
 BUCKET = "prd-tnm"
@@ -197,8 +198,13 @@ def main() -> None:
 
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial;")
+    # GEOMETRY('EPSG:6350'), not bare GEOMETRY: these footprints are Conus
+    # Albers metres, but DuckDB defaults an undeclared CRS to OGC:CRS84 and
+    # writes that into the GeoParquet metadata. The coordinates would be
+    # unchanged and every query here would still work -- while the file told
+    # any other reader that Wyoming sits off the coast of west Africa.
     con.execute(
-        "CREATE TABLE t (fid BIGINT, dataset VARCHAR, geometry GEOMETRY, "
+        f"CREATE TABLE t (fid BIGINT, dataset VARCHAR, geometry GEOMETRY('EPSG:{DEM_INDEX_EPSG}'), "
         "bbox_xmin DOUBLE, bbox_xmax DOUBLE, bbox_ymin DOUBLE, bbox_ymax DOUBLE)"
     )
     con.executemany("INSERT INTO t VALUES (?, ?, ST_GeomFromWKB(?), ?, ?, ?, ?)", rows)

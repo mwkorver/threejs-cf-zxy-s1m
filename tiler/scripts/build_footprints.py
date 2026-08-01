@@ -71,8 +71,10 @@ def build_geojson(index_path: str, dataset_type: str, region: str, conus_only: b
     w, s, e, n = CONUS_BBOX
 
     con = duck.connect(region)
+    # ST_AsWKB, not a raw column read: the indexes carry a native GEOMETRY
+    # column now, and shapely still wants bytes.
     rows = con.execute(
-        "SELECT dataset, geometry_wkb FROM read_parquet(?)", [index_path]
+        "SELECT dataset, ST_AsWKB(geometry) FROM read_parquet(?)", [index_path]
     ).fetchall()
 
     features = []
