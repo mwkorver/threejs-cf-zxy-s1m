@@ -1,13 +1,14 @@
 import { type TileId } from "./mercator";
 import { loadTerrain, loadImageryFor } from "./tileLoader";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
+import type { TileWorkerTaskOptions } from "./workerTypes";
 
 interface PendingTask {
   requestId: string;
   key: string;
   tile: TileId;
   priority: number;
-  options: any;
+  options: TileWorkerTaskOptions;
   resolve: (value: any) => void;
   reject: (reason: any) => void;
   aborted: boolean;

@@ -36,7 +36,8 @@ def connect(region: str) -> duckdb.DuckDBPyConnection:
             con.execute(f"INSTALL {e}; LOAD {e};")
     try:
         con.execute(
-            f"CREATE OR REPLACE SECRET s3 (TYPE s3, PROVIDER credential_chain, REGION '{region}')"
+            "CREATE OR REPLACE SECRET s3 (TYPE s3, PROVIDER credential_chain, REGION ?)",
+            [region],
         )
     except duckdb.Error:
         _create_static_secret(con, region)

@@ -2,7 +2,9 @@ import { decodeTerrarium } from "./terrarium";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { imageryRequest, terrainRequest } from "./tileUrls";
 
-const ctx: any = self;
+import type { WorkerTileRequest } from "./workerTypes";
+
+const ctx: Worker = self as unknown as Worker;
 
 /** Abortable sleep that removes its abort listener on normal wake-up. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

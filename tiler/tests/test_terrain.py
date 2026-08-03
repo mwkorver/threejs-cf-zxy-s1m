@@ -222,3 +222,22 @@ def test_mosaic_empty_returns_none():
 
     with patch.object(terrain, "mosaic_reader", side_effect=EmptyMosaicError()):
         assert terrain.render_terrain_tile(["s3://prd-tnm/x.tif"], 15, 0, 0, 512) is None
+
+
+def test_unmocked_rio_tiler_terrain_rendering():
+    # Real un-mocked rio-tiler tile rendering against a real GeoTIFF fixture
+    from pathlib import Path
+
+    fixture = Path(__file__).parent / "fixtures" / "test_raster.tif"
+    assert fixture.exists(), "test_raster.tif fixture missing"
+
+    # Tile z=14, x=3342, y=6190 corresponds exactly to the fixture bounds
+    body = terrain.render_terrain_tile([str(fixture)], 14, 3342, 6190, tilesize=256)
+    assert body is not None, "Real rio-tiler read returned None"
+
+    # Decode returned WebP image and verify Terrarium values match 1500m..2500m range
+    decoded = decode_terrarium(_decode_webp(body))
+    assert decoded.shape == (256, 256)
+    assert np.min(decoded) >= 1490.0
+    assert np.max(decoded) <= 2510.0
+
