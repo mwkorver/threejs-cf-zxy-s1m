@@ -1,7 +1,13 @@
 import { type TileId } from "./mercator";
 import { loadTerrain, loadImageryFor } from "./tileLoader";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
-import type { TileWorkerTaskOptions } from "./workerTypes";
+import type {
+  TileLoadResult,
+  TileWorkerTaskOptions,
+  WorkerAbortRequest,
+  WorkerTileRequest,
+  WorkerTileResponse,
+} from "./workerTypes";
 
 interface PendingTask {
   requestId: string;
@@ -9,7 +15,7 @@ interface PendingTask {
   tile: TileId;
   priority: number;
   options: TileWorkerTaskOptions;
-  resolve: (value: any) => void;
+  resolve: (value: TileLoadResult) => void;
   reject: (reason: any) => void;
   aborted: boolean;
   /** Worker this task was dispatched to (set on dispatch). */
@@ -48,7 +54,7 @@ export class TileWorkerPool {
       // Use standard module worker instantiation which Vite natively compiles
       const worker = new Worker(new URL("./tile.worker.ts", import.meta.url), { type: "module" });
 
-      worker.onmessage = (e: MessageEvent) => {
+      worker.onmessage = (e: MessageEvent<WorkerTileResponse>) => {
         this.handleWorkerMessage(e.data);
       };
 
@@ -64,7 +70,7 @@ export class TileWorkerPool {
   /**
    * Request a tile to be loaded and built. Returns a Promise with the mesh data and imagery.
    */
-  requestTile(tile: TileId, priority: number, options: any): Promise<any> {
+  requestTile(tile: TileId, priority: number, options: TileWorkerTaskOptions): Promise<TileLoadResult> {
     const key = this.getTileKey(tile);
 
     // 1. De-duplication: check if already pending or running
@@ -139,7 +145,8 @@ export class TileWorkerPool {
       running.aborted = true;
       this.runningTasks.delete(key);
       running.reject(new DOMException("Aborted", "AbortError"));
-      running.worker?.postMessage({ type: "ABORT", requestId: running.requestId });
+      const abort: WorkerAbortRequest = { type: "ABORT", requestId: running.requestId };
+      running.worker?.postMessage(abort);
     }
   }
 
@@ -178,7 +185,11 @@ export class TileWorkerPool {
       this.runningTasks.set(task.key, task);
       this.tasksByRequestId.set(task.requestId, task);
 
-      worker.postMessage({
+      // Annotated, not spread: the explicit list keeps a caller's extra
+      // properties out of the structured clone, and the annotation makes a new
+      // field on WorkerTileRequest a compile error here instead of an
+      // undefined read in the worker.
+      const request: WorkerTileRequest = {
         requestId: task.requestId,
         tile: task.tile,
         baseUrl: task.options.baseUrl,
@@ -188,14 +199,17 @@ export class TileWorkerPool {
         terrainMinZoom: task.options.terrainMinZoom,
         gridStep: task.options.gridStep,
         externalImageryMaxZoom: task.options.externalImageryMaxZoom
-      });
+      };
+      worker.postMessage(request);
     }
   }
 
-  private handleWorkerMessage(data: any): void {
-    const { type, requestId, error, demSource, centerElevation, meshData, imageBitmap, minElevation, maxElevation } = data;
+  private handleWorkerMessage(data: WorkerTileResponse): void {
+    // Narrowed up front rather than destructured off the union: only SUCCESS
+    // carries a bitmap, and the two early returns below still have to close it.
+    const imageBitmap = data.type === "SUCCESS" ? data.imageBitmap : null;
 
-    const task = this.tasksByRequestId.get(requestId);
+    const task = this.tasksByRequestId.get(data.requestId);
     if (!task) {
       // Task was cleaned up earlier (e.g. pool clear); don't leak the bitmap.
       imageBitmap?.close();
@@ -203,7 +217,7 @@ export class TileWorkerPool {
     }
 
     // Release the worker slot exactly once, on response.
-    this.tasksByRequestId.delete(requestId);
+    this.tasksByRequestId.delete(data.requestId);
     if (task.worker) {
       this.workerLoad.set(task.worker, Math.max(0, (this.workerLoad.get(task.worker) ?? 1) - 1));
     }
@@ -219,18 +233,18 @@ export class TileWorkerPool {
       return;
     }
 
-    if (type === "SUCCESS") {
+    if (data.type === "SUCCESS") {
       task.resolve({
-        demSource,
-        centerElevation,
-        meshData,
-        imageBitmap,
-        minElevation,
-        maxElevation
+        demSource: data.demSource,
+        centerElevation: data.centerElevation,
+        meshData: data.meshData,
+        imageBitmap: data.imageBitmap,
+        minElevation: data.minElevation,
+        maxElevation: data.maxElevation
       });
-    } else if (type === "ERROR") {
-      task.reject(new Error(error));
-    } else if (type === "ABORTED") {
+    } else if (data.type === "ERROR") {
+      task.reject(new Error(data.error));
+    } else if (data.type === "ABORTED") {
       task.reject(new DOMException("Aborted", "AbortError"));
     }
 
@@ -240,7 +254,7 @@ export class TileWorkerPool {
   /**
    * Main thread fallback loader implementation for testing.
    */
-  private async loadOnMainThread(tile: TileId, options: any): Promise<any> {
+  private async loadOnMainThread(tile: TileId, options: TileWorkerTaskOptions): Promise<TileLoadResult> {
     let heights: Float32Array | null = null;
     let demSource = "flat";
 
@@ -321,7 +335,8 @@ export class TileWorkerPool {
       if (!task.aborted) {
         task.aborted = true;
         task.reject(new DOMException("Aborted", "AbortError"));
-        task.worker?.postMessage({ type: "ABORT", requestId: task.requestId });
+        const abort: WorkerAbortRequest = { type: "ABORT", requestId: task.requestId };
+        task.worker?.postMessage(abort);
       }
     }
     this.runningTasks.clear();

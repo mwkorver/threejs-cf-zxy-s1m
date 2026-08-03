@@ -2,9 +2,27 @@ import { decodeTerrarium } from "./terrarium";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { imageryRequest, terrainRequest } from "./tileUrls";
 
-import type { WorkerTileRequest } from "./workerTypes";
+import type { WorkerRequest, WorkerTileResponse } from "./workerTypes";
 
-const ctx: Worker = self as unknown as Worker;
+/**
+ * `self` in a dedicated worker is a DedicatedWorkerGlobalScope, but that type
+ * only exists in TypeScript's "webworker" lib, which can't be combined with
+ * "dom" -- they redeclare hundreds of the same globals. The client compiles
+ * against dom, so name the members this module actually uses instead. Not
+ * `Worker`: that is the main thread's *handle to* a worker, and it type-checks
+ * here only by coincidence of having the same three method names.
+ *
+ * Typing postMessage against WorkerTileResponse is the point -- it is what
+ * makes the responses below checked against the contract rather than assumed.
+ */
+interface TileWorkerScope {
+  onmessage: ((e: MessageEvent<WorkerRequest>) => void) | null;
+  postMessage(message: WorkerTileResponse, transfer?: Transferable[]): void;
+  addEventListener(type: "message", listener: (e: MessageEvent<WorkerRequest>) => void): void;
+  removeEventListener(type: "message", listener: (e: MessageEvent<WorkerRequest>) => void): void;
+}
+
+const ctx = self as unknown as TileWorkerScope;
 
 /** Abortable sleep that removes its abort listener on normal wake-up. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -75,20 +93,19 @@ async function bitmapToRgba(bmp: ImageBitmap): Promise<{ rgba: Uint8ClampedArray
   return { rgba: data, w, h };
 }
 
-ctx.onmessage = async (e: MessageEvent) => {
+ctx.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   // ABORT control messages are handled by the per-request listeners below;
   // without this guard they'd fall through, crash on the missing tile field,
-  // and post a spurious ERROR for the aborted requestId.
+  // and post a spurious ERROR for the aborted requestId. It doubles as the
+  // union's discriminant: everything after it is a WorkerTileRequest.
   if (e.data.type === "ABORT") return;
 
-
-
   const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom } = e.data;
-  
+
   const abortController = new AbortController();
   const signal = abortController.signal;
 
-  const onAbortMessage = (msgEvent: MessageEvent) => {
+  const onAbortMessage = (msgEvent: MessageEvent<WorkerRequest>) => {
     if (msgEvent.data.type === "ABORT" && msgEvent.data.requestId === requestId) {
       abortController.abort();
       ctx.removeEventListener("message", onAbortMessage);
