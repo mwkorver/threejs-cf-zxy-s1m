@@ -1,4 +1,4 @@
-"""Terrain tile rendering (plan §4.2, §10.5).
+"""Terrain tile rendering.
 
 Two regimes behind one endpoint so the client speaks one terrain contract:
 
@@ -8,7 +8,7 @@ Two regimes behind one endpoint so the client speaks one terrain contract:
 - z < s1m_min_zoom (far field): passthrough of elevation-tiles-prod, which is
   already 256px Terrarium. A 512px tile at z is exactly the four z+1 children
   at 256px, so this is a pure 2x2 pixel copy — same encoding by design, no
-  elevation decode/re-encode, no conversion bugs at the boundary (plan §10.5).
+  elevation decode/re-encode, no conversion bugs at the boundary.
 """
 
 import time

@@ -1,5 +1,5 @@
 /**
- * Coordinates & precision (plan §5.1 — bake in from day one).
+ * Coordinates & precision (bake in from day one).
  *
  * World = Mercator meters (float64 on CPU), Z-up. A Mercator meter is not a
  * ground meter: EVERY true-meters -> world conversion (terrain Z, building

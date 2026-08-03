@@ -1,4 +1,4 @@
-"""Lambda entrypoint: Function URL -> Mangum -> FastAPI (plan §3, §9 step 2)."""
+"""Lambda entrypoint: Function URL -> Mangum -> FastAPI."""
 
 from mangum import Mangum
 

@@ -1,12 +1,12 @@
 /**
- * Terrarium Terrain-RGB decode (plan §10.5 — settled: Terrarium).
+ * Terrarium Terrain-RGB decode (settled: Terrarium, not Mapbox Terrain-RGB).
  *
  *   elevation = (R * 256 + G + B / 256) - 32768
  *
  * One decoder for the whole planet: S1M near-field tiles and
  * elevation-tiles-prod far-field tiles use the same packing by design.
  * In the render path this runs in the vertex shader; this CPU version is
- * for mesh building and height sampling (building seating, plan §4.3).
+ * for mesh building and height sampling (building seating).
  */
 
 export const TERRARIUM_OFFSET = 32768;

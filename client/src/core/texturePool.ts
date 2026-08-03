@@ -12,7 +12,7 @@ import * as THREE from "three";
  * three.js then re-uploads into the existing WebGLTexture instead of churning
  * a create/delete pair through the driver on every tile swap. The heavy-load
  * engine spike found GPU resource management, not the draw path, to be the
- * ceiling at scale (plan §10.2); this is the cheap half of that.
+ * ceiling at scale; this is the cheap half of that.
  *
  * Safety: a texture may only be released once nothing renders it. TileManager
  * pins every key whose node still holds a mesh, so BundleCache only evicts

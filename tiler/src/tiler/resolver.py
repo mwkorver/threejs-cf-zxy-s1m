@@ -1,4 +1,4 @@
-"""Mosaic resolver: which COGs intersect tile z/x/y? (plan §2 row 5, §4.1)
+"""Mosaic resolver: which COGs intersect tile z/x/y?
 
 Region pruning to shrink the S3 LIST, a cheap bbox-column prune, then an exact
 ST_Intersects refine. Lake geometry/bbox columns are EPSG:4326; tile bounds come
@@ -228,7 +228,7 @@ class MosaicResolver:
 
 
 class DemIndexResolver:
-    """DEM tile lookup for terrain tiles (plan §4.2).
+    """DEM tile lookup for terrain tiles.
 
     Serves any Albers-indexed 3DEP DEM index — S1M (1 m) and USGS 1/3" both
     use this shape — so the dataset is chosen by which parquet index is passed

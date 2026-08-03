@@ -1,6 +1,6 @@
-"""Imagery tile rendering: COG list -> mosaic read -> warp -> WebP (plan §4.1).
+"""Imagery tile rendering: COG list -> mosaic read -> warp -> WebP.
 
-rio-tiler does the real work (this is why "thin rio-tiler", plan §10.4):
+rio-tiler does the real work (this is why "thin rio-tiler"):
 Reader.tile() reads only the overview level and blocks the tile needs and
 warps to Web Mercator; mosaic_reader lays assets down first-hit-first until
 the tile is fully covered. The resolver sorts finest-gsd first, so the

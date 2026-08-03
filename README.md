@@ -16,10 +16,12 @@ A **CONUS flight-simulator-style streaming viewer**: NAIP aerial imagery and
 USGS 3DEP S1M 1-meter terrain, normalized server-side onto a single EPSG:3857
 `z/x/y` quadtree and streamed to a Three.js client through CloudFront.
 
-> [!IMPORTANT]
-> **Read [FLIGHT-SIM-PLAN.md](FLIGHT-SIM-PLAN.md) first** — it holds the
-> architecture, the locked decisions, and the phased plan. This repo is the
-> Phase 0/1 build: fly a camera over S1M high-resolution 1-meter terrain (centered on the Wyoming S1M tile group) with server tiles end-to-end.
+What's built today: a camera you can fly over 1-meter S1M terrain, centered on
+the Wyoming S1M tile group, with server tiles end-to-end. Everything below —
+the architecture, the tile contracts, and how to run it — is self-contained;
+[FLIGHT-SIM-PLAN.md](FLIGHT-SIM-PLAN.md) holds the longer-form design record
+and the phases still ahead, and is worth reading only if you want the reasoning
+behind a decision rather than the decision itself.
 
 ## Why this repository exists
 
@@ -373,7 +375,7 @@ so origin-side auth would leave every already-cached tile open.
 
 | File | What |
 |---|---|
-| [FLIGHT-SIM-PLAN.md](FLIGHT-SIM-PLAN.md) | Architecture, locked decisions, and the phased plan — read first |
+| [FLIGHT-SIM-PLAN.md](FLIGHT-SIM-PLAN.md) | The design record: why each decision went the way it did, and the phases still ahead |
 | [README-PTOLEMY3D.md](README-PTOLEMY3D.md) | What this demo inherits from pTolemy3D, and what two decades changed |
 | [infra/README.md](infra/README.md) | Deploying the tiler and edge stacks, plus the runtime gotchas |
 | [SECURITY.md](SECURITY.md) | How to report a vulnerability privately, and what's in scope |

@@ -1,6 +1,8 @@
 /**
- * Entry point: wires the three.js renderer (the engine picked in plan §10.2)
- * to the tile manager, the HUD, and the flight controls.
+ * Entry point: wires the three.js renderer to the tile manager, the HUD, and
+ * the flight controls. three.js rather than a globe engine because the world
+ * here is a flat Mercator plane, so none of Cesium's ellipsoid machinery earns
+ * its size; src/core stays engine-agnostic regardless.
  *
  * Reads config from URL query params, builds the scene and camera, hands
  * streaming and LOD to TileManager, renders the HUD overlay, then runs the

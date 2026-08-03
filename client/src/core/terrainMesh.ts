@@ -1,5 +1,5 @@
 /**
- * Terrain tile -> regular-grid mesh with skirts (plan §4.2, §5.3 — settled).
+ * Terrain tile -> regular-grid mesh with skirts.
  *
  * Server tiles are vanilla 512px Terrarium rasters, standard registration,
  * no overlap ring. Seam hiding is entirely this module's job: one extra
@@ -7,8 +7,8 @@
  * handles both same-zoom hairline cracks and cross-LOD T-junctions.
  * O(perimeter) on an O(area) pass — generated in the same loop as the grid.
  *
- * World = Mercator meters, Z-up (plan §5.1). Positions are emitted relative
- * to the tile's NW anchor as float32 (raw Mercator X for CONUS is ~1e7, where
+ * World = Mercator meters, Z-up. Positions are emitted relative to the tile's
+ * NW anchor as float32 (raw Mercator X for CONUS is ~1e7, where
  * float32 is ~1 m — useless against 8 cm imagery). Elevation is true meters
  * scaled by mercatorScale(lat): horizontal is stretched Mercator meters, so
  * vertical must match or slopes flatten.
@@ -40,8 +40,8 @@ export interface TerrainMesh {
  * Per-zoom skirt drop in world (Mercator) meters. Scales with the tile's
  * ground resolution so it stays visually constant across zooms: a few source
  * texels deep is enough to hide same-zoom cracks and LOD T-junctions without
- * a tall smeared wall on oblique low passes (plan §4.2 residuals). Cesium's
- * formula ties this to geometric error; texel-proportional is the cheap
+ * a tall smeared wall on oblique low passes. Cesium's formula ties this to
+ * geometric error; texel-proportional is the cheap
  * equivalent and easy to tune with one constant.
  */
 export function skirtHeight(tile: TileId, tileSize = 512, texels = 4): number {
@@ -96,7 +96,7 @@ export function buildTerrainMesh(
   const tileH = b.north - b.south;
 
   // Ground-meter -> Mercator-meter vertical scale, evaluated once per tile at
-  // its center latitude (plan §5.1).
+  // its center latitude.
   const [, centerLat] = mercatorToLonLat((b.west + b.east) / 2, (b.north + b.south) / 2);
   const zScale = mercatorScale(centerLat);
 

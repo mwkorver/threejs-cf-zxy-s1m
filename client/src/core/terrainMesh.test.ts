@@ -43,7 +43,7 @@ describe("buildTerrainMesh", () => {
     expect(maxX).toBeCloseTo(w, 3);
     expect(minY).toBeCloseTo(-h, 3);
     // anchor-relative keeps values ~1e3 (one tile wide), not the ~1e7 of raw
-    // Mercator X — that's what buys sub-meter float32 precision (plan §5.1).
+    // Mercator X — that's what buys sub-meter float32 precision.
     expect(maxX).toBeLessThan(2000);
   });
 

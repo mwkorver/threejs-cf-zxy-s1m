@@ -8,7 +8,7 @@ import {
 } from "./mercator";
 
 describe("mercatorScale", () => {
-  // Plan §5.1 anchor values
+  // Reference latitudes spanning CONUS, where the factor matters most
   it("matches the plan's reference latitudes", () => {
     expect(mercatorScale(25.76)).toBeCloseTo(1.11, 2); // Miami
     expect(mercatorScale(39.74)).toBeCloseTo(1.30, 2); // Denver
@@ -20,7 +20,7 @@ describe("mercatorScale", () => {
   });
 });
 
-// Plan §5.1 sec(lat) scale audit: every true-metre → world-Z conversion must
+// sec(lat) scale audit: every true-metre → world-Z conversion must
 // multiply by mercatorScale(lat). This test documents the convention and guards
 // against regressions: a 1000 m peak at 49°N renders at world Z = 1524 m, not
 // 1000 m — miss the factor and slopes flatten going north, frustum culling

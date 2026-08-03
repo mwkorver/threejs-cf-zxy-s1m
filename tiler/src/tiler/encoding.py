@@ -1,17 +1,17 @@
-"""Terrarium Terrain-RGB packing (plan §10.5 — settled: Terrarium).
+"""Terrarium Terrain-RGB packing (settled: Terrarium, not Mapbox Terrain-RGB).
 
     elevation = (R * 256 + G + B / 256) - 32768
 
 Matches s3://elevation-tiles-prod exactly, so far-field passthrough is pure
 pixel copying and the client runs one decoder everywhere. Tiles carrying this
-encoding MUST be losslessly compressed (plan §4.2).
+encoding MUST be losslessly compressed.
 """
 
 import numpy as np
 
 TERRARIUM_OFFSET = 32768.0
 
-# S1M nodata (plan §4.2). Encoded as 0 m for now; revisit void-fill vs
+# S1M nodata. Encoded as 0 m for now; revisit void-fill vs
 # transparency in Phase 0 when real coverage gaps are on screen.
 S1M_NODATA = -999999.0
 

@@ -15,11 +15,11 @@ _SEED_BUCKET_ROOT = "s3://mwkorver-foundation-us-west-2/threejs-cf-zxy-s1m/"
 class Settings(BaseSettings):
     model_config = {"env_prefix": "TILER_"}
 
-    # GeoParquet lake = mosaic index (plan §2 row 5, §7). Hive tree:
+    # GeoParquet lake = mosaic index. Hive tree:
     # collection=/region=/year=. This is the canonical NAIP index, shared with
     # deckgl-s3-cog-s1m rather than owned by either repo: this tiler reads
-    # collection=naip-visualization (RGB, plan §2 row 5a), while the analytic
-    # RGBIR collection alongside it belongs to that project. Requester-pays,
+    # collection=naip-visualization (RGB), while the analytic RGBIR collection
+    # alongside it belongs to that project. Requester-pays,
     # which duck.py already sets. Point at a local copy for offline dev.
     lake_path: str = "s3://naip-geoparquet-index/manifest-index"
 
@@ -36,11 +36,11 @@ class Settings(BaseSettings):
     # wrong.
     s1m_index_path: str = _SEED_BUCKET_ROOT + "manifest-index/s1m/S1M_Products.parquet"
 
-    # Far-field terrain source, Terrarium 256px (plan §2 row 7, §4.2).
+    # Far-field terrain source, Terrarium 256px.
     farfield_tiles: str = "s3://elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 
-    tile_size: int = 512  # both imagery and terrain (plan §2 row 4, §4.2)
-    imagery_webp_quality: int = 75  # plan §4.1
+    tile_size: int = 512  # both imagery and terrain
+    imagery_webp_quality: int = 75  # lossy is fine for imagery; terrain is not
 
     # Zoom at/above which /imagery resolves the COG mosaic. Below it the client
     # asks /basemap instead (the USDA cache stitch), because down there a tile
@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     # imagery.
     terrain_max_zoom: int = 18
 
-    aws_region: str = "us-west-2"  # same region as sources (plan §2 row 10)
+    aws_region: str = "us-west-2"  # same region as sources
 
 
 settings = Settings()

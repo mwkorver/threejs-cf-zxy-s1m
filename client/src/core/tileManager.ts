@@ -109,7 +109,7 @@ export class TileManager {
   public transitionTtlMs = 5000;
   private workerPool = new TileWorkerPool();
 
-  // --- Velocity-vector prefetch (plan §5.3) ---
+  // --- Velocity-vector prefetch ---
   private prefetchPrevPos?: THREE.Vector3;
   private prefetchPrevTimeMs = 0;
   private prefetchVelocity = new THREE.Vector3(); // Mercator m/s, local offset space
@@ -238,7 +238,7 @@ export class TileManager {
     const cy = localCameraPos.y + this.worldAnchor[1];
     this.lastCameraMercator = [cx, cy];
 
-    // Velocity estimate for prefetch (§5.3): finite-difference from prev frame.
+    // Velocity estimate for prefetch: finite-difference from prev frame.
     // Clamped to 200 ms: tabs that go to background then resume would produce a
     // huge phantom velocity spike from accumulated dt — reset instead.
     const pfNow = performance.now();
@@ -421,7 +421,7 @@ export class TileManager {
       this.globalUniforms.localMaxElev.value = 4000.0;
     }
 
-    // 10. Prefetch tiles along the flight vector (§5.3)
+    // 10. Prefetch tiles along the flight vector
     this.prefetchAhead();
   }
 
@@ -444,7 +444,7 @@ export class TileManager {
 
   /** @returns true if the node was frustum-culled (renders nothing on screen). */
   private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): boolean {
-    // Per-tile ground→world Z scale at the tile's center latitude (plan §5.1).
+    // Per-tile ground→world Z scale at the tile's center latitude.
     // Every true-metre value (elevation, exagZ) must be multiplied by this
     // before entering world Z, where the camera and frustum live. Mesh
     // vertices bake h·zScale; the same factor applies here for consistency.
@@ -760,7 +760,7 @@ export class TileManager {
 
 
   /**
-   * Velocity-vector prefetch (plan §5.3): sample look-ahead points along the
+   * Velocity-vector prefetch: sample look-ahead points along the
    * horizontal flight vector and pre-warm the bundle cache for tiles the camera
    * will encounter in prefetchLookaheadSec seconds. Called at the end of update().
    *

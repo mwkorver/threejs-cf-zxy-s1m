@@ -452,7 +452,7 @@ describe("TileManager frustum culling", () => {
   });
 
   it("sec(lat) audit: frustum box Z is scaled by mercatorScale at high latitude", () => {
-    // Regression test for the §5.1 sec(lat) scale audit: the frustum culling
+    // Regression test for the sec(lat) scale audit: the frustum culling
     // box Z must be in world (Mercator) metres, not true metres. At 49°N
     // (sec(lat) ≈ 1.52), a 9000 m peak renders at world Z = 13680 m. Before
     // the fix the box only extended to 9000 (true), so a camera at 10000 m

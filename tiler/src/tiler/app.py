@@ -1,7 +1,7 @@
-"""FastAPI app: the two tile endpoints (plan §4).
+"""FastAPI app: the two tile endpoints.
 
 Deliberately tiny and rigid — path parameters only, no query strings, so
-CloudFront cache keys stay path-only and every tile is immutable (plan §4.1).
+CloudFront cache keys stay path-only and every tile is immutable.
 """
 
 from functools import lru_cache
@@ -55,13 +55,13 @@ def get_usgs13_resolver() -> DemIndexResolver:
 
 @app.get("/imagery/{layer}/{year}/{z}/{x}/{y}.webp")
 def imagery_tile(layer: str, year: int, z: int, x: int, y: int) -> Response:
-    """512px WebP q~75 imagery tile (plan §4.1)."""
+    """512px WebP q~75 imagery tile."""
     lyr = LAYERS.get(layer)
     if lyr is None:
         raise HTTPException(404, f"unknown layer {layer!r}")
     if not 0 <= z <= lyr.maxzoom:
         # Beyond the source's resolution: 404 so the CDN never caches
-        # upsampled junk; the client clamps (plan §4.1, §5.2).
+        # upsampled junk; the client clamps.
         raise HTTPException(404, f"z {z} beyond layer maxzoom {lyr.maxzoom}")
     if z < settings.imagery_min_zoom:
         # Below the mosaic band. /basemap serves this range from the USDA cache;
@@ -112,7 +112,7 @@ def basemap_tile(z: int, x: int, y: int) -> Response:
 
 @app.get("/terrain/{z}/{x}/{y}.webp")
 def terrain_tile(z: int, x: int, y: int) -> Response:
-    """512px Terrarium Terrain-RGB tile, lossless WebP (plan §4.2).
+    """512px Terrarium Terrain-RGB tile, lossless WebP.
 
     Path-only, like every other endpoint. The DEM-band thresholds are config
     (TILER_USGS_MIN_ZOOM / TILER_S1M_MIN_ZOOM), never per-request: they change
