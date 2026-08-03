@@ -11,11 +11,7 @@ from tiler import terrain
 from tiler.encoding import decode_terrarium
 
 
-def _decode_webp(body: bytes) -> np.ndarray:
-    from rasterio.io import MemoryFile
-
-    with MemoryFile(body) as m, m.open() as ds:
-        return np.transpose(ds.read(), (1, 2, 0))
+from helpers import decode_webp as _decode_webp
 
 
 def test_s1m_empty_hrefs_returns_none():
