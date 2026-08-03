@@ -1,4 +1,11 @@
-"""Script to generate a small 256x256 GeoTIFF fixture for un-mocked rio-tiler tests."""
+"""Regenerates test_raster.tif, the fixture for the un-mocked rio-tiler test.
+
+A plain 256x256 GeoTIFF, not a COG: at one tile the internal tiling and
+overviews a COG adds are never read, so they would only make the checked-in
+fixture larger without covering a different path. The file is committed so the
+test suite doesn't need rasterio write support at runtime -- rerun this only if
+the tile or elevation range in test_terrain.py changes.
+"""
 
 from pathlib import Path
 import numpy as np
