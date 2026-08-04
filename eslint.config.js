@@ -71,9 +71,9 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "off",
     },
   },
-  // Untyped linting for plain JS scripts
+  // Untyped linting for plain JS at the repo root (this config file itself)
   {
-    files: ["client/scripts/**/*.mjs", "*.js"],
+    files: ["*.js"],
     extends: [...tseslint.configs.recommended],
   }
 );
