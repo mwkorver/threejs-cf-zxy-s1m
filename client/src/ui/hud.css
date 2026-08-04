@@ -1,5 +1,4 @@
-/* HUD overlay styles. The markup lives in main.ts; nothing here is dynamic, so
-   it belongs in a stylesheet rather than in a template string. */
+/* HUD overlay styles. */
 
 .hud {
   --accent: #38bdf8;
@@ -21,17 +20,8 @@
   font-size: 13px;
   color: var(--fg);
   z-index: 100;
-  pointer-events: auto; /* controls stay clickable inside the overlay */
+  pointer-events: auto;
 
-  /* Never let the panel outgrow the window. Expanded it exceeds a laptop
-     viewport, and with no scroll container a wheel over the HUD fell through to
-     the document (main.ts leaves those events undefaulted), scrolling the 3D
-     canvas away instead. overscroll-behavior keeps that from resuming once this
-     panel hits its end.
-
-     82px = 20px top offset + 20px bottom gap + 40px padding + 2px border. This
-     box is content-box, so padding and border fall outside max-height and have
-     to be subtracted by hand or the panel overflows by exactly that much. */
   max-height: calc(100vh - 82px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -45,12 +35,10 @@
   letter-spacing: 1px;
 }
 
-/* Live telemetry readouts (LAT/LON, ALTITUDE, ...) */
 .hud-readout {
   margin-bottom: 4px;
 }
 
-/* A rule-separated block, e.g. the tile stats or the lighting controls. */
 .hud-section {
   margin-top: 10px;
   padding-top: 10px;
@@ -63,8 +51,6 @@
   font-weight: bold;
 }
 
-/* Collapsible section. Closed, it should read exactly like the .hud-section
-   header it replaces — same rule above, same accent title. */
 .hud-details {
   margin-top: 10px;
   padding-top: 10px;
@@ -76,10 +62,9 @@
   font-weight: bold;
   cursor: pointer;
   user-select: none;
-  list-style: none; /* drop the default triangle; ::before draws our own */
+  list-style: none;
 }
 
-/* Safari still paints a marker without this. */
 .hud-summary::-webkit-details-marker {
   display: none;
 }
@@ -94,12 +79,10 @@
   transform: rotate(90deg);
 }
 
-/* Give the first control inside an open section room below the summary. */
 .hud-details[open] > .hud-summary {
   margin-bottom: 8px;
 }
 
-/* One labelled control: caption row above, input below. */
 .hud-group {
   margin-bottom: 8px;
 }
@@ -139,7 +122,6 @@
   cursor: pointer;
 }
 
-/* Checkbox/radio with its caption on one line. */
 .hud-toggle {
   display: flex;
   align-items: center;
@@ -150,19 +132,16 @@
   user-select: none;
 }
 
-/* Stacked toggles (e.g. a radio group) need a little air between them. */
 .hud-toggle + .hud-toggle {
   margin-top: 4px;
 }
 
-/* Side-by-side controls, e.g. the hypsometric bounds radios. */
 .hud-row {
   display: flex;
   gap: 12px;
   margin-bottom: 6px;
 }
 
-/* Colour-key rows under a toggle, indented past the checkbox. */
 .hud-legend {
   display: flex;
   flex-wrap: wrap;
@@ -190,7 +169,6 @@
   font-weight: bold;
 }
 
-/* A group nested under a parent control (indented, slightly smaller). */
 .hud-sub {
   margin-left: 22px;
 }
@@ -199,14 +177,12 @@
   font-size: 9px;
 }
 
-/* Lives inside the CONTROLS <details>, which already draws the rule above. */
 .hud-help {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.4;
 }
 
-/* Top-right North compass rose */
 .compass {
   position: absolute;
   top: 20px;
