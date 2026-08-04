@@ -15,7 +15,7 @@ shaped the way it is, and that reasoning is still the interesting part.
 was never built. Individual sections are annotated where they say something no
 longer true.
 
-Last reconciled against the code: **2026-07-31**.
+Last reconciled against the code: **2026-08-04**.
 
 ---
 
@@ -23,8 +23,7 @@ Last reconciled against the code: **2026-07-31**.
 
 ### Held as planned
 
-Every locked decision in [§2](#2-locked-decisions) survived contact except
-buildings (row 8, never built). The flat Mercator world, the single 3857
+Every locked decision in [§2](#2-locked-decisions) survived contact. The flat Mercator world, the single 3857
 quadtree, path-only immutable cache keys, WebP 512, Terrarium terrain,
 three.js, and us-west-2 are all exactly as specified. Phase 0 shipped in full
 and its measurements are recorded in [§9](#9-phased-plan). All five open
@@ -37,6 +36,7 @@ were reopened.
 |---|---|---|
 | DEM tiers | Two: S1M near-field, `elevation-tiles-prod` far-field | **Three**: S1M → USGS 1/3" (10 m) → far-field. The 1/3" tier also void-fills S1M's ragged coverage edges, which [§4.2](#42-terrain) had hand-waved as "void fill or transparent" |
 | Low-zoom imagery | Pre-genned z0–z12 static pyramid on S3 | **`/basemap/{z}/{x}/{y}.webp`** — a live endpoint stitching four USDA NAIP ImageServer cache tiles into one 512. The COG mosaic fan-out was too slow and coverage-capped down there, and this needed no pre-gen job at all. The pyramid was never built |
+| 3D Buildings | Static PMTiles range reads from S3 ([§4.3](#43-buildings)) | **`/buildings/{z}/{x}/{y}.pbf`** — dynamic serverless MVT vector tiles generated via DuckDB `ST_AsMVT()` over Overture Maps / MS Building Footprints GeoParquet lake partitions on S3. Web Worker extrudes 3D wall & roof meshes off the main thread at $z \ge 14$, sampling 1m S1M terrain heightfields to seat building bases flush on 3D terrain |
 | Coverage fallback | "Client renders no-data as fallback-LOD terrain" ([§8](#8-cost--risk-notes)) | **`/footprints/{s1m,usgs13}.json`** — two static vectors (~360 KB gzipped) the client fetches once and clips against, so it knows where coverage ends before requesting. Not in the plan at all |
 | Client hosting | Implicit; CloudFront served tiles only | The **same distribution serves the compiled app**, so there is one origin story for the whole demo |
 | Access control | Not considered | A viewer-request CloudFront Function gates everything on `?k=<key>`, to keep crawlers off requester-pays reads. Not a real secret — it ships in the bundle |
@@ -45,12 +45,6 @@ were reopened.
 
 ### Never built
 
-- **Buildings, entirely.** [§2 row 8](#2-locked-decisions), [§4.3](#43-buildings--not-built),
-  the `/buildings/*` behavior in [§3](#3-architecture)'s diagram, and the last
-  bullet of Phase 1. No Overture ingest, no tippecanoe, no PMTiles, no
-  terrain-seated extrusions. The terrain-sampling seating API that [§4.3](#43-buildings--not-built)
-  depends on (`getElevationAt`) does exist — it drives the follow-terrain
-  camera instead.
 - **Any second imagery layer.** The registry holds exactly one entry,
   `naip-visualization`. `nj-imagery`, `kyfromabove` and `in-imagery` were never
   onboarded, so the `{layer}` path segment is real but single-valued and the
@@ -201,13 +195,12 @@ signing.
   - Optional later: pack server-computed normals into a parallel tile layer (or
     alpha) for free sun-angle shading.
 
-### 4.3 Buildings — not built
+### 4.3 Buildings — Shipped (`/buildings/{z}/{x}/{y}.pbf`)
 
-- One-time (per Overture release) batch: Overture buildings GeoParquet →
-  GeoJSONSeq → tippecanoe → `buildings.pmtiles` on S3.
-  - Keep `height`, `num_floors`, class; zoom-graded drop/coalesce.
-  - Client seats footprints by sampling the terrain tile grid (bilinear — the
-    regular grid makes the current repo's mesh-raycast seating obsolete).
+- Serverless Lambda endpoint `GET /buildings/{z}/{x}/{y}.pbf` (`application/x-protobuf`).
+  - DuckDB `ST_AsMVT()` queries Overture Maps / MS Building Footprints GeoParquet lake partitions on S3.
+  - High-zoom LOD floor ($z \ge 14$): returned for high zoom; 404 below.
+  - Client Web Worker (`tile.worker.ts` & `buildingMesh.ts`) decodes MVT protobuf vector tiles off the main thread, samples loaded 1-meter S1M terrain heightfields at building centroids, deduplicates feature IDs, and generates merged 3D wall & roof `Float32Array` buffers for 1 `THREE.Mesh` draw call per tile node.
 
 ## 5. Client architecture notes
 
