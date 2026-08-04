@@ -122,11 +122,19 @@ export interface FootprintFeature {
     href: string;
     type?: string;
   };
-  geometry: {
-    type: "Polygon" | "MultiPolygon";
-    coordinates: any;
-  };
+  // Discriminated on `type` rather than one loose `coordinates`, because the
+  // two nest to different depths and the renderer loops accordingly: a Polygon
+  // is rings, a MultiPolygon is polygons of rings. With `any` the two loops in
+  // tileManager's footprint builder type-checked against each other, so
+  // swapping them -- or dropping a level -- failed only at runtime, on data
+  // that comes off the network.
+  geometry:
+    | { type: "Polygon"; coordinates: FootprintRing[] }
+    | { type: "MultiPolygon"; coordinates: FootprintRing[][] };
 }
+
+/** GeoJSON linear ring: [lon, lat] positions. Elevation is never carried here. */
+export type FootprintRing = [number, number][];
 
 export interface FootprintCollection {
   type: "FeatureCollection";
