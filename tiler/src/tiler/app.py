@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .basemap import BASEMAP_MAX_ZOOM, TransientBasemapError, render_basemap_tile
+from .buildings import BuildingResolver
 from .imagery import render_imagery_tile
 from .registry import LAYERS
 from .resolver import MosaicResolver, DemIndexResolver
@@ -177,6 +178,27 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
             "Access-Control-Expose-Headers": "X-DEM-Source"
         }
     )
+
+
+@lru_cache(maxsize=1)
+def get_building_resolver() -> BuildingResolver:
+    """One BuildingResolver (DuckDB + MVT exporter) per container."""
+    return BuildingResolver(settings.building_lake_path, settings.aws_region)
+
+
+@app.get("/buildings/{z}/{x}/{y}.pbf")
+def building_tile(z: int, x: int, y: int) -> Response:
+    """512px MVT vector tile containing 3D building footprints and heights."""
+    if z < settings.building_min_zoom:
+        raise HTTPException(404, f"z {z} below building minzoom {settings.building_min_zoom}")
+    n = 2**z
+    if not (0 <= x < n and 0 <= y < n):
+        raise HTTPException(404, "tile out of range")
+
+    body = get_building_resolver().resolve(z, x, y)
+    if body is None:
+        raise HTTPException(404, "no building coverage")
+    return Response(body, media_type="application/x-protobuf", headers={"Cache-Control": IMMUTABLE})
 
 
 @app.get("/healthz")

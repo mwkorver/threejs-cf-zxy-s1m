@@ -5,6 +5,7 @@ export interface Bundle {
   key: string; // tileKey(z/x/y)
   bytes: number;
   geometry: THREE.BufferGeometry;
+  buildingGeometry?: THREE.BufferGeometry;
   texture?: THREE.Texture;
   footprints?: THREE.LineSegments;
   centerElevation?: number;
@@ -71,6 +72,9 @@ export class BundleCache {
   private disposeBundle(bundle: Bundle): void {
     // Dispose of GPU resources to prevent memory leaks
     bundle.geometry.dispose();
+    if (bundle.buildingGeometry) {
+      bundle.buildingGeometry.dispose();
+    }
     if (bundle.texture) {
       if (this.texturePool) {
         this.texturePool.release(bundle.texture);

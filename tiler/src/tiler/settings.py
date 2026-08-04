@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # Zoom at/above which USGS 1/3" DEM is used instead of far-field.
     usgs_min_zoom: int = 11
 
+    # Overture Maps / MS Building footprints GeoParquet lake path & min zoom floor
+    building_lake_path: str = _SEED_BUCKET_ROOT + "manifest-index/buildings/buildings.parquet"
+    building_min_zoom: int = 14
+
     # Hard cap on /terrain z: above this the CDN would cache upsampled junk
     # over an unbounded key space (mirrors the imagery maxzoom 404). S1M at
     # 1 m fully resolves ~z17 on the 512px basis; 18 matches the client's max

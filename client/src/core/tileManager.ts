@@ -655,7 +655,12 @@ export class TileManager {
         node.demSource = transNode.demSource;
         node.minElevation = transNode.minElevation;
         node.maxElevation = transNode.maxElevation;
-        this.createMeshFromBundle(node, transNode.mesh.geometry, tex);
+        this.createMeshFromBundle(node, {
+          key: node.key,
+          bytes: 0,
+          geometry: transNode.mesh.geometry,
+          texture: tex,
+        });
         node.loaded = true;
         node.loading = false;
         return;
@@ -669,7 +674,7 @@ export class TileManager {
       node.demSource = cached.demSource;
       node.minElevation = cached.minElevation;
       node.maxElevation = cached.maxElevation;
-      this.createMeshFromBundle(node, cached.geometry, cached.texture);
+      this.createMeshFromBundle(node, cached);
       node.loaded = true;
       node.loading = false;
       return;
@@ -700,7 +705,7 @@ export class TileManager {
 
           const bundle = this.buildBundleFromResult(key, node.tile, res);
           this.bundleCache.put(bundle, this.activeKeys);
-          this.createMeshFromBundle(node, bundle.geometry, bundle.texture);
+          this.createMeshFromBundle(node, bundle);
           node.loaded = true;
           node.loading = false;
           node.retryAfter = undefined;
@@ -724,13 +729,22 @@ export class TileManager {
     tile: TileId,
     res: TileLoadResult
   ): Bundle {
-    const { demSource, centerElevation, meshData, imageBitmap, minElevation, maxElevation } = res;
+    const { demSource, centerElevation, meshData, buildingMeshData, imageBitmap, minElevation, maxElevation } = res;
 
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
     geom.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
     geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
     geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+    let buildingGeometry: THREE.BufferGeometry | undefined;
+    if (buildingMeshData) {
+      buildingGeometry = new THREE.BufferGeometry();
+      buildingGeometry.setAttribute("position", new THREE.BufferAttribute(buildingMeshData.positions, 3));
+      buildingGeometry.setAttribute("normal", new THREE.BufferAttribute(buildingMeshData.normals, 3));
+      buildingGeometry.setAttribute("uv", new THREE.BufferAttribute(buildingMeshData.uvs, 2));
+      buildingGeometry.setIndex(new THREE.BufferAttribute(buildingMeshData.indices, 1));
+    }
 
     let texture: THREE.Texture | undefined;
     if (imageBitmap) {
@@ -746,9 +760,10 @@ export class TileManager {
       meshData.positions.byteLength +
       meshData.normals.byteLength +
       meshData.indices.byteLength +
+      (buildingMeshData ? buildingMeshData.positions.byteLength + buildingMeshData.indices.byteLength : 0) +
       (texture ? 512 * 512 * 4 : 0);
 
-    return { key, bytes, geometry: geom, texture, centerElevation, demSource, minElevation, maxElevation };
+    return { key, bytes, geometry: geom, buildingGeometry, texture, centerElevation, demSource, minElevation, maxElevation };
   }
 
 
@@ -1027,9 +1042,10 @@ export class TileManager {
 
   private createMeshFromBundle(
     node: TileNode,
-    geom: THREE.BufferGeometry,
-    texture?: THREE.Texture
+    bundle: Bundle
   ): void {
+    const geom = bundle.geometry;
+    const texture = bundle.texture;
     let demSourceVal = 0.0;
     if (node.demSource === "flat") {
       demSourceVal = 3.0;
@@ -1039,8 +1055,6 @@ export class TileManager {
       demSourceVal = 1.0;
     }
 
-    // Per-tile ground->Mercator vertical scale at the tile's center latitude;
-    // matches the zScale baked into the mesh vertices by buildTerrainMesh.
     const zScale = mercatorScale(mercatorToLonLat(
       (node.bounds.west + node.bounds.east) / 2,
       (node.bounds.north + node.bounds.south) / 2
@@ -1064,9 +1078,6 @@ export class TileManager {
         contrast: this.globalUniforms.contrast,
         saturation: this.globalUniforms.saturation,
         demSourceType: { value: demSourceVal },
-        // Per-tile Mercator vertical scale: vertex Z is elevation * sec(lat),
-        // so the shader divides by this to recover true metres for hypsometric
-        // tinting (whose bounds are in true metres).
         uZScale: { value: zScale },
         ...THREE.UniformsLib.fog
       },
@@ -1076,16 +1087,21 @@ export class TileManager {
     });
 
     const mesh = new THREE.Mesh(geom, material);
-    // Position NW anchor relative to worldAnchor to maintain float32 coordinate
-    // precision. Z realises the reference-anchored exaggeration: with vertex
-    // z = h·zScale and scale.z = exag, adding exagZ(0)·zScale gives world
-    // z = ((h - ref)·exag + ref)·zScale.
+
+    if (bundle.buildingGeometry) {
+      const bMat = new THREE.MeshLambertMaterial({
+        color: 0xcbd5e1,
+        side: THREE.DoubleSide,
+      });
+      const bMesh = new THREE.Mesh(bundle.buildingGeometry, bMat);
+      mesh.add(bMesh);
+    }
+
     mesh.position.set(
       node.bounds.west - this.worldAnchor[0],
       node.bounds.north - this.worldAnchor[1],
       this.exagZ(0) * zScale
     );
-    // Apply vertical exaggeration
     mesh.scale.z = this.verticalExaggeration;
 
     node.mesh = mesh;

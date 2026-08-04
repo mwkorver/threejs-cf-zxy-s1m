@@ -245,6 +245,7 @@ export class EdgeStack extends Stack {
           tilerBehavior("/imagery/*"),
           tilerBehavior("/terrain/*"),
           tilerBehavior("/basemap/*"),
+          tilerBehavior("/buildings/*"),
           // Static footprint vectors -> S3 origin, same tile cache policy.
           {
             pathPattern: "/footprints/*",

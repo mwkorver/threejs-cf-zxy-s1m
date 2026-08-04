@@ -17,6 +17,7 @@
 import { type TileId } from "./mercator";
 import type { TerrainMesh } from "./terrainMesh";
 import type { ImageryRouting } from "./tileUrls";
+import type { ExtrudedBuildingMesh } from "./buildingMesh";
 
 /**
  * Everything a tile load needs beyond the tile itself. Extends the imagery
@@ -67,6 +68,8 @@ export interface WorkerTileSuccessResponse {
   demSource: string;
   centerElevation: number;
   meshData: WorkerMeshData;
+  /** Extruded 3D building mesh data (optional). */
+  buildingMeshData?: ExtrudedBuildingMesh | null;
   /** null when imagery 404s: no coverage, but the mesh is still good. */
   imageBitmap: ImageBitmap | null;
   minElevation: number;

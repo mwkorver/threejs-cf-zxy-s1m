@@ -1,8 +1,11 @@
 import { decodeTerrarium } from "./terrarium";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { imageryRequest, terrainRequest } from "./tileUrls";
+import { decodeAndExtrudeBuildings, type ExtrudedBuildingMesh } from "./buildingMesh";
 
 import type { WorkerRequest, WorkerTileResponse } from "./workerTypes";
+
+const activeBuildingIds = new Set<string>();
 
 /**
  * `self` in a dedicated worker is a DedicatedWorkerGlobalScope, but that type
@@ -207,7 +210,20 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
       ? buildTerrainMesh(heights, tile, gridStep)
       : buildFlatMesh(tile);
 
-    // 4. Pass back ownership via transferable ArrayBuffers
+    // 4. Fetch & decode 3D building vector tiles when z >= 14
+    let buildingMeshData: ExtrudedBuildingMesh | null = null;
+    if (tile.z >= 14) {
+      try {
+        const buildingUrl = `${baseUrl}/buildings/${tile.z}/${tile.x}/${tile.y}.pbf`;
+        const res = await fetchTile(buildingUrl, `building ${tile.z}/${tile.x}/${tile.y}`, 3, signal);
+        const pbfBuf = await res.arrayBuffer();
+        buildingMeshData = decodeAndExtrudeBuildings(pbfBuf, tile, heights, activeBuildingIds);
+      } catch {
+        buildingMeshData = null;
+      }
+    }
+
+    // 5. Pass back ownership via transferable ArrayBuffers
     const transferList: Transferable[] = [
       meshData.positions.buffer,
       meshData.uvs.buffer,
@@ -216,6 +232,14 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
     ];
     if (imageBitmap) {
       transferList.push(imageBitmap);
+    }
+    if (buildingMeshData) {
+      transferList.push(
+        buildingMeshData.positions.buffer,
+        buildingMeshData.normals.buffer,
+        buildingMeshData.uvs.buffer,
+        buildingMeshData.indices.buffer
+      );
     }
 
     ctx.postMessage({
@@ -232,6 +256,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
         anchor: meshData.anchor,
         gridSize: meshData.gridSize
       },
+      buildingMeshData,
       imageBitmap,
       minElevation,
       maxElevation
