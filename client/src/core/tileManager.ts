@@ -690,6 +690,7 @@ export class TileManager {
       terrainMinZoom: this.terrainMinZoom,
       gridStep: this.gridStep,
       externalImageryMaxZoom: this.externalImageryMaxZoom,
+      showBuildings: this.showBuildings,
     };
 
     this.workerPool.requestTile(node.tile, priority, options)
@@ -795,12 +796,12 @@ export class TileManager {
       terrainMinZoom: this.terrainMinZoom,
       gridStep: this.gridStep,
       externalImageryMaxZoom: this.externalImageryMaxZoom,
+      showBuildings: this.showBuildings,
     };
 
-    // Prefetch zoom: always at maxZoom (e.g. z15–18) — the tier where cold
-    // misses actually cause pop-in. At coarser zooms tiles are 100s of km
-    // wide; the camera can't outrun them and they're already in the active tree.
-    const zoom = this.maxZoom;
+    // Prefetch zoom: match camera's active LOD zoom tier (baseZoom + 2 capped at maxZoom),
+    // so a high-altitude camera at z=7 prefetches z=9, NOT z=18!
+    const zoom = Math.min(this.baseZoom + 2, this.maxZoom);
     const anchorX = this.worldAnchor[0];
     const anchorY = this.worldAnchor[1];
 
@@ -890,6 +891,7 @@ export class TileManager {
       terrainMinZoom: this.terrainMinZoom,
       gridStep: this.gridStep,
       externalImageryMaxZoom: this.externalImageryMaxZoom,
+      showBuildings: this.showBuildings,
     };
 
     // Priority = 1e8 (super high priority so it jumps to top of pending task queue)

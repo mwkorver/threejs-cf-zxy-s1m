@@ -103,7 +103,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
   // union's discriminant: everything after it is a WorkerTileRequest.
   if (e.data.type === "ABORT") return;
 
-  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom } = e.data;
+  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom, showBuildings } = e.data;
 
   const abortController = new AbortController();
   const signal = abortController.signal;
@@ -210,9 +210,9 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
       ? buildTerrainMesh(heights, tile, gridStep)
       : buildFlatMesh(tile);
 
-    // 4. Fetch & decode 3D building vector tiles when z >= 14
+    // 4. Fetch & decode 3D building vector tiles when showBuildings is true and z >= 14
     let buildingMeshData: ExtrudedBuildingMesh | null = null;
-    if (tile.z >= 14) {
+    if (showBuildings && tile.z >= 14) {
       try {
         const buildingUrl = `${baseUrl}/buildings/${tile.z}/${tile.x}/${tile.y}.pbf`;
         const res = await fetchTile(buildingUrl, `building ${tile.z}/${tile.x}/${tile.y}`, 3, signal);

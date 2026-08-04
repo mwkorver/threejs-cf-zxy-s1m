@@ -880,13 +880,11 @@ describe("TileManager prefetchAhead", () => {
     // show calls if some look-ahead tiles were already requested by triggerLoad.
     expect(tm.getLastPrefetchCount()).toBeGreaterThan(0);
 
-    // All look-ahead tiles must be east of the current camera tile.
-    // Prefetch now operates at maxZoom — the only tier where pop-in matters.
-    const maxZoom = (tm as any).maxZoom as number;
-    const currentTile = mercatorToTile(0, 0, maxZoom);
+    // All look-ahead tiles must be east of the current camera tile at that zoom level.
     const allCalls = requestSpy.mock.calls as any[][];
     for (const [tile] of allCalls) {
-      expect((tile as { x: number }).x).toBeGreaterThanOrEqual(currentTile.x);
+      const currentTileAtZ = mercatorToTile(0, 0, (tile as { z: number }).z);
+      expect((tile as { x: number }).x).toBeGreaterThanOrEqual(currentTileAtZ.x);
     }
   });
 

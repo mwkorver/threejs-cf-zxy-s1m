@@ -29,6 +29,8 @@ export interface TileWorkerTaskOptions extends ImageryRouting {
   terrainMinZoom: number;
   /** Mesh vertices every N source texels; the LOD manager picks it per tile. */
   gridStep: number;
+  /** Whether 3D vector buildings should be fetched and extruded. */
+  showBuildings?: boolean;
 }
 
 export interface WorkerTileRequest extends TileWorkerTaskOptions {
