@@ -196,7 +196,7 @@ export class EdgeStack extends Stack {
       viewerProtocolPolicy: "https-only",
       cachePolicyId: cachePolicy.ref,
       responseHeadersPolicyId: corsPolicy.ref,
-      allowedMethods: ["GET", "HEAD"],
+      allowedMethods: ["GET", "HEAD", "OPTIONS"],
       compress: false,
       functionAssociations: authAssociations,
     });
@@ -253,7 +253,7 @@ export class EdgeStack extends Stack {
             viewerProtocolPolicy: "https-only",
             cachePolicyId: cachePolicy.ref,
             responseHeadersPolicyId: corsPolicy.ref,
-            allowedMethods: ["GET", "HEAD"],
+            allowedMethods: ["GET", "HEAD", "OPTIONS"],
             compress: false,
             functionAssociations: authAssociations,
           },
