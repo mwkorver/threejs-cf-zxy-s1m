@@ -15,5 +15,14 @@ declare global {
   interface Window {
     __VIEWER_STATE__?: ViewerStateTelemetry;
     __STEP_FRAME__?: (dtMs?: number) => void;
+    /**
+     * Debug handles for poking at the scene from the browser console. Declared
+     * here rather than reached through `window as any` at the assignment, so
+     * console use gets completion and the two stay in step with their types.
+     * Loosely typed on purpose: importing TileManager/THREE into a .d.ts to
+     * name them would make this file a module and break the global augmentation.
+     */
+    tileManager?: object;
+    camera?: object;
   }
 }

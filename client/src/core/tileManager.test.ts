@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as THREE from "three";
 import { TileManager, type TileNode } from "./tileManager";
-import { BundleCache, type Bundle } from "./bundleCache";
-import { mercatorToTile, lonLatToMercator, mercatorScale } from "./mercator";
+import { BundleCache } from "./bundleCache";
+import { mercatorToTile, lonLatToMercator } from "./mercator";
 
 // Suppress noisy console output from tile loading warnings
 let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -902,7 +902,7 @@ describe("TileManager prefetchAhead", () => {
     tm.update(pos);
     requestSpy.mockClear();
 
-    const baseZoom = (tm as any).baseZoom as number;
+    const _baseZoom = (tm as any).baseZoom as number;
     // Prefetch operates at maxZoom — update the cache with maxZoom tiles.
     const zoom = (tm as any).maxZoom as number;
     const lookahead = tm.prefetchLookaheadSec;

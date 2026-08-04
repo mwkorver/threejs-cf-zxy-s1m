@@ -70,9 +70,7 @@ export class BundleCache {
 
   private disposeBundle(bundle: Bundle): void {
     // Dispose of GPU resources to prevent memory leaks
-    if (bundle.geometry) {
-      bundle.geometry.dispose();
-    }
+    bundle.geometry.dispose();
     if (bundle.texture) {
       if (this.texturePool) {
         this.texturePool.release(bundle.texture);

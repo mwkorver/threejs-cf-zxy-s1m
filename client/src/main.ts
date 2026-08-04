@@ -15,7 +15,7 @@ import { lonLatToMercator, mercatorToLonLat } from "./core/mercator";
 import { BundleCache } from "./core/bundleCache";
 import { TileManager } from "./core/tileManager";
 import { TexturePool } from "./core/texturePool";
-import { createStarfield, updateSky } from "./core/sky";
+import { updateSky } from "./core/sky";
 
 // 1. Setup default configurations & URL query parameters
 const params = new URLSearchParams(window.location.search);
@@ -152,9 +152,9 @@ tileManager.maxActiveTiles = Math.floor((cacheBudget / (1024 * 1024)) * 0.8);
 tileManager.prefetchLookaheadSec = PREFETCH_LOOKAHEAD;
 tileManager.prefetchSamples = PREFETCH_SAMPLES;
 
-// Debug handles for the browser console.
-(window as any).tileManager = tileManager;
-(window as any).camera = camera;
+// Debug handles for the browser console (typed in src/global.d.ts).
+window.tileManager = tileManager;
+window.camera = camera;
 
 // 4. Create floating HUD overlay (styles in hud.css)
 const hud = document.createElement("div");
@@ -748,7 +748,6 @@ applyPreset(PRESETS.midday);
 
 // 5. Setup simple keyboard & mouse flight controls
 const activeKeys = new Set<string>();
-let isInteractingWithHud = false;
 let previousMousePosition = { x: 0, y: 0 };
 let baseSpeedKnots = 800; // Customizable flight speed setting in knots
 let speedKnots = 800; // Default active airspeed simulation
@@ -799,8 +798,7 @@ function pickGround(clientX: number, clientY: number): THREE.Vector3 | null {
   ndc.y = -(clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(ndc, camera);
   const hits = raycaster
-    .intersectObjects(scene.children, true)
-    .filter((h) => (h.object as THREE.Mesh).isMesh);
+    .intersectObjects(scene.children, true);
   return hits.length ? hits[0]!.point.clone() : null;
 }
 
@@ -825,10 +823,8 @@ const orbitTarget = new THREE.Vector3(); // fixed pivot while orbiting
 
 window.addEventListener("mousedown", (e) => {
   if (hud.contains(e.target as Node)) {
-    isInteractingWithHud = true;
     return;
   }
-  isInteractingWithHud = false;
   dragMode = null;
   previousMousePosition = { x: e.clientX, y: e.clientY };
 
@@ -865,7 +861,7 @@ window.addEventListener("mousemove", (e) => {
     // Translate so the anchored ground point stays under the cursor.
     const q = rayToPlane(e.clientX, e.clientY, panPlaneZ);
     if (q) camera.position.add(tmpV.copy(panAnchor).sub(q));
-  } else if (dragMode === "orbit") {
+  } else {
     // Spherical offset about the pivot: dx -> azimuth (bearing), dy -> polar (tilt).
     const off = tmpV.copy(camera.position).sub(orbitTarget);
     const r = off.length();
@@ -883,7 +879,6 @@ window.addEventListener("mousemove", (e) => {
 
 window.addEventListener("mouseup", () => {
   dragMode = null;
-  isInteractingWithHud = false;
 });
 
 // Wheel = zoom toward the ground point under the cursor (keeps it under the cursor).
@@ -1127,11 +1122,11 @@ if (params.get("test") === "1" || import.meta.env.MODE === "test" || window.loca
     getSpeedKts: () => speedKnots,
     getAltitudeFt: () => Math.round(camera.position.z),
     isHudVisible: () => hud.style.display !== "none",
-    stepFrame: (dtMs = 16.6) => {
+    stepFrame: (_dtMs = 16.6) => {
       renderer.render(scene, camera);
     },
   };
-  window.__STEP_FRAME__ = (dtMs = 16.6) => {
+  window.__STEP_FRAME__ = (_dtMs = 16.6) => {
     renderer.render(scene, camera);
   };
 }

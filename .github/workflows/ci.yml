@@ -11,23 +11,30 @@ concurrency:
 
 jobs:
   client:
-    name: typecheck · test (TS client)
+    name: lint · typecheck · test (TS client & infra)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: client
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: client/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            infra/package-lock.json
+      # Three separate packages, so three installs. The root holds only eslint
+      # + typescript-eslint; without the other two, `tsc` and `vitest` are not
+      # on disk and eslint type-checks infra/ against unresolvable aws-cdk-lib
+      # imports -- which fails quietly, since the no-unsafe-* rules are off.
       - run: npm ci
-      - run: npm run typecheck
+      - run: npm ci --prefix client
+      - run: npm ci --prefix infra
+      - run: npx eslint .
+      - run: npm --prefix client run typecheck
       # Vitest runs the core tile math, the LOD/transition logic, the worker
       # pool, and the shared tile-URL routing. No network: tileLoader is mocked.
-      - run: npm test
+      - run: npm --prefix client test
 
   tiler:
     name: ruff · pytest (Python tiler)

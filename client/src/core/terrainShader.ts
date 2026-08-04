@@ -1,5 +1,3 @@
-import * as THREE from "three";
-
 export const TerrainShader = {
   vertexShader: `
     varying vec2 vUv;

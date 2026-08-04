@@ -93,7 +93,7 @@ async function bitmapToRgba(bmp: ImageBitmap): Promise<{ rgba: Uint8ClampedArray
   return { rgba: data, w, h };
 }
 
-ctx.onmessage = async (e: MessageEvent<WorkerRequest>) => {
+async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> {
   // ABORT control messages are handled by the per-request listeners below;
   // without this guard they'd fall through, crash on the missing tile field,
   // and post a spurious ERROR for the aborted requestId. It doubles as the
@@ -130,7 +130,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         const { rgba, w, h } = await bitmapToRgba(bmp);
         bmp.close();
         return { heights: decodeTerrarium(rgba, w, h), demSource };
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") {
           throw err;
         }
@@ -138,7 +138,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         // subdivide past the coverage edge. Anything else (5xx burst, network)
         // is transient — rethrow so the manager's retry cooldown handles it
         // instead of caching a permanently-flat tile as loaded.
-        if (typeof err?.message === "string" && err.message.endsWith(": 404")) {
+        if (err instanceof Error && err.message.endsWith(": 404")) {
           console.warn(`No terrain coverage for tile ${tile.z}/${tile.x}/${tile.y}, using flat terrain`);
           return { heights: null, demSource: "flat" };
         }
@@ -237,13 +237,32 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       maxElevation
     }, transferList);
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (err instanceof DOMException && err.name === "AbortError") {
       ctx.postMessage({ type: "ABORTED", requestId, tile });
     } else {
-      ctx.postMessage({ type: "ERROR", requestId, tile, error: err?.message || String(err) });
+      ctx.postMessage({
+        type: "ERROR",
+        requestId,
+        tile,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   } finally {
     ctx.removeEventListener("message", onAbortMessage);
   }
+}
+
+ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
+  // onmessage is void-returning, so the handler's promise has to be dealt with
+  // here rather than assigned straight in. Everything meaningful inside
+  // handleTileRequest already sits in a try/catch that answers with ERROR; this
+  // covers only the narrow window before it -- a message so malformed that
+  // reading e.data.type throws, where there is no requestId to answer with.
+  // Logged rather than discarded: an unhandled rejection inside a worker is
+  // invisible from the main thread, which would leave the pool's task pending
+  // with no clue why.
+  handleTileRequest(e).catch((err: unknown) => {
+    console.error("tile worker: request failed before setup completed", err);
+  });
 };

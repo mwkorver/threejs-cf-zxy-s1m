@@ -16,7 +16,10 @@ interface PendingTask {
   priority: number;
   options: TileWorkerTaskOptions;
   resolve: (value: TileLoadResult) => void;
-  reject: (reason: any) => void;
+  // `unknown`, matching what a promise rejection actually carries: callers here
+  // reject with DOMException (abort) or Error (load failure), and consumers
+  // narrow before using it.
+  reject: (reason: unknown) => void;
   aborted: boolean;
   /** Worker this task was dispatched to (set on dispatch). */
   worker?: Worker;
@@ -244,7 +247,7 @@ export class TileWorkerPool {
       });
     } else if (data.type === "ERROR") {
       task.reject(new Error(data.error));
-    } else if (data.type === "ABORTED") {
+    } else {
       task.reject(new DOMException("Aborted", "AbortError"));
     }
 
@@ -263,10 +266,10 @@ export class TileWorkerPool {
         const terrain = await loadTerrain(options.baseUrl, tile);
         heights = terrain.heights;
         demSource = terrain.demSource;
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Mirror the worker: only a 404 (no DEM coverage) falls back to flat;
         // transient failures rethrow so the retry cooldown handles them.
-        if (typeof err?.message === "string" && err.message.endsWith(": 404")) {
+        if (err instanceof Error && err.message.endsWith(": 404")) {
           console.warn(`No terrain coverage for tile ${tile.z}/${tile.x}/${tile.y}, using flat terrain`);
           heights = null;
           demSource = "flat";

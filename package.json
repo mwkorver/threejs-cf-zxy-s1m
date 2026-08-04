@@ -1,0 +1,12 @@
+{
+  "name": "threejs-cf-zxy-s1m-root",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "eslint": "^9.19.0",
+    "typescript-eslint": "^8.22.0"
+  }
+}

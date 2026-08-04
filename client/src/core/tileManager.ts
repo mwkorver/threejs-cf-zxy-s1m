@@ -18,6 +18,7 @@ import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { TileWorkerPool } from "./tileWorkerPool";
+import type { TileLoadResult } from "./workerTypes";
 
 
 export interface TileNode {
@@ -188,7 +189,7 @@ export class TileManager {
     // Projection factor for SSE: projectionMatrix[5] is cot(fovY/2) for a
     // perspective camera, so (viewportH/2) * m[5] converts a (metres/metre)
     // angular error into on-screen pixels.
-    if (camera && (camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
+    if (camera instanceof THREE.PerspectiveCamera) {
       const cotHalfFov = camera.projectionMatrix.elements[5]!;
       const viewportH = typeof window !== "undefined" ? window.innerHeight : 1024;
       this.sseFactor = (viewportH / 2) * cotHalfFov;
@@ -648,7 +649,7 @@ export class TileManager {
     const transNode = this.transitionNodes.get(key);
     if (transNode && transNode.loaded && transNode.mesh) {
       const mat = transNode.mesh.material as THREE.ShaderMaterial;
-      const tex = mat?.uniforms?.map?.value as THREE.Texture;
+      const tex = mat.uniforms.map?.value as THREE.Texture | null;
       if (tex) {
         node.centerElevation = transNode.centerElevation;
         node.demSource = transNode.demSource;
@@ -721,14 +722,7 @@ export class TileManager {
   private buildBundleFromResult(
     key: string,
     tile: TileId,
-    res: {
-      demSource: string;
-      centerElevation: number;
-      meshData: { positions: Float32Array; uvs: Float32Array; normals: Float32Array; indices: Uint32Array };
-      imageBitmap?: ImageBitmap | null;
-      minElevation: number;
-      maxElevation: number;
-    }
+    res: TileLoadResult
   ): Bundle {
     const { demSource, centerElevation, meshData, imageBitmap, minElevation, maxElevation } = res;
 
@@ -902,7 +896,7 @@ export class TileManager {
   private buildViewportFootprintsMesh(
     footprints: FootprintCollection
   ): LineSegments2 | undefined {
-    if (!footprints.features || footprints.features.length === 0) {
+    if (footprints.features.length === 0) {
       return undefined;
     }
 
@@ -951,13 +945,13 @@ export class TileManager {
 
     for (const feat of footprints.features) {
       const geom = feat.geometry;
-      const isS1M = feat.properties?.type !== "usgs13";
+      const isS1M = feat.properties.type !== "usgs13";
       
       if (geom.type === "Polygon") {
         for (const ring of geom.coordinates) {
           addRingSegments(ring, isS1M);
         }
-      } else if (geom.type === "MultiPolygon") {
+      } else {
         for (const poly of geom.coordinates) {
           for (const ring of poly) {
             addRingSegments(ring, isS1M);
@@ -1279,7 +1273,7 @@ export class TileManager {
   }
 
   private applyPolygonOffset(node: TileNode, enable: boolean): void {
-    if (node.mesh && node.mesh.material) {
+    if (node.mesh) {
       const mat = node.mesh.material as THREE.ShaderMaterial;
       mat.polygonOffset = enable;
       mat.polygonOffsetFactor = enable ? 4.0 : 0.0;
@@ -1558,7 +1552,7 @@ export class TileManager {
       this.isFetchingFootprints = true;
       loadStaticFootprints(this.baseUrl)
         .then((fc) => {
-          this.allFootprints = fc.features ?? [];
+          this.allFootprints = fc.features;
           this.isFetchingFootprints = false;
           this.footprintsDrapeSig = ""; // force a build now that data exists
         })

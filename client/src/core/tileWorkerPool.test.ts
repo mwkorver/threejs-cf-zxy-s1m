@@ -101,9 +101,9 @@ describe("TileWorkerPool (main-thread fallback)", () => {
     const pool = new TileWorkerPool();
     // In main-thread fallback, the request resolves synchronously before clear runs.
     // This is expected: with real workers the I/O gap allows cancellation.
-    const p1 = pool.requestTile(TILE_12_2048_2048, 10, BASE_OPTIONS);
+    const _p1 = pool.requestTile(TILE_12_2048_2048, 10, BASE_OPTIONS);
     pool.clear();
-    // p1 already resolved (main-thread fallback), so no rejection.
+    // _p1 already resolved (main-thread fallback), so no rejection.
     // But the pool should accept new requests after clear.
     const result = await pool.requestTile(TILE_12_2048_2049, 10, BASE_OPTIONS);
     expect(result.meshData).toBeDefined();

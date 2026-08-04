@@ -81,8 +81,8 @@ export function updateSky(
 ): number {
   const factor = spaceFactor(camera.position.z, spaceAltitude);
 
-  const background = scene.background as THREE.Color | null;
-  if (background && background.isColor) {
+  const background = scene.background;
+  if (background instanceof THREE.Color) {
     background.copy(groundSky).lerp(SPACE_COLOR, factor);
   }
 
