@@ -27,12 +27,34 @@ class BuildingResolver:
         """Query building features and encode into 512px MVT protobuf byte payload."""
         bounds = TMS.bounds(morecantile.Tile(x, y, z))
         try:
+            # 1. Query index manifest to find intersecting Overture partition files
+            files_res = self._con.execute(
+                """
+                SELECT DISTINCT 's3://' || file
+                FROM read_parquet(?)
+                WHERE NOT (bbox_xmax < ? OR bbox_xmin > ? OR bbox_ymax < ? OR bbox_ymin > ?)
+                """,
+                [
+                    self.index_path,
+                    bounds.left,
+                    bounds.right,
+                    bounds.bottom,
+                    bounds.top,
+                ],
+            ).fetchall()
+
+            if not files_res:
+                return None
+
+            file_list = [f[0] for f in files_res]
+
+            # 2. Query target partition files for building geometry and encode MVT
             res = self._con.execute(
                 """
                 SELECT ST_AsMVT(building_tiles, 'buildings', 4096, 'geom')
                 FROM (
                     SELECT id, height, num_floors,
-                           ST_AsMVTGeom(geometry, ST_MakeEnvelope(?, ?, ?, ?), 4096, 64, true) AS geom
+                           ST_AsMVTGeom(geometry, ST_Extent(ST_MakeEnvelope(?, ?, ?, ?)), 4096, 64, true) AS geom
                     FROM read_parquet(?)
                     WHERE ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))
                 ) AS building_tiles
@@ -42,13 +64,14 @@ class BuildingResolver:
                     bounds.bottom,
                     bounds.right,
                     bounds.top,
-                    self.index_path,
+                    file_list,
                     bounds.left,
                     bounds.bottom,
                     bounds.right,
                     bounds.top,
                 ],
             ).fetchone()
+
             if res and res[0]:
                 data = bytes(res[0])
                 return data if len(data) > 0 else None
