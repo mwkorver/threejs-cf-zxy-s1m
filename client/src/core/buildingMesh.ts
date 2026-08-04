@@ -84,7 +84,10 @@ export function decodeAndExtrudeBuildings(
       const baseZ = groundZ;
       const topZ = groundZ + buildingHeight;
 
-      // Scale coordinates from tile 4096 extent to local tile meters (~256m tile extent)
+      // Scale coordinates from tile 4096 extent to local tile meters.
+      // Terrain mesh positions are NW-anchor-relative: X grows east [0, tileW],
+      // Y grows south [0, -tileH]. MVT coordinates: x grows east [0, extent],
+      // y grows south [0, extent]. Map MVT -> terrain local space directly.
       const tileSizeMeters = 40075016.68557849 / Math.pow(2, tile.z); // Mercator tile size
       const scale = tileSizeMeters / layer.extent;
 
@@ -93,10 +96,10 @@ export function decodeAndExtrudeBuildings(
         const curr = outerRing[j]!;
         const next = outerRing[(j + 1) % outerRing.length]!;
 
-        const x1 = (curr.x - 2048) * scale;
-        const y1 = (2048 - curr.y) * scale;
-        const x2 = (next.x - 2048) * scale;
-        const y2 = (2048 - next.y) * scale;
+        const x1 = curr.x * scale;
+        const y1 = -curr.y * scale;  // MVT y grows down, terrain Y grows south (negative)
+        const x2 = next.x * scale;
+        const y2 = -next.y * scale;
 
         // Normal for vertical wall segment
         const dx = x2 - x1;
