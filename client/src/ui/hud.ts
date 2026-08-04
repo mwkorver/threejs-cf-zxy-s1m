@@ -167,6 +167,10 @@ export function setupHUD(
       </div>
 
       <div class="hud-group">
+        ${toggle('<input type="checkbox" class="hud-check" id="ctrl-buildings" checked>', "SHOW 3D BUILDINGS (z &ge; 14)")}
+      </div>
+
+      <div class="hud-group">
         <div class="hud-label"><span>SHADING MODE</span></div>
         ${toggle('<input type="radio" class="hud-radio" name="ctrl-shading-mode" value="0" checked>', "Satellite / Imagery")}
         ${toggle('<input type="radio" class="hud-radio" name="ctrl-shading-mode" value="1">', "DEM Shading (DEM Colors)")}
@@ -285,6 +289,7 @@ export function setupHUD(
   const ctrlOrbitSpeed = document.getElementById("ctrl-orbit-speed") as HTMLInputElement;
   const ctrlSpaceAlt = document.getElementById("ctrl-space-alt") as HTMLInputElement;
   const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
+  const ctrlBuildings = document.getElementById("ctrl-buildings") as HTMLInputElement;
   const ctrlShadingModes = document.getElementsByName("ctrl-shading-mode") as NodeListOf<HTMLInputElement>;
   const containerDemLegend = document.getElementById("container-dem-legend") as HTMLDivElement;
   const containerHypsometric = document.getElementById("container-hypsometric") as HTMLDivElement;
@@ -455,6 +460,11 @@ export function setupHUD(
     const isChecked = ctrlOutlines.checked;
     tileManager.setShowOutlines(isChecked);
     tileManager.setShowTileLabels(isChecked);
+  });
+
+  ctrlBuildings.addEventListener("change", () => {
+    tileManager.showBuildings = ctrlBuildings.checked;
+    tileManager.updateBuildingVisibility();
   });
 
   ctrlShadingModes.forEach((radio) => {

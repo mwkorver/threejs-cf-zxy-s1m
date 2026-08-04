@@ -83,6 +83,8 @@ export class TileManager {
   public imagerySource: "satellite" | "osm" = "satellite";
   // Toggle for showing DEM source colors
   public showDemColors = false;
+  // Toggle for 3D vector buildings rendering
+  public showBuildings = true;
 
   // Footprint overlay. The full S1M+usgs13 set (~360 KB gzipped) is fetched once
   // from the static /footprints/*.json files and held in memory; the mesh is
@@ -1094,6 +1096,8 @@ export class TileManager {
         side: THREE.DoubleSide,
       });
       const bMesh = new THREE.Mesh(bundle.buildingGeometry, bMat);
+      bMesh.name = "buildingMesh";
+      bMesh.visible = this.showBuildings;
       mesh.add(bMesh);
     }
 
@@ -1105,6 +1109,28 @@ export class TileManager {
     mesh.scale.z = this.verticalExaggeration;
 
     node.mesh = mesh;
+  }
+
+  public updateBuildingVisibility(): void {
+    const updateNode = (node: TileNode) => {
+      if (node.mesh) {
+        const bMesh = node.mesh.getObjectByName("buildingMesh");
+        if (bMesh) {
+          bMesh.visible = this.showBuildings;
+        }
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          updateNode(child);
+        }
+      }
+    };
+    for (const root of this.rootNodes.values()) {
+      updateNode(root);
+    }
+    for (const trans of this.transitionNodes.values()) {
+      updateNode(trans);
+    }
   }
 
   /**
