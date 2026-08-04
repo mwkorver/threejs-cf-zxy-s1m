@@ -67,7 +67,7 @@ echo "-- deploying stacks..."
 # One-time data seed. The static bucket holds the DEM index and footprints as
 # well as the web app; a fresh account starts empty, so pull them from the
 # shared seed bucket (public read, requester-pays) the first time only.
-if ! aws s3 ls "s3://${USER_BUCKET}/manifest-index/s1m/S1M_Products.parquet" >/dev/null 2>&1; then
+if ! aws s3 ls "s3://${USER_BUCKET}/manifest-index/s1m/S1M_Products.parquet" >/dev/null 2>&1 || ! aws s3 ls "s3://${USER_BUCKET}/manifest-index/buildings/buildings.parquet" >/dev/null 2>&1; then
   echo "-- seeding s3://${USER_BUCKET}/ from s3://${SEED_BUCKET}/threejs-cf-zxy-s1m/..."
   aws s3 sync "s3://${SEED_BUCKET}/threejs-cf-zxy-s1m/" "s3://${USER_BUCKET}/" --request-payer requester
 fi

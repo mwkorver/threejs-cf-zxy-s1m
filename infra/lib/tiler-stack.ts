@@ -57,6 +57,7 @@ export class TilerStack extends Stack {
                 "arn:aws:s3:::naip-visualization/*", // NAIP RGB COGs (requester-pays)
                 "arn:aws:s3:::prd-tnm/*", // S1M terrain COGs
                 "arn:aws:s3:::elevation-tiles-prod/*", // far-field terrain
+                "arn:aws:s3:::overturemaps-us-west-2/*", // Overture Maps 3D building GeoParquet
                 `arn:aws:s3:::${seedBucket}/*`,
                 // Exact bucket, not a "threejs-cf-zxy-s1m-*" prefix wildcard:
                 // S3 names are globally unique across ALL AWS accounts, so a
@@ -72,6 +73,7 @@ export class TilerStack extends Stack {
                 `arn:aws:s3:::${seedBucket}`,
                 `arn:aws:s3:::${staticBucket}`,
                 "arn:aws:s3:::naip-geoparquet-index",
+                "arn:aws:s3:::overturemaps-us-west-2",
               ],
             }),
           ],
@@ -113,6 +115,7 @@ export class TilerStack extends Stack {
       environment: {
         TILER_LAKE_PATH: "s3://naip-geoparquet-index/manifest-index",
         TILER_S1M_INDEX_PATH: `s3://${staticBucket}/manifest-index/s1m/S1M_Products.parquet`,
+        TILER_BUILDING_LAKE_PATH: `s3://${staticBucket}/manifest-index/buildings/buildings.parquet`,
         TILER_SEED_BUCKET_PATH: `s3://${seedBucket}/threejs-cf-zxy-s1m/`,
         // GDAL tuning for COG-over-S3 reads. Names verified against the GDAL in
         // the image -- an unrecognised key is silently ignored, so a typo reads
