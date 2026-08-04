@@ -16,6 +16,13 @@ A **CONUS flight-simulator-style streaming viewer**: NAIP aerial imagery and
 USGS 3DEP S1M 1-meter terrain, normalized server-side onto a single EPSG:3857
 `z/x/y` quadtree and streamed to a Three.js client through CloudFront.
 
+![NAIP imagery draped over 1-meter S1M terrain, looking northeast across the
+Wind River basin in Wyoming](docs/hero.jpg)
+
+<sub>Badlands north of the Wind River, Wyoming — NAIP aerial imagery draped over
+1 m S1M terrain, both streamed as `z/x/y` WebP tiles. Regenerate with
+`npm run capture:hero` (see [client/scripts/capture-hero.mjs](client/scripts/capture-hero.mjs)).</sub>
+
 What's built today: a camera you can fly over 1-meter S1M terrain, centered on
 the Wyoming S1M tile group, with server tiles end-to-end. Everything below —
 the architecture, the tile contracts, and how to run it — is self-contained;
