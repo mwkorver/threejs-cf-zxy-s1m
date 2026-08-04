@@ -26,7 +26,9 @@ export function decodeAndExtrudeBuildings(
   heightfield: Float32Array | null,
   activeBuildingIds: Set<string>
 ): ExtrudedBuildingMesh | null {
-  if (!pbfBuffer || pbfBuffer.byteLength === 0) return null;
+  // Empty body, not a missing one: the caller passes res.arrayBuffer(), which
+  // always resolves to a buffer. A zero-length one is a tile with no buildings.
+  if (pbfBuffer.byteLength === 0) return null;
 
   try {
     const tilePbf = new Pbf(new Uint8Array(pbfBuffer));
@@ -56,7 +58,9 @@ export function decodeAndExtrudeBuildings(
       const buildingHeight = Number(props.height ?? (props.num_floors ? Number(props.num_floors) * 3.5 : defaultHeight));
       const geom = feature.loadGeometry(); // array of rings
 
-      if (!geom || geom.length === 0) continue;
+      // loadGeometry() always returns an array; a zero-length one is a feature
+      // whose geometry was clipped away at this tile's edge.
+      if (geom.length === 0) continue;
       const outerRing = geom[0];
       if (!outerRing || outerRing.length < 3) continue;
 
@@ -146,7 +150,9 @@ export function decodeAndExtrudeBuildings(
       uvs: new Float32Array(uvs),
       indices: new Uint32Array(indices),
     };
-  } catch (err) {
+  } catch {
+    // A malformed or unexpected-schema tile drops its buildings rather than
+    // failing the whole tile: terrain and imagery are still worth showing.
     return null;
   }
 }

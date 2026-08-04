@@ -47,8 +47,6 @@ window.camera = sceneCtx.camera;
 // Bind viewport resize handler
 bindSceneResize(sceneCtx.camera, sceneCtx.renderer, tileManager);
 
-let flightControllerCtx: ReturnType<typeof setupFlightController>;
-
 // 3. Initialize HUD overlay and UI controls
 let baseFogDensity = sceneCtx.baseFogDensity;
 
@@ -73,8 +71,13 @@ const hudCtx = setupHUD(
   }
 );
 
-// 4. Initialize flight controller
-flightControllerCtx = setupFlightController(
+// 4. Initialize flight controller.
+//
+// The HUD's fly-to-cancel callback above closes over this before the line that
+// declares it. That is fine: the callback only runs on user input, by which
+// time this has been assigned. It is why the binding was previously a
+// forward-declared `let`.
+const flightControllerCtx = setupFlightController(
   sceneCtx.scene,
   sceneCtx.camera,
   tileManager,
