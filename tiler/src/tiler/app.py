@@ -26,7 +26,7 @@ app = FastAPI(title="flight-sim tiler", version="0.0.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "HEAD", "OPTIONS"],
     expose_headers=["X-DEM-Source"],
 )
 
