@@ -168,6 +168,11 @@ export function setupHUD(
 
       <div class="hud-group">
         ${toggle('<input type="checkbox" class="hud-check" id="ctrl-buildings" checked>', "SHOW 3D BUILDINGS (z &ge; 14)")}
+        <div class="hud-range-row" id="container-wall-opacity">
+          <label class="hud-label"><span>WALL OPACITY</span></label>
+          <input type="range" class="hud-range" id="ctrl-wall-opacity" min="0" max="1" step="0.05" value="0.85">
+          <span class="hud-val" id="val-wall-opacity">85%</span>
+        </div>
       </div>
 
       <div class="hud-group">
@@ -290,6 +295,8 @@ export function setupHUD(
   const ctrlSpaceAlt = document.getElementById("ctrl-space-alt") as HTMLInputElement;
   const ctrlOutlines = document.getElementById("ctrl-outlines") as HTMLInputElement;
   const ctrlBuildings = document.getElementById("ctrl-buildings") as HTMLInputElement;
+  const ctrlWallOpacity = document.getElementById("ctrl-wall-opacity") as HTMLInputElement;
+  const valWallOpacity = document.getElementById("val-wall-opacity")!;
   const ctrlShadingModes = document.getElementsByName("ctrl-shading-mode") as NodeListOf<HTMLInputElement>;
   const containerDemLegend = document.getElementById("container-dem-legend") as HTMLDivElement;
   const containerHypsometric = document.getElementById("container-hypsometric") as HTMLDivElement;
@@ -465,6 +472,12 @@ export function setupHUD(
   ctrlBuildings.addEventListener("change", () => {
     tileManager.showBuildings = ctrlBuildings.checked;
     tileManager.updateBuildingVisibility();
+  });
+
+  ctrlWallOpacity.addEventListener("input", () => {
+    const opacity = parseFloat(ctrlWallOpacity.value);
+    valWallOpacity.textContent = `${Math.round(opacity * 100)}%`;
+    tileManager.setBuildingWallOpacity(opacity);
   });
 
   ctrlShadingModes.forEach((radio) => {

@@ -89,6 +89,8 @@ export class TileManager {
   public showDemColors = false;
   // Toggle for 3D vector buildings rendering
   public showBuildings = true;
+  // Opacity for 3D building wall faces (0.0 fully transparent, 1.0 opaque)
+  public buildingWallOpacity = 0.85;
   /** The one zoom that fetches /buildings; finer tiles reuse the cache. */
   public buildingSourceZoom = 14;
   /** Decoded footprints, keyed by source tile and reused up the LOD. */
@@ -1228,6 +1230,8 @@ export class TileManager {
       const wallMat = new THREE.MeshLambertMaterial({
         color: 0xcbd5e1,
         side: THREE.DoubleSide,
+        transparent: this.buildingWallOpacity < 1.0,
+        opacity: this.buildingWallOpacity,
       });
       // Group 1 (roofs) reuses the terrain material INSTANCE, so a roof tones
       // exactly like the ground it sits on and follows SHADING MODE, brightness,
@@ -1256,6 +1260,37 @@ export class TileManager {
         const bMesh = node.mesh.getObjectByName("buildingMesh");
         if (bMesh) {
           bMesh.visible = this.showBuildings;
+        }
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          updateNode(child);
+        }
+      }
+    };
+    for (const root of this.rootNodes.values()) {
+      updateNode(root);
+    }
+    for (const trans of this.transitionNodes.values()) {
+      updateNode(trans);
+    }
+  }
+
+  public setBuildingWallOpacity(opacity: number): void {
+    this.buildingWallOpacity = opacity;
+    const transparent = opacity < 1.0;
+    const updateNode = (node: TileNode) => {
+      if (node.mesh) {
+        const bMesh = node.mesh.getObjectByName("buildingMesh") as THREE.Mesh | undefined;
+        if (bMesh) {
+          // Wall material is at index 0 in the multi-material array
+          const materials = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
+          const wallMat = materials[0] as THREE.MeshLambertMaterial;
+          if (wallMat) {
+            wallMat.opacity = opacity;
+            wallMat.transparent = transparent;
+            wallMat.needsUpdate = true;
+          }
         }
       }
       if (node.children) {
