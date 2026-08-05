@@ -190,8 +190,14 @@ export class TileWorkerPool {
 
       // Annotated, not spread: the explicit list keeps a caller's extra
       // properties out of the structured clone, and the annotation makes a new
-      // field on WorkerTileRequest a compile error here instead of an
+      // REQUIRED field on WorkerTileRequest a compile error here rather than an
       // undefined read in the worker.
+      //
+      // That guarantee stops at optional fields, which is not a detail: this
+      // list silently omitted `showBuildings` for the life of the buildings
+      // feature, so the worker never fetched a single building tile and tsc had
+      // nothing to say. Anything added here that the worker must act on belongs
+      // in the type as required-and-nullable, not optional.
       const request: WorkerTileRequest = {
         requestId: task.requestId,
         tile: task.tile,
@@ -201,7 +207,8 @@ export class TileWorkerPool {
         imagerySource: task.options.imagerySource,
         terrainMinZoom: task.options.terrainMinZoom,
         gridStep: task.options.gridStep,
-        externalImageryMaxZoom: task.options.externalImageryMaxZoom
+        externalImageryMaxZoom: task.options.externalImageryMaxZoom,
+        showBuildings: task.options.showBuildings
       };
       worker.postMessage(request);
     }
@@ -241,6 +248,7 @@ export class TileWorkerPool {
         demSource: data.demSource,
         centerElevation: data.centerElevation,
         meshData: data.meshData,
+        buildingMeshData: data.buildingMeshData,
         imageBitmap: data.imageBitmap,
         minElevation: data.minElevation,
         maxElevation: data.maxElevation
@@ -316,6 +324,10 @@ export class TileWorkerPool {
       demSource,
       centerElevation: heights ? (heights[256 * 512 + 256] ?? 0) : 0,
       meshData,
+      // This fallback exists for Vitest under jsdom, where Worker is absent. It
+      // deliberately skips the buildings fetch: the tests that run it assert on
+      // terrain and imagery, and MVT decoding needs no coverage from here.
+      buildingMeshData: null,
       imageBitmap,
       minElevation,
       maxElevation

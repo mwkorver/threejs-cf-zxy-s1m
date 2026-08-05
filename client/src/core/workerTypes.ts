@@ -30,7 +30,15 @@ export interface TileWorkerTaskOptions extends ImageryRouting {
   /** Mesh vertices every N source texels; the LOD manager picks it per tile. */
   gridStep: number;
   /** Whether 3D vector buildings should be fetched and extruded. */
-  showBuildings?: boolean;
+  /**
+   * Whether to fetch and extrude Overture buildings for this tile.
+   *
+   * Required, not optional. As `showBuildings?: boolean` the pool's explicit
+   * request list simply omitted it, the worker destructured `undefined`, and
+   * the buildings branch never ran -- with nothing for tsc to object to. All
+   * three call sites in tileManager already pass it.
+   */
+  showBuildings: boolean;
 }
 
 export interface WorkerTileRequest extends TileWorkerTaskOptions {
@@ -70,8 +78,17 @@ export interface WorkerTileSuccessResponse {
   demSource: string;
   centerElevation: number;
   meshData: WorkerMeshData;
-  /** Extruded 3D building mesh data (optional). */
-  buildingMeshData?: ExtrudedBuildingMesh | null;
+  /**
+   * Extruded 3D buildings, or null when the tile has none -- buildings are off,
+   * z is below the band, the fetch failed, or nothing decoded.
+   *
+   * Required-but-nullable, deliberately. As an optional field this was silently
+   * dropped for months: tileWorkerPool forwards the success payload field by
+   * field, and an omitted optional still satisfies TileLoadResult, so the worker
+   * sent buildings, the pool discarded them, and tsc saw nothing wrong. Making
+   * it required turns that omission into a compile error.
+   */
+  buildingMeshData: ExtrudedBuildingMesh | null;
   /** null when imagery 404s: no coverage, but the mesh is still good. */
   imageBitmap: ImageBitmap | null;
   minElevation: number;

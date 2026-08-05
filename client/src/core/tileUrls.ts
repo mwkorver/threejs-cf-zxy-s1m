@@ -70,6 +70,21 @@ export function cogImageryRequest(baseUrl: string, layer: string, year: number, 
   };
 }
 
+/**
+ * Overture 3D building footprints as MVT, extruded client-side.
+ *
+ * Belongs here with the others rather than being assembled at the call site:
+ * this URL was built inline in tile.worker.ts without withKey(), so every
+ * request 403'd at the edge and the decode failure was swallowed as "no
+ * buildings here". Centralising it is what stops the key being forgotten again.
+ */
+export function buildingsRequest(baseUrl: string, t: TileId): TileRequest {
+  return {
+    url: withKey(`${baseUrl}/buildings/${t.z}/${t.x}/${t.y}.pbf`),
+    label: `buildings ${t.z}/${t.x}/${t.y}`,
+  };
+}
+
 /** Low-zoom basemap: the tiler stitches 4 USDA NAIP cache children into 512px. */
 export function basemapRequest(baseUrl: string, t: TileId): TileRequest {
   return {

@@ -1,6 +1,6 @@
 import { decodeTerrarium } from "./terrarium";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
-import { imageryRequest, terrainRequest } from "./tileUrls";
+import { buildingsRequest, imageryRequest, terrainRequest } from "./tileUrls";
 import { decodeAndExtrudeBuildings, type ExtrudedBuildingMesh } from "./buildingMesh";
 
 import type { WorkerRequest, WorkerTileResponse } from "./workerTypes";
@@ -214,11 +214,17 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
     let buildingMeshData: ExtrudedBuildingMesh | null = null;
     if (showBuildings && tile.z >= 14) {
       try {
-        const buildingUrl = `${baseUrl}/buildings/${tile.z}/${tile.x}/${tile.y}.pbf`;
-        const res = await fetchTile(buildingUrl, `building ${tile.z}/${tile.x}/${tile.y}`, 3, signal);
+        const { url, label } = buildingsRequest(baseUrl, tile);
+        const res = await fetchTile(url, label, 3, signal);
         const pbfBuf = await res.arrayBuffer();
         buildingMeshData = decodeAndExtrudeBuildings(pbfBuf, tile, heights, activeBuildingIds);
-      } catch {
+      } catch (err) {
+        // Buildings are an overlay: losing them must not cost the tile its
+        // terrain and imagery. Warned rather than silent -- a swallowed 403
+        // here is what made the whole feature look like "no coverage".
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          console.warn(`Building fetch failed for tile ${tile.z}/${tile.x}/${tile.y}:`, err);
+        }
         buildingMeshData = null;
       }
     }

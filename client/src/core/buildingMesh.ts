@@ -1,8 +1,6 @@
 import { VectorTile } from "@mapbox/vector-tile";
-import * as PbfModule from "pbf";
+import { PbfReader } from "pbf";
 import { type TileId } from "./mercator";
-
-const Pbf = (PbfModule as any).default || PbfModule;
 
 export interface BuildingFeatureData {
   id: string;
@@ -31,7 +29,7 @@ export function decodeAndExtrudeBuildings(
   if (pbfBuffer.byteLength === 0) return null;
 
   try {
-    const tilePbf = new Pbf(new Uint8Array(pbfBuffer));
+    const tilePbf = new PbfReader(new Uint8Array(pbfBuffer));
     const vectorTile = new VectorTile(tilePbf);
     const layerName = Object.keys(vectorTile.layers)[0] || "buildings";
     const layer = vectorTile.layers[layerName];
@@ -150,9 +148,14 @@ export function decodeAndExtrudeBuildings(
       uvs: new Float32Array(uvs),
       indices: new Uint32Array(indices),
     };
-  } catch {
+  } catch (err) {
     // A malformed or unexpected-schema tile drops its buildings rather than
     // failing the whole tile: terrain and imagery are still worth showing.
+    //
+    // Warned, not swallowed. Silent, this branch is indistinguishable from "no
+    // buildings here" -- which is how a wrong pbf import made every tile in
+    // CONUS decode to null without leaving a trace anywhere.
+    console.warn(`Building decode failed for tile ${tile.z}/${tile.x}/${tile.y}:`, err);
     return null;
   }
 }

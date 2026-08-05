@@ -32,6 +32,8 @@ const BASE_OPTIONS = {
   terrainMinZoom: 14,
   gridStep: 8,
   externalImageryMaxZoom: 13,
+  // These tests run the main-thread fallback, which never fetches buildings.
+  showBuildings: false,
 };
 
 // Suppress noisy console output from tile loading warnings
