@@ -5,7 +5,13 @@ export interface Bundle {
   key: string; // tileKey(z/x/y)
   bytes: number;
   geometry: THREE.BufferGeometry;
-  buildingGeometry?: THREE.BufferGeometry;
+  /**
+   * Interior vertices per side of the terrain grid. Kept so building geometry
+   * can be assembled later from this bundle's positions -- it is no longer
+   * baked in here, because a bundle outlives the BuildingCache state it was
+   * created under.
+   */
+  gridSize: number;
   texture?: THREE.Texture;
   footprints?: THREE.LineSegments;
   centerElevation?: number;
@@ -72,9 +78,9 @@ export class BundleCache {
   private disposeBundle(bundle: Bundle): void {
     // Dispose of GPU resources to prevent memory leaks
     bundle.geometry.dispose();
-    if (bundle.buildingGeometry) {
-      bundle.buildingGeometry.dispose();
-    }
+    // Building geometry is owned by the tile mesh, not the bundle -- it is
+    // rebuilt per mesh from the current cache. TileManager disposes it when the
+    // mesh is torn down.
     if (bundle.texture) {
       if (this.texturePool) {
         this.texturePool.release(bundle.texture);

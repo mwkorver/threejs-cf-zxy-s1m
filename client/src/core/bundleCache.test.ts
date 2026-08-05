@@ -6,7 +6,7 @@ function makeBundle(key: string, bytes: number): Bundle {
   const geom = {
     dispose: vi.fn(),
   } as unknown as import("three").BufferGeometry;
-  return { key, bytes, geometry: geom };
+  return { key, bytes, geometry: geom, gridSize: 65 };
 }
 
 /** Create a Bundle with a mock texture (tests dispose path). */
@@ -17,7 +17,7 @@ function makeBundleWithTexture(key: string, bytes: number): Bundle {
   const tex = {
     dispose: vi.fn(),
   } as unknown as import("three").Texture;
-  return { key, bytes, geometry: geom, texture: tex };
+  return { key, bytes, geometry: geom, gridSize: 65, texture: tex };
 }
 
 /** Create a Bundle with mock footprints (tests array + non-array material dispose). */
@@ -41,7 +41,7 @@ function makeBundleWithFootprints(
     geometry: footGeom,
     material: mats,
   } as unknown as import("three").LineSegments;
-  return { key, bytes, geometry: geom, footprints };
+  return { key, bytes, geometry: geom, gridSize: 65, footprints };
 }
 
 describe("BundleCache", () => {

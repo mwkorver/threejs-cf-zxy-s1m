@@ -587,7 +587,7 @@ describe("TileManager setting changes", () => {
     const cache = (tm as any).bundleCache as BundleCache;
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
-    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom });
+    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom, gridSize: 65 });
     expect(cache.size()).toBeGreaterThan(0);
 
     tm.setImagerySource("osm");
@@ -601,7 +601,7 @@ describe("TileManager setting changes", () => {
     const cache = (tm as any).bundleCache as BundleCache;
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
-    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom });
+    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom, gridSize: 65 });
 
     tm.setTerrainMinZoom(15);
     expect(cache.size()).toBe(0);
@@ -614,7 +614,7 @@ describe("TileManager setting changes", () => {
     const cache = (tm as any).bundleCache as BundleCache;
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
-    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom });
+    cache.put({ key: "12/2048/2048", bytes: 100, geometry: geom, gridSize: 65 });
 
     tm.setExternalImageryMaxZoom(15);
     expect(cache.size()).toBe(0);
@@ -916,6 +916,7 @@ describe("TileManager prefetchAhead", () => {
           key,
           bytes: 100,
           geometry: new THREE.BufferGeometry(),
+          gridSize: 65,
           centerElevation: 0,
           demSource: "farfield",
           minElevation: 0,
