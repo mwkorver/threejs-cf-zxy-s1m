@@ -20,8 +20,18 @@ export interface BuildingRecord {
   id: string;
   /** Height in metres above local ground. */
   height: number;
-  /** [x, y] centroid of the outer ring. Decides which tile owns the building. */
+  /** [x, y] centroid of the outer ring. Decides which tile draws the walls. */
   centroid: [number, number];
+  /**
+   * [minX, minY, maxX, maxY] of the outer ring.
+   *
+   * Roofs are drawn by every tile the building overlaps, not just the one
+   * holding its centroid, so each tile needs a cheap overlap test. At z18 a
+   * tile is 153 m while 9% of buildings here are bigger than that -- the
+   * largest is 591 m -- so centroid-only roofs left most of a warehouse
+   * sampling UVs outside [0,1], which clamp to the edge texel and smear.
+   */
+  bbox: [number, number, number, number];
   /**
    * Polygons, each `[outerRing, ...holes]`, each ring a flat [x, y, x, y, ...].
    * Flat arrays because they cross a postMessage boundary; nested point objects
@@ -47,6 +57,56 @@ export interface ExtrudedBuildingMesh {
 /** Mercator metres spanned by one tile at this zoom. */
 export function tileSizeMeters(z: number): number {
   return EARTH_CIRCUMFERENCE / 2 ** z;
+}
+
+/**
+ * Sutherland-Hodgman clip of a flat [x,y,...] ring to an axis-aligned rect.
+ *
+ * Used so a roof is drawn by every tile it overlaps, each tile emitting only
+ * the part inside itself. That keeps roof UVs inside [0,1] by construction,
+ * which is what stops a warehouse larger than its tile from clamping to the
+ * edge texel and smearing.
+ *
+ * Convex clip region, so the classic algorithm applies unchanged. Returns [] if
+ * the ring falls entirely outside.
+ */
+function clipRingToRect(
+  ring: number[],
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number
+): number[] {
+  // side: 0 = x>=minX, 1 = x<=maxX, 2 = y>=minY, 3 = y<=maxY
+  const inside = (x: number, y: number, side: number): boolean =>
+    side === 0 ? x >= minX : side === 1 ? x <= maxX : side === 2 ? y >= minY : y <= maxY;
+
+  let cur = ring;
+  for (let side = 0; side < 4 && cur.length >= 6; side++) {
+    const next: number[] = [];
+    for (let i = 0; i < cur.length; i += 2) {
+      const ax = cur[i]!;
+      const ay = cur[i + 1]!;
+      const j = (i + 2) % cur.length;
+      const bx = cur[j]!;
+      const by = cur[j + 1]!;
+      const aIn = inside(ax, ay, side);
+      const bIn = inside(bx, by, side);
+
+      if (aIn !== bIn) {
+        // Segment crosses this edge: emit the crossing point.
+        let t: number;
+        if (side === 0) t = (minX - ax) / (bx - ax);
+        else if (side === 1) t = (maxX - ax) / (bx - ax);
+        else if (side === 2) t = (minY - ay) / (by - ay);
+        else t = (maxY - ay) / (by - ay);
+        next.push(ax + t * (bx - ax), ay + t * (by - ay));
+      }
+      if (bIn) next.push(bx, by);
+    }
+    cur = next;
+  }
+  return cur.length >= 6 ? cur : [];
 }
 
 /** Twice the signed area of a flat [x,y,...] ring. Sign gives orientation. */
@@ -117,13 +177,29 @@ export function decodeBuildings(pbfBuffer: ArrayBuffer, tile: TileId): BuildingR
       const outer = polygons[0]![0]!;
       let sx = 0;
       let sy = 0;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
       for (let k = 0; k < outer.length; k += 2) {
-        sx += outer[k]!;
-        sy += outer[k + 1]!;
+        const x = outer[k]!;
+        const y = outer[k + 1]!;
+        sx += x;
+        sy += y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
       }
       const n = outer.length / 2;
 
-      out.push({ id, height, centroid: [sx / n, sy / n], polygons });
+      out.push({
+        id,
+        height,
+        centroid: [sx / n, sy / n],
+        bbox: [minX, minY, maxX, maxY],
+        polygons,
+      });
     }
 
     return out.length > 0 ? out : null;
@@ -147,7 +223,12 @@ export function decodeBuildings(pbfBuffer: ArrayBuffer, tile: TileId): BuildingR
  * terrain and re-UV'd onto progressively finer imagery. No network, no protobuf
  * -- this is arithmetic over a few thousand points.
  *
- * @param buildings records in SOURCE-tile local metres
+ * @param wallBuildings records whose centroid this tile owns. Walls are drawn
+ *   whole by exactly one tile, so they are never duplicated at a seam; their
+ *   UVs are synthetic per-quad, so extending past the tile edge is harmless.
+ * @param roofBuildings records whose footprint OVERLAPS this tile, a superset
+ *   of the above. Roof caps are clipped to the tile so their UVs stay in [0,1]
+ *   and sample this tile's imagery -- the whole point of the exercise.
  * @param targetTile the terrain tile being built
  * @param groundAt terrain height at a tile UV, in the terrain mesh's own Z
  *   space. Sampling the mesh rather than a raw heightfield is what keeps
@@ -162,13 +243,14 @@ export function decodeBuildings(pbfBuffer: ArrayBuffer, tile: TileId): BuildingR
  *   records, so a dense source tile isn't deep-copied once per terrain tile.
  */
 export function buildTileBuildings(
-  buildings: BuildingRecord[],
+  wallBuildings: BuildingRecord[],
+  roofBuildings: BuildingRecord[],
   targetTile: TileId,
   groundAt: (u: number, v: number) => number,
   zScale: number,
   origin: readonly [number, number] = [0, 0]
 ): ExtrudedBuildingMesh | null {
-  if (buildings.length === 0) return null;
+  if (wallBuildings.length === 0 && roofBuildings.length === 0) return null;
   const [ox, oy] = origin;
 
   const size = tileSizeMeters(targetTile.z);
@@ -184,10 +266,21 @@ export function buildTileBuildings(
   // so a roof samples the imagery at the ground position it covers.
   const uvOf = (x: number, y: number): [number, number] => [x / size, -y / size];
 
-  for (const b of buildings) {
+  // Ground under a building, sampled at its centroid clamped into this tile.
+  // Clamping matters for roof pieces whose owner is a neighbouring tile: the
+  // whole cap must sit at one height or it shears at the seam. Terrain is
+  // near-identical across a shared edge, so the clamp is accurate wherever
+  // these large buildings actually occur -- ports and industrial flats. On
+  // steep ground a building spanning several tiles could still step slightly.
+  const topOf = (b: BuildingRecord): number => {
     const [cu, cv] = uvOf(b.centroid[0] - ox, b.centroid[1] - oy);
-    const baseZ = groundAt(cu, cv);
-    const topZ = baseZ + b.height * zScale;
+    const cl = (t: number) => Math.min(1, Math.max(0, t));
+    return groundAt(cl(cu), cl(cv)) + b.height * zScale;
+  };
+
+  for (const b of wallBuildings) {
+    const topZ = topOf(b);
+    const baseZ = topZ - b.height * zScale;
 
     for (const polygon of b.polygons) {
       // Walls around every ring, holes included: a courtyard has interior walls.
@@ -217,22 +310,34 @@ export function buildTileBuildings(
         }
       }
 
-      // Roof cap. earcut wants one flat coordinate array with hole ring starts
-      // given as vertex indices.
-      const contour = polygon[0]!;
-      const rebase = (ring: number[]) => {
-        const r = new Array<number>(ring.length);
-        for (let k = 0; k < ring.length; k += 2) {
-          r[k] = ring[k]! - ox;
-          r[k + 1] = ring[k + 1]! - oy;
-        }
-        return r;
-      };
-      const flat: number[] = rebase(contour);
+    }
+  }
+
+  // Roofs, from every building overlapping this tile rather than only the ones
+  // it owns, each clipped to the tile so its UVs land inside [0,1].
+  const rebase = (ring: number[]) => {
+    const r = new Array<number>(ring.length);
+    for (let k = 0; k < ring.length; k += 2) {
+      r[k] = ring[k]! - ox;
+      r[k + 1] = ring[k + 1]! - oy;
+    }
+    return r;
+  };
+
+  for (const b of roofBuildings) {
+    const topZ = topOf(b);
+
+    for (const polygon of b.polygons) {
+      const contour = clipRingToRect(rebase(polygon[0]!), 0, -size, size, 0);
+      if (contour.length < 6) continue; // nothing of this ring lands here
+
+      const flat: number[] = [...contour];
       const holeIndices: number[] = [];
       for (let h = 1; h < polygon.length; h++) {
+        const hole = clipRingToRect(rebase(polygon[h]!), 0, -size, size, 0);
+        if (hole.length < 6) continue; // courtyard clipped away entirely
         holeIndices.push(flat.length / 2);
-        flat.push(...rebase(polygon[h]!));
+        flat.push(...hole);
       }
 
       const tri = earcut(flat, holeIndices.length > 0 ? holeIndices : null, 2);

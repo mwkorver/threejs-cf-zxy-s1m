@@ -17,9 +17,18 @@
 import { type TileId } from "./mercator";
 import { tileSizeMeters, type BuildingRecord } from "./buildingMesh";
 
-/** Buildings owned by a target tile, plus the offset needed to place them. */
+/** Buildings a target tile must draw, plus the offset needed to place them. */
 export interface TileBuildings {
-  records: BuildingRecord[];
+  /**
+   * Centroid falls in this tile: it draws the walls, whole and exactly once.
+   */
+  wallRecords: BuildingRecord[];
+  /**
+   * Footprint overlaps this tile — a superset of wallRecords. Roofs are clipped
+   * to the tile so their UVs stay in [0,1]; without that, a building larger
+   * than the tile clamps to the edge texel and smears.
+   */
+  roofRecords: BuildingRecord[];
   /**
    * The target tile's NW corner expressed in the source tile's local metres.
    * buildTileBuildings subtracts this as it reads coordinates, so records are
@@ -91,14 +100,22 @@ export class BuildingCache {
     const ox = (target.x - (source.x << shift)) * span;
     const oy = -(target.y - (source.y << shift)) * span;
 
-    const owned: BuildingRecord[] = [];
+    const wallRecords: BuildingRecord[] = [];
+    const roofRecords: BuildingRecord[] = [];
     for (const r of records) {
-      const x = r.centroid[0] - ox;
-      const y = r.centroid[1] - oy;
-      if (x >= 0 && x < span && y <= 0 && y > -span) owned.push(r);
+      // Overlap in tile-local metres: tile spans x [0, span], y [-span, 0].
+      const [bx0, by0, bx1, by1] = r.bbox;
+      const overlaps =
+        bx1 - ox >= 0 && bx0 - ox <= span && by1 - oy >= -span && by0 - oy <= 0;
+      if (!overlaps) continue;
+      roofRecords.push(r);
+
+      const cx = r.centroid[0] - ox;
+      const cy = r.centroid[1] - oy;
+      if (cx >= 0 && cx < span && cy <= 0 && cy > -span) wallRecords.push(r);
     }
 
-    return owned.length > 0 ? { records: owned, origin: [ox, oy] } : null;
+    return roofRecords.length > 0 ? { wallRecords, roofRecords, origin: [ox, oy] } : null;
   }
 
   clear(): void {

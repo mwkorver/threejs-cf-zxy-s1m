@@ -809,7 +809,14 @@ export class TileManager {
       )[1]
     );
 
-    const built = buildTileBuildings(owned.records, tile, groundAt, zScale, owned.origin);
+    const built = buildTileBuildings(
+      owned.wallRecords,
+      owned.roofRecords,
+      tile,
+      groundAt,
+      zScale,
+      owned.origin
+    );
     if (!built) return undefined;
 
     const bg = new THREE.BufferGeometry();
