@@ -18,6 +18,8 @@ import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { TileWorkerPool } from "./tileWorkerPool";
+import { BuildingCache } from "./buildingCache";
+import { buildTileBuildings } from "./buildingMesh";
 import type { TileLoadResult } from "./workerTypes";
 
 
@@ -85,6 +87,10 @@ export class TileManager {
   public showDemColors = false;
   // Toggle for 3D vector buildings rendering
   public showBuildings = true;
+  /** The one zoom that fetches /buildings; finer tiles reuse the cache. */
+  public buildingSourceZoom = 14;
+  /** Decoded footprints, keyed by source tile and reused up the LOD. */
+  private buildingCache = new BuildingCache();
 
   // Footprint overlay. The full S1M+usgs13 set (~360 KB gzipped) is fetched once
   // from the static /footprints/*.json files and held in memory; the mesh is
@@ -691,6 +697,7 @@ export class TileManager {
       gridStep: this.gridStep,
       externalImageryMaxZoom: this.externalImageryMaxZoom,
       showBuildings: this.showBuildings,
+      buildingSourceZoom: this.buildingSourceZoom,
     };
 
     this.workerPool.requestTile(node.tile, priority, options)
@@ -723,6 +730,54 @@ export class TileManager {
   }
 
   /**
+   * Extrude this tile's share of the cached buildings, or undefined if it has
+   * none. Runs for every terrain tile at or above the source zoom, which is what
+   * lets one fetch serve z14 through z18.
+   */
+  private buildBuildingGeometry(
+    tile: TileId,
+    meshData: TileLoadResult["meshData"]
+  ): THREE.BufferGeometry | undefined {
+    const owned = this.buildingCache.forTile(tile, this.buildingSourceZoom);
+    if (!owned) return undefined;
+
+    // Sample the terrain mesh itself for base elevation. Its interior vertices
+    // are a row-major (gridSize x gridSize) grid over the tile, and their Z is
+    // already mercator-scaled -- so a building seated on it lands on the ground
+    // whatever the vertical exaggeration or latitude.
+    const g = meshData.gridSize;
+    const pos = meshData.positions;
+    const groundAt = (u: number, v: number): number => {
+      const col = Math.min(g - 1, Math.max(0, Math.round(u * (g - 1))));
+      const row = Math.min(g - 1, Math.max(0, Math.round(v * (g - 1))));
+      return pos[(row * g + col) * 3 + 2] ?? 0;
+    };
+
+    const zScale = mercatorScale(
+      mercatorToLonLat(
+        (tileBoundsMercator(tile).west + tileBoundsMercator(tile).east) / 2,
+        (tileBoundsMercator(tile).north + tileBoundsMercator(tile).south) / 2
+      )[1]
+    );
+
+    const built = buildTileBuildings(owned.records, tile, groundAt, zScale, owned.origin);
+    if (!built) return undefined;
+
+    const bg = new THREE.BufferGeometry();
+    bg.setAttribute("position", new THREE.BufferAttribute(built.positions, 3));
+    bg.setAttribute("normal", new THREE.BufferAttribute(built.normals, 3));
+    bg.setAttribute("uv", new THREE.BufferAttribute(built.uvs, 2));
+    bg.setIndex(new THREE.BufferAttribute(built.indices, 1));
+
+    // Two draw groups so walls and roofs can take different materials: walls
+    // stay flat-shaded, roofs take the terrain material and so show imagery.
+    bg.addGroup(0, built.roofIndexStart, 0);
+    bg.addGroup(built.roofIndexStart, built.indices.length - built.roofIndexStart, 1);
+
+    return bg;
+  }
+
+  /**
    * Shared resolution step for triggerLoad and prefetchAhead: convert a worker
    * result into a Bundle (geometry + texture) without touching any TileNode.
    * Callers are responsible for putting the bundle into the cache.
@@ -732,7 +787,7 @@ export class TileManager {
     tile: TileId,
     res: TileLoadResult
   ): Bundle {
-    const { demSource, centerElevation, meshData, buildingMeshData, imageBitmap, minElevation, maxElevation } = res;
+    const { demSource, centerElevation, meshData, buildingRecords, imageBitmap, minElevation, maxElevation } = res;
 
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
@@ -740,14 +795,16 @@ export class TileManager {
     geom.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
     geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
 
-    let buildingGeometry: THREE.BufferGeometry | undefined;
-    if (buildingMeshData) {
-      buildingGeometry = new THREE.BufferGeometry();
-      buildingGeometry.setAttribute("position", new THREE.BufferAttribute(buildingMeshData.positions, 3));
-      buildingGeometry.setAttribute("normal", new THREE.BufferAttribute(buildingMeshData.normals, 3));
-      buildingGeometry.setAttribute("uv", new THREE.BufferAttribute(buildingMeshData.uvs, 2));
-      buildingGeometry.setIndex(new THREE.BufferAttribute(buildingMeshData.indices, 1));
+    // Source-zoom tiles carry the footprints; cache them so every finer tile
+    // over this ground can re-extrude without another fetch.
+    if (buildingRecords) {
+      this.buildingCache.put(
+        BuildingCache.sourceTileFor(tile, this.buildingSourceZoom),
+        buildingRecords
+      );
     }
+
+    const buildingGeometry = this.buildBuildingGeometry(tile, meshData);
 
     let texture: THREE.Texture | undefined;
     if (imageBitmap) {
@@ -763,7 +820,10 @@ export class TileManager {
       meshData.positions.byteLength +
       meshData.normals.byteLength +
       meshData.indices.byteLength +
-      (buildingMeshData ? buildingMeshData.positions.byteLength + buildingMeshData.indices.byteLength : 0) +
+      (buildingGeometry
+        ? buildingGeometry.getAttribute("position").array.byteLength +
+          (buildingGeometry.getIndex()?.array.byteLength ?? 0)
+        : 0) +
       (texture ? 512 * 512 * 4 : 0);
 
     return { key, bytes, geometry: geom, buildingGeometry, texture, centerElevation, demSource, minElevation, maxElevation };
@@ -797,6 +857,7 @@ export class TileManager {
       gridStep: this.gridStep,
       externalImageryMaxZoom: this.externalImageryMaxZoom,
       showBuildings: this.showBuildings,
+      buildingSourceZoom: this.buildingSourceZoom,
     };
 
     // Prefetch zoom: match camera's active LOD zoom tier (baseZoom + 2 capped at maxZoom),
@@ -892,6 +953,7 @@ export class TileManager {
       gridStep: this.gridStep,
       externalImageryMaxZoom: this.externalImageryMaxZoom,
       showBuildings: this.showBuildings,
+      buildingSourceZoom: this.buildingSourceZoom,
     };
 
     // Priority = 1e8 (super high priority so it jumps to top of pending task queue)
@@ -1093,11 +1155,15 @@ export class TileManager {
     const mesh = new THREE.Mesh(geom, material);
 
     if (bundle.buildingGeometry) {
-      const bMat = new THREE.MeshLambertMaterial({
+      const wallMat = new THREE.MeshLambertMaterial({
         color: 0xcbd5e1,
         side: THREE.DoubleSide,
       });
-      const bMesh = new THREE.Mesh(bundle.buildingGeometry, bMat);
+      // Group 1 (roofs) reuses the terrain material INSTANCE, so a roof tones
+      // exactly like the ground it sits on and follows SHADING MODE, brightness,
+      // contrast, saturation and hillshade with no second uniform set to keep in
+      // step -- and nothing extra to dispose, since the mesh does not own it.
+      const bMesh = new THREE.Mesh(bundle.buildingGeometry, [wallMat, material]);
       bMesh.name = "buildingMesh";
       bMesh.visible = this.showBuildings;
       mesh.add(bMesh);

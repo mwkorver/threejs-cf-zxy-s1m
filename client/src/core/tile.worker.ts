@@ -1,11 +1,9 @@
 import { decodeTerrarium } from "./terrarium";
 import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { buildingsRequest, imageryRequest, terrainRequest } from "./tileUrls";
-import { decodeAndExtrudeBuildings, type ExtrudedBuildingMesh } from "./buildingMesh";
+import { decodeBuildings, type BuildingRecord } from "./buildingMesh";
 
 import type { WorkerRequest, WorkerTileResponse } from "./workerTypes";
-
-const activeBuildingIds = new Set<string>();
 
 /**
  * `self` in a dedicated worker is a DedicatedWorkerGlobalScope, but that type
@@ -103,7 +101,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
   // union's discriminant: everything after it is a WorkerTileRequest.
   if (e.data.type === "ABORT") return;
 
-  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom, showBuildings } = e.data;
+  const { requestId, tile, baseUrl, layer, year, imagerySource, terrainMinZoom, gridStep, externalImageryMaxZoom, showBuildings, buildingSourceZoom } = e.data;
 
   const abortController = new AbortController();
   const signal = abortController.signal;
@@ -210,14 +208,19 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
       ? buildTerrainMesh(heights, tile, gridStep)
       : buildFlatMesh(tile);
 
-    // 4. Fetch & decode 3D building vector tiles when showBuildings is true and z >= 14
-    let buildingMeshData: ExtrudedBuildingMesh | null = null;
-    if (showBuildings && tile.z >= 14) {
+    // 4. Fetch building footprints -- ONLY at the source zoom.
+    //
+    // Buildings do not change with zoom, so finer tiles re-extrude from the
+    // main thread's BuildingCache instead of asking again. Requesting per
+    // terrain tile, as this used to, ran the tiler's DuckDB query 256 times
+    // over between z14 and z18 for the same footprints.
+    let buildingRecords: BuildingRecord[] | null = null;
+    if (showBuildings && tile.z === buildingSourceZoom) {
       try {
         const { url, label } = buildingsRequest(baseUrl, tile);
         const res = await fetchTile(url, label, 3, signal);
         const pbfBuf = await res.arrayBuffer();
-        buildingMeshData = decodeAndExtrudeBuildings(pbfBuf, tile, heights, activeBuildingIds);
+        buildingRecords = decodeBuildings(pbfBuf, tile);
       } catch (err) {
         // Buildings are an overlay: losing them must not cost the tile its
         // terrain and imagery. Warned rather than silent -- a swallowed 403
@@ -225,7 +228,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           console.warn(`Building fetch failed for tile ${tile.z}/${tile.x}/${tile.y}:`, err);
         }
-        buildingMeshData = null;
+        buildingRecords = null;
       }
     }
 
@@ -239,14 +242,9 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
     if (imageBitmap) {
       transferList.push(imageBitmap);
     }
-    if (buildingMeshData) {
-      transferList.push(
-        buildingMeshData.positions.buffer,
-        buildingMeshData.normals.buffer,
-        buildingMeshData.uvs.buffer,
-        buildingMeshData.indices.buffer
-      );
-    }
+    // buildingRecords are plain arrays, not typed arrays: nothing to transfer,
+    // they go by structured clone. Only sent on source-zoom tiles, so the clone
+    // cost is paid once per source tile rather than once per terrain tile.
 
     ctx.postMessage({
       type: "SUCCESS",
@@ -262,7 +260,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
         anchor: meshData.anchor,
         gridSize: meshData.gridSize
       },
-      buildingMeshData,
+      buildingRecords,
       imageBitmap,
       minElevation,
       maxElevation

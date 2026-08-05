@@ -9,6 +9,12 @@ export interface AppConfig {
   cullTiles: boolean;
   prefetchLookahead: number;
   prefetchSamples: number;
+  /**
+   * The one zoom that ever requests /buildings. Finer tiles re-extrude from the
+   * cached vectors instead of refetching, so this also sets the zoom at which
+   * buildings first appear.
+   */
+  buildingSourceZoom: number;
   startLon: number;
   startLat: number;
   worldAnchor: [number, number];
@@ -59,6 +65,7 @@ export const config: AppConfig = {
   cullTiles: params.get("cull") !== "false",
   prefetchLookahead: Number(params.get("lookahead") ?? 4),
   prefetchSamples: Number(params.get("samples") ?? 4),
+  buildingSourceZoom: Number(params.get("buildingzoom") ?? 14),
   startLon,
   startLat,
   worldAnchor,

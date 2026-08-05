@@ -37,6 +37,7 @@ const tileManager = new TileManager(
 tileManager.terrainMinZoom = 0;
 tileManager.texturePool = texturePool;
 tileManager.maxActiveTiles = Math.floor((cacheBudget / (1024 * 1024)) * 0.8);
+tileManager.buildingSourceZoom = config.buildingSourceZoom;
 tileManager.prefetchLookaheadSec = config.prefetchLookahead;
 tileManager.prefetchSamples = config.prefetchSamples;
 

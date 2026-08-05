@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",
+    "earcut": "^3.2.3",
     "pbf": "^5.1.2"
   }
 }

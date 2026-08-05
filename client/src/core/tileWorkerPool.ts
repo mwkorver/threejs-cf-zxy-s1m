@@ -208,7 +208,8 @@ export class TileWorkerPool {
         terrainMinZoom: task.options.terrainMinZoom,
         gridStep: task.options.gridStep,
         externalImageryMaxZoom: task.options.externalImageryMaxZoom,
-        showBuildings: task.options.showBuildings
+        showBuildings: task.options.showBuildings,
+        buildingSourceZoom: task.options.buildingSourceZoom
       };
       worker.postMessage(request);
     }
@@ -248,7 +249,7 @@ export class TileWorkerPool {
         demSource: data.demSource,
         centerElevation: data.centerElevation,
         meshData: data.meshData,
-        buildingMeshData: data.buildingMeshData,
+        buildingRecords: data.buildingRecords,
         imageBitmap: data.imageBitmap,
         minElevation: data.minElevation,
         maxElevation: data.maxElevation
@@ -327,7 +328,7 @@ export class TileWorkerPool {
       // This fallback exists for Vitest under jsdom, where Worker is absent. It
       // deliberately skips the buildings fetch: the tests that run it assert on
       // terrain and imagery, and MVT decoding needs no coverage from here.
-      buildingMeshData: null,
+      buildingRecords: null,
       imageBitmap,
       minElevation,
       maxElevation

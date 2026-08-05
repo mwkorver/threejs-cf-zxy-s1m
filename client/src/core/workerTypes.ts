@@ -17,7 +17,7 @@
 import { type TileId } from "./mercator";
 import type { TerrainMesh } from "./terrainMesh";
 import type { ImageryRouting } from "./tileUrls";
-import type { ExtrudedBuildingMesh } from "./buildingMesh";
+import type { BuildingRecord } from "./buildingMesh";
 
 /**
  * Everything a tile load needs beyond the tile itself. Extends the imagery
@@ -29,9 +29,8 @@ export interface TileWorkerTaskOptions extends ImageryRouting {
   terrainMinZoom: number;
   /** Mesh vertices every N source texels; the LOD manager picks it per tile. */
   gridStep: number;
-  /** Whether 3D vector buildings should be fetched and extruded. */
   /**
-   * Whether to fetch and extrude Overture buildings for this tile.
+   * Whether to fetch Overture buildings for this tile.
    *
    * Required, not optional. As `showBuildings?: boolean` the pool's explicit
    * request list simply omitted it, the worker destructured `undefined`, and
@@ -39,6 +38,12 @@ export interface TileWorkerTaskOptions extends ImageryRouting {
    * three call sites in tileManager already pass it.
    */
   showBuildings: boolean;
+  /**
+   * The single zoom that fetches buildings. The worker requests /buildings only
+   * when `tile.z === buildingSourceZoom`; every finer tile re-extrudes from the
+   * main thread's BuildingCache instead.
+   */
+  buildingSourceZoom: number;
 }
 
 export interface WorkerTileRequest extends TileWorkerTaskOptions {
@@ -79,16 +84,19 @@ export interface WorkerTileSuccessResponse {
   centerElevation: number;
   meshData: WorkerMeshData;
   /**
-   * Extruded 3D buildings, or null when the tile has none -- buildings are off,
-   * z is below the band, the fetch failed, or nothing decoded.
+   * Decoded building footprints for this tile, or null when it is not the
+   * source zoom, buildings are off, or nothing decoded.
    *
-   * Required-but-nullable, deliberately. As an optional field this was silently
-   * dropped for months: tileWorkerPool forwards the success payload field by
+   * Vectors rather than extruded geometry: the same buildings are drawn at
+   * every zoom above the source, and each zoom needs its own base elevations
+   * and roof UVs. The main thread caches these and extrudes per terrain tile.
+   *
+   * Required-but-nullable, deliberately. As an optional field its predecessor
+   * was silently dropped: tileWorkerPool forwards the success payload field by
    * field, and an omitted optional still satisfies TileLoadResult, so the worker
-   * sent buildings, the pool discarded them, and tsc saw nothing wrong. Making
-   * it required turns that omission into a compile error.
+   * sent buildings, the pool discarded them, and tsc saw nothing wrong.
    */
-  buildingMeshData: ExtrudedBuildingMesh | null;
+  buildingRecords: BuildingRecord[] | null;
   /** null when imagery 404s: no coverage, but the mesh is still good. */
   imageBitmap: ImageBitmap | null;
   minElevation: number;
