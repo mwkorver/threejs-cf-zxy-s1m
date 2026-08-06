@@ -23,6 +23,16 @@ import { buildTileBuildings } from "./buildingMesh";
 import type { TileLoadResult } from "./workerTypes";
 
 
+/** Chebyshev radius of the root grid, in tiles: 2 gives the 5x5 grid. */
+const ROOT_GRID_RADIUS = 2;
+/**
+ * Roots beyond this are dropped on distance alone. Wider than the build radius
+ * on purpose: the ring between the two is hysteresis, so crossing a tile
+ * boundary doesn't prune and refetch an edge root. Bounded by time rather than
+ * distance -- see rootStaleTtlMs.
+ */
+const ROOT_EVICT_RADIUS = 3;
+
 /** Byte size of a building geometry's own buffers, for the live-memory counter. */
 function buildingGeometryBytes(g: THREE.BufferGeometry): number {
   let n = g.getIndex()?.array.byteLength ?? 0;
@@ -55,6 +65,11 @@ export interface TileNode {
   retryAfter?: number;
   /** performance.now() when the node was handed to transitionNodes (stale pool). */
   transitionSince?: number;
+  /**
+   * When this root last had nothing able to see it, or undefined while it is in
+   * frustum. Only set on hysteresis-band roots -- see rootStaleTtlMs.
+   */
+  outOfViewSince?: number;
 }
 
 export class TileManager {
@@ -155,6 +170,28 @@ export class TileManager {
   // TTL bounds that: the global swap prunes everything anyway, so timing a
   // straggler out just reaches the same steady state sooner.
   public transitionTtlMs = 5000;
+  /**
+   * Max lifetime (ms) of a hysteresis-band root that nothing can see.
+   *
+   * The band is roots between the build radius and the evict radius: kept, but
+   * never rebuilt. It exists so crossing a tile boundary doesn't prune and
+   * refetch an edge root, which is worth keeping. What it must not do is
+   * accumulate -- and it did, because the grid centre is biased forward along
+   * the view direction, so turning in place walks the centre around and leaves
+   * a trail of band roots that distance alone never collects. Measured at 36
+   * roots against a 5x5 grid after one 360, with zero evictions.
+   *
+   * Every one of those still ran through updateNode, pinning itself and its
+   * subtree into activeKeys, which is what carried the working set past
+   * maxActiveTiles -- and over the cap updateNode hard-prunes culled subtrees
+   * instead of retaining them, so each camera turn threw away tiles it then had
+   * to refetch. Timing out the band roots nothing can see keeps the hysteresis
+   * for the case it was meant for and drops the trail.
+   *
+   * Only counts time spent OUT of the frustum: a band root that is on screen is
+   * doing real work at the far edge of the view and is never timed out.
+   */
+  public rootStaleTtlMs = 4000;
   private workerPool = new TileWorkerPool();
 
   // --- Velocity-vector prefetch ---
@@ -333,8 +370,8 @@ export class TileManager {
     // 5x5 (not 3x3) so the horizon extends ~2 tiles in every direction;
     // distant roots stay coarse (cheap), only near-camera tiles subdivide.
     const newRootKeys = new Set<string>();
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -ROOT_GRID_RADIUS; dx <= ROOT_GRID_RADIUS; dx++) {
+      for (let dy = -ROOT_GRID_RADIUS; dy <= ROOT_GRID_RADIUS; dy++) {
         const tx = centerTile.x + dx;
         const ty = centerTile.y + dy;
         // Simple range check for Web Mercator tile index boundaries
@@ -373,11 +410,13 @@ export class TileManager {
       }
     }
 
-    // 4. Evict root nodes that are too far from the camera (Chebyshev distance > 3)
+    // 4. Evict root nodes that are too far from the camera. Distance only --
+    // the band inside this radius is collected by time instead, after the
+    // frustum exists, in step 6b.
     for (const [key, node] of this.rootNodes.entries()) {
       const dx = Math.abs(node.tile.x - centerTile.x);
       const dy = Math.abs(node.tile.y - centerTile.y);
-      if (dx > 3 || dy > 3) {
+      if (dx > ROOT_EVICT_RADIUS || dy > ROOT_EVICT_RADIUS) {
         this.pruneNode(node);
         this.rootNodes.delete(key);
       }
@@ -442,7 +481,31 @@ export class TileManager {
       }
     }
 
-    // 6b. Settle the GPU budget now the walk is done and activeKeys is whole
+    // 6b. Time out hysteresis-band roots that nothing can see.
+    //
+    // Runs here rather than beside the distance eviction in step 4 because it
+    // needs the frustum, which step 5 builds. Roots inside the build grid are
+    // left alone: they are the intended working set, they are bounded at 25,
+    // and pruning one only means step 3 recreates it empty on the next frame.
+    for (const [key, node] of this.rootNodes.entries()) {
+      const dx = Math.abs(node.tile.x - centerTile.x);
+      const dy = Math.abs(node.tile.y - centerTile.y);
+      if (dx <= ROOT_GRID_RADIUS && dy <= ROOT_GRID_RADIUS) {
+        node.outOfViewSince = undefined; // in the grid: not a candidate
+        continue;
+      }
+      if (this.isNodeVisible(node, frustum)) {
+        node.outOfViewSince = undefined; // still drawing the far edge of the view
+        continue;
+      }
+      node.outOfViewSince ??= pfNow;
+      if (pfNow - node.outOfViewSince > this.rootStaleTtlMs) {
+        this.pruneNode(node);
+        this.rootNodes.delete(key);
+      }
+    }
+
+    // 6c. Settle the GPU budget now the walk is done and activeKeys is whole
     // again. Every live mesh is pinned at this point, so eviction can only take
     // bundles nothing renders -- the precondition TexturePool recycling relies
     // on. Doing this inside the walk is what put another tile's imagery on
