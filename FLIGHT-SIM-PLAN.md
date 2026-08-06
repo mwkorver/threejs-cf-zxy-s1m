@@ -15,7 +15,7 @@ shaped the way it is, and that reasoning is still the interesting part.
 was never built. Individual sections are annotated where they say something no
 longer true.
 
-Last reconciled against the code: **2026-08-04**.
+Last reconciled against the code: **2026-08-06**.
 
 ---
 
@@ -36,7 +36,7 @@ were reopened.
 |---|---|---|
 | DEM tiers | Two: S1M near-field, `elevation-tiles-prod` far-field | **Three**: S1M → USGS 1/3" (10 m) → far-field. The 1/3" tier also void-fills S1M's ragged coverage edges, which [§4.2](#42-terrain) had hand-waved as "void fill or transparent" |
 | Low-zoom imagery | Pre-genned z0–z12 static pyramid on S3 | **`/basemap/{z}/{x}/{y}.webp`** — a live endpoint stitching four USDA NAIP ImageServer cache tiles into one 512. The COG mosaic fan-out was too slow and coverage-capped down there, and this needed no pre-gen job at all. The pyramid was never built |
-| 3D Buildings | Static PMTiles range reads from S3 ([§4.3](#43-buildings)) | **`/buildings/{z}/{x}/{y}.pbf`** — dynamic serverless MVT vector tiles generated via DuckDB `ST_AsMVT()` over Overture Maps / MS Building Footprints GeoParquet lake partitions on S3. Web Worker extrudes 3D wall & roof meshes off the main thread at $z \ge 14$, sampling 1m S1M terrain heightfields to seat building bases flush on 3D terrain |
+| 3D Buildings | Static PMTiles range reads from S3 ([§4.3](#43-buildings--shipped-buildingszxypbf)) | **`/buildings/{z}/{x}/{y}.pbf`** — dynamic serverless MVT vector tiles generated via DuckDB `ST_AsMVT()` over Overture Maps / MS Building Footprints GeoParquet lake partitions on S3. Fetched once at a single source zoom and re-extruded per terrain tile, so footprints are seated on whatever terrain is under them as the camera descends |
 | Coverage fallback | "Client renders no-data as fallback-LOD terrain" ([§8](#8-cost--risk-notes)) | **`/footprints/{s1m,usgs13}.json`** — two static vectors (~360 KB gzipped) the client fetches once and clips against, so it knows where coverage ends before requesting. Not in the plan at all |
 | Client hosting | Implicit; CloudFront served tiles only | The **same distribution serves the compiled app**, so there is one origin story for the whole demo |
 | Access control | Not considered | A viewer-request CloudFront Function gates everything on `?k=<key>`, to keep crawlers off requester-pays reads. Not a real secret — it ships in the bundle |
@@ -88,7 +88,7 @@ universal contract**:
 | 5a | NAIP source | **`naip-visualization` RGB COGs** (not `naip-analytic` RGBIR) | 3-band uint8 JPEG COGs, display-ready — the tiler dropped the IR band anyway; smaller reads. Lake collection = `naip-visualization`, served at `/imagery/naip-visualization/...` |
 | 6 | Terrain payload | **Terrain-RGB (Terrarium-style) raster tiles from S1M**, quantized-mesh deferred | One pipeline with imagery (same tiler, same quadtree); client meshes regular grids (simpler than the current drape mesher). Revisit quantized-mesh only if client meshing shows up in profiles |
 | 7 | Far-field terrain | **AWS Open Data `s3://elevation-tiles-prod` (Mapzen Terrarium)** | Already tiled in exactly this scheme, global, free; S1M kicks in below a screen-space-error threshold |
-| 8 | Buildings | ~~**Overture → tippecanoe → PMTiles on S3 + CloudFront**~~ — **never built** ([§0](#0-status--plan-vs-as-built)) | Fully static, zero servers, range-read friendly, zoom-graded simplification for free |
+| 8 | Buildings | ~~**Overture → tippecanoe → PMTiles on S3 + CloudFront**~~ — **this route was never built**; buildings ship as a dynamic MVT endpoint instead ([§4.3](#43-buildings--shipped-buildingszxypbf)) | Fully static, zero servers, range-read friendly, zoom-graded simplification for free — but it needed a pre-gen pipeline, and the lake could already answer the query directly |
 | 9 | Rendering engine | **three.js — not CesiumJS** (settled [§10.2](#10-open-questions-settle-in-phase-0), 2026-07-09) | See [§6](#6-engine-decision-custom-renderer-vs-cesiumjs). Cesium = globe engine overhead for pre-aligned tiles; custom pipeline keeps the GPU raster/mesh control and velocity prefetch. three won the Phase 0 spike (least friction, native free-fly camera); luma.gl kept as WebGPU fallback. Backend stays engine-agnostic so Cesium/luma remain fallback consumers |
 | 10 | Region | **us-west-2** | Same as sources (`naip-visualization`, `prd-tnm` etc., per RODA); requester-pays reads become same-region GET pennies. All reads signed via the execution role; requester-pays scoped per-bucket |
 
@@ -133,13 +133,15 @@ graph TD
     S3STATIC -. batch build .- OVERTURE
 ```
 
-> **This diagram is the plan, not the deployment.** Two of its nodes were
-> never built: `/buildings/*` (with its Overture source) and the static
-> `z0–z12` pyramid. Three things it doesn't show did get built: `/basemap/*`
-> (live low-zoom stitch), `/footprints/*` (coverage vectors), the compiled web
-> app served from the same distribution, and a USGS 1/3" DEM tier between S1M
-> and the far field. See [§0](#0-status--plan-vs-as-built); the as-built
-> diagram is in [README.md](README.md).
+> **This diagram is the plan, not the deployment.** The static `z0–z12` pyramid
+> was never built. `/buildings/*` exists but not as drawn — it is a live MVT
+> endpoint over the Overture lake, not PMTiles range reads against a pre-genned
+> file ([§4.3](#43-buildings--shipped-buildingszxypbf)). Four things it doesn't
+> show did get built: `/basemap/*` (live low-zoom stitch), `/footprints/*`
+> (coverage vectors), the compiled web app served from the same distribution,
+> and a USGS 1/3" DEM tier between S1M and the far field. See
+> [§0](#0-status--plan-vs-as-built); the as-built diagram is in
+> [README.md](README.md).
 
 Client (browser): custom renderer, one LOD manager over `z/x/y` "tile bundles"
 (imagery texture + terrain mesh + buildings), byte-budgeted LRU cache,
@@ -182,8 +184,11 @@ signing.
     ring — resolved later by server-side normal tiles (Phase 2), which are a
     data product and belong serverside; skirt texture stretch tuned via
     per-zoom skirt height (Cesium's published formula as starting point);
-    building seating samples the height raster, never mesh raycasts, so skirt
-    geometry can't pollute picking ([§4.3](#43-buildings--not-built) already does this).
+    building seating reads elevation directly rather than raycasting the scene,
+    so skirt geometry can't pollute picking. As built it samples the terrain
+    mesh's own vertices, not the height raster the plan assumed — the raster is
+    unscaled, and mesh Z already carries `mercatorScale(lat)`
+    ([§4.3](#43-buildings--shipped-buildingszxypbf)).
   - Source: S1M COGs via `S1M_Products.parquet` lookup; `-999999` nodata → void
     fill or transparent.
   - `maxzoom` ≈ 15–16 (1 m source at 512 px); below-threshold zooms can
@@ -198,9 +203,11 @@ signing.
 ### 4.3 Buildings — Shipped (`/buildings/{z}/{x}/{y}.pbf`)
 
 - Serverless Lambda endpoint `GET /buildings/{z}/{x}/{y}.pbf` (`application/x-protobuf`).
-  - DuckDB `ST_AsMVT()` queries Overture Maps / MS Building Footprints GeoParquet lake partitions on S3.
-  - High-zoom LOD floor ($z \ge 14$): returned for high zoom; 404 below.
-  - Client Web Worker (`tile.worker.ts` & `buildingMesh.ts`) decodes MVT protobuf vector tiles off the main thread, samples loaded 1-meter S1M terrain heightfields at building centroids, deduplicates feature IDs, and generates merged 3D wall & roof `Float32Array` buffers for 1 `THREE.Mesh` draw call per tile node.
+  - DuckDB `ST_AsMVT()` queries Overture Maps / MS Building Footprints GeoParquet lake partitions on S3. `ST_AsMVTGeom(..., clip_geom=true)`, so a building crossing a tile boundary arrives already cut.
+  - LOD floor $z \ge 14$: served at high zoom, 404 below.
+  - The client fetches at **one** configurable source zoom (`?buildingzoom=`, default 14), not per tile. Footprints do not change with zoom — only the terrain under them and the imagery on them do — so asking per tile ran the same query 256 times over between z14 and z18.
+  - The Web Worker only decodes MVT to per-building vectors (`decodeBuildings` in `buildingMesh.ts`). Those vectors are cached by source tile (`buildingCache.ts`) and extruded on the main thread, per terrain tile, against that tile's own mesh and UVs (`buildTileBuildings`) — which is what lets one fetch serve every zoom above it. Base elevation samples the terrain **mesh**, not the raw heightfield: mesh Z already carries `mercatorScale(lat)`, and sampling the unscaled raster sinks or floats buildings by that factor.
+  - Two draw groups per tile: flat-shaded walls, and roofs sharing the tile's terrain material so they carry the aerial imagery.
 
 ## 5. Client architecture notes
 
@@ -354,9 +361,11 @@ z0–z12 pyramid (Phase 2) is the prescribed mitigation.
   `flyToPositionSpeed`)~~ **Done** — double-click flies an arc that climbs to
   a cruise altitude and descends onto the target, replacing the instant
   `lerp(point, 0.5)` jump.
-- Buildings: Overture → PMTiles, terrain-seated extrusions. **Not built** —
-  see [§0](#0-status--plan-vs-as-built). This is the single largest piece of
-  the plan that never happened.
+- ~~Buildings: Overture → PMTiles, terrain-seated extrusions.~~ **Done, by a
+  different route** — terrain-seated extrusions ship, but from a live MVT
+  endpoint over the Overture lake rather than a pre-genned PMTiles file
+  ([§4.3](#43-buildings--shipped-buildingszxypbf)). The PMTiles pipeline is the
+  piece of the plan that never happened.
 
 ### Phase 2 — scale & polish
 

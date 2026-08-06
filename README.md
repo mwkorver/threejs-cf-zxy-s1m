@@ -238,8 +238,10 @@ can never drift apart.
 - `GET /footprints/{s1m,usgs13}.json` — static gzipped GeoJSON of DEM COG
   footprints, served straight from S3 (no Lambda); rebuilt by
   [`tiler/scripts/build_footprints.py`](tiler/scripts/build_footprints.py).
+- `GET /buildings/{z}/{x}/{y}.pbf` — MVT building footprints and heights from
+  the Overture lake, extruded client-side. Served at z ≥ 14, 404 below.
 
-All four are path-only by design. DEM band thresholds are tiler **config**
+All five are path-only by design. DEM band thresholds are tiler **config**
 (`TILER_USGS_MIN_ZOOM` / `TILER_S1M_MIN_ZOOM`), never per-request parameters —
 they change what a tile *contains*, which must not vary independently of the
 cache key.
