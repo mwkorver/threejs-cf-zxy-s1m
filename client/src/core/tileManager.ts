@@ -731,7 +731,18 @@ export class TileManager {
 
     // 2. Check if the bundle exists in cache
     const cached = this.bundleCache.get(key);
-    if (cached) {
+    // A source-zoom tile whose footprints have aged out of BuildingCache has to
+    // go back to the worker. The bundle short-circuit below skips the fetch
+    // entirely -- terrain is complete without buildings, so nothing notices --
+    // and the /buildings request is made nowhere else. BuildingCache holds 64
+    // source tiles against a BundleCache measured in hundreds of megabytes, so
+    // records age out first, and every finer tile over that ground then reads a
+    // cold cache and draws no buildings for as long as the terrain bundle lives.
+    const needsFootprints =
+      this.showBuildings &&
+      node.tile.z === this.buildingSourceZoom &&
+      !this.buildingCache.has(node.tile);
+    if (cached && !needsFootprints) {
       node.centerElevation = cached.centerElevation;
       node.demSource = cached.demSource;
       node.minElevation = cached.minElevation;
@@ -811,22 +822,75 @@ export class TileManager {
   }
 
   /**
+   * Hang extruded buildings on a terrain mesh.
+   *
+   * Group 1 (roofs) reuses the terrain material INSTANCE, so a roof tones
+   * exactly like the ground it sits on and follows SHADING MODE, brightness,
+   * contrast, saturation and hillshade with no second uniform set to keep in
+   * step -- and nothing extra to dispose, since the mesh does not own it.
+   */
+  private attachBuildingMesh(
+    mesh: THREE.Mesh,
+    buildingGeometry: THREE.BufferGeometry,
+    terrainMaterial: THREE.Material
+  ): void {
+    const wallMat = new THREE.MeshLambertMaterial({
+      color: 0xcbd5e1,
+      side: THREE.DoubleSide,
+      transparent: this.buildingWallOpacity < 1.0,
+      opacity: this.buildingWallOpacity,
+    });
+    const bMesh = new THREE.Mesh(buildingGeometry, [wallMat, terrainMaterial]);
+    bMesh.name = "buildingMesh";
+    bMesh.visible = this.showBuildings;
+    mesh.add(bMesh);
+    this.buildingBytes += buildingGeometryBytes(buildingGeometry);
+    // Deferred for the same reason as the disposal side: settled once per
+    // frame in update(), where the pin set is known to be complete.
+    this.buildingBudgetDirty = true;
+  }
+
+  /**
    * Re-attach buildings to tiles that were drawn before their footprints
    * arrived. Without this a tile bundled while the cache was cold stays empty
    * for good, since triggerLoad hands back the cached bundle untouched.
+   *
+   * Extrudes onto the mesh the node already has, rather than rebuilding it from
+   * a Bundle. A mesh outlives its bundle -- eviction only spares PINNED keys, so
+   * a loaded node that is currently hidden keeps its mesh while its bundle goes
+   * -- and asking BundleCache for one it no longer holds silently did nothing,
+   * leaving that tile building-less for good. Everything the extrusion needs
+   * (the terrain positions it seats buildings on, the grid size, the material
+   * roofs share) is on the mesh already, so the bundle was never required.
+   *
+   * transitionNodes are walked too: a base-zoom change parks whole subtrees
+   * there, and those tiles are on screen exactly like any other.
    */
   private attachPendingBuildings(source: TileId): void {
     const visit = (node: TileNode): void => {
+      const mesh = node.mesh;
       if (
-        node.mesh &&
+        mesh &&
         node.loaded &&
+        node.gridSize !== undefined &&
         node.tile.z >= this.buildingSourceZoom &&
-        !node.mesh.getObjectByName("buildingMesh")
+        !mesh.getObjectByName("buildingMesh")
       ) {
         const owner = BuildingCache.sourceTileFor(node.tile, this.buildingSourceZoom);
         if (owner.x === source.x && owner.y === source.y && owner.z === source.z) {
-          const bundle = this.bundleCache.get(node.key);
-          if (bundle) this.createMeshFromBundle(node, bundle);
+          // mats[0] is the terrain material for a terrain mesh; roofs share the
+          // instance, exactly as they do when the mesh is first built.
+          const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+          const buildingGeometry = material
+            ? this.buildBuildingGeometry(
+                node.tile,
+                mesh.geometry.getAttribute("position").array,
+                node.gridSize
+              )
+            : undefined;
+          if (buildingGeometry && material) {
+            this.attachBuildingMesh(mesh, buildingGeometry, material);
+          }
         }
       }
       if (node.children) {
@@ -834,6 +898,7 @@ export class TileManager {
       }
     };
     for (const root of this.rootNodes.values()) visit(root);
+    for (const node of this.transitionNodes.values()) visit(node);
   }
 
   private buildBuildingGeometry(
@@ -1280,24 +1345,7 @@ export class TileManager {
     );
 
     if (buildingGeometry) {
-      const wallMat = new THREE.MeshLambertMaterial({
-        color: 0xcbd5e1,
-        side: THREE.DoubleSide,
-        transparent: this.buildingWallOpacity < 1.0,
-        opacity: this.buildingWallOpacity,
-      });
-      // Group 1 (roofs) reuses the terrain material INSTANCE, so a roof tones
-      // exactly like the ground it sits on and follows SHADING MODE, brightness,
-      // contrast, saturation and hillshade with no second uniform set to keep in
-      // step -- and nothing extra to dispose, since the mesh does not own it.
-      const bMesh = new THREE.Mesh(buildingGeometry, [wallMat, material]);
-      bMesh.name = "buildingMesh";
-      bMesh.visible = this.showBuildings;
-      mesh.add(bMesh);
-      this.buildingBytes += buildingGeometryBytes(buildingGeometry);
-      // Deferred for the same reason as the disposal side: settled once per
-      // frame in update(), where the pin set is known to be complete.
-      this.buildingBudgetDirty = true;
+      this.attachBuildingMesh(mesh, buildingGeometry, material);
     }
 
     mesh.position.set(
