@@ -23,6 +23,18 @@ import { buildTileBuildings } from "./buildingMesh";
 import type { TileLoadResult } from "./workerTypes";
 
 
+/** Byte size of a building geometry's own buffers, for the live-memory counter. */
+function buildingGeometryBytes(g: THREE.BufferGeometry): number {
+  let n = g.getIndex()?.array.byteLength ?? 0;
+  for (const name of ["position", "normal", "uv"]) {
+    // Indexed off .attributes rather than getAttribute(), whose type claims a
+    // value is always present; under noUncheckedIndexedAccess this stays honest.
+    const a = g.attributes[name];
+    if (a) n += a.array.byteLength;
+  }
+  return n;
+}
+
 export interface TileNode {
   /** Terrain grid size of the mesh currently attached, for rebuilding buildings. */
   gridSize?: number;
@@ -95,6 +107,18 @@ export class TileManager {
   public buildingSourceZoom = 14;
   /** Decoded footprints, keyed by source tile and reused up the LOD. */
   private buildingCache = new BuildingCache();
+  /**
+   * Live bytes of building geometry.
+   *
+   * Deliberately its own counter rather than part of BundleCache's 256 MB
+   * budget: this geometry is owned by the tile MESH, not the bundle, so a
+   * cached bundle with no live node holds none of it and folding it in would
+   * make the budget lie in the other direction. It went untracked entirely
+   * between cc32005 (which moved ownership) and now -- and b9f98ba then put
+   * roof geometry on every overlapping tile, so there is much more of it.
+   * Tracked so it is at least visible rather than invisible.
+   */
+  private buildingBytes = 0;
 
   // Footprint overlay. The full S1M+usgs13 set (~360 KB gzipped) is fetched once
   // from the static /footprints/*.json files and held in memory; the mesh is
@@ -752,6 +776,7 @@ export class TileManager {
   private disposeBuildingMesh(node: TileNode): void {
     const bMesh = node.mesh?.getObjectByName("buildingMesh") as THREE.Mesh | undefined;
     if (!bMesh) return;
+    this.buildingBytes -= buildingGeometryBytes(bMesh.geometry);
     bMesh.geometry.dispose();
     const mats = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
     mats[0]?.dispose(); // walls only; mats[1] is the shared terrain material
@@ -817,7 +842,8 @@ export class TileManager {
       tile,
       groundAt,
       zScale,
-      owned.origin
+      owned.origin,
+      this.buildingSourceZoom
     );
     if (!built) return undefined;
 
@@ -1241,6 +1267,7 @@ export class TileManager {
       bMesh.name = "buildingMesh";
       bMesh.visible = this.showBuildings;
       mesh.add(bMesh);
+      this.buildingBytes += buildingGeometryBytes(buildingGeometry);
     }
 
     mesh.position.set(
@@ -1252,6 +1279,11 @@ export class TileManager {
 
     node.mesh = mesh;
     node.gridSize = bundle.gridSize;
+  }
+
+  /** Live building geometry in bytes. Outside the BundleCache budget -- see the field. */
+  public getBuildingBytes(): number {
+    return this.buildingBytes;
   }
 
   public updateBuildingVisibility(): void {
@@ -1283,10 +1315,13 @@ export class TileManager {
       if (node.mesh) {
         const bMesh = node.mesh.getObjectByName("buildingMesh") as THREE.Mesh | undefined;
         if (bMesh) {
-          // Wall material is at index 0 in the multi-material array
+          // Wall material is at index 0 in the multi-material array; index 1 is
+          // the shared terrain material the roofs use, which must not be touched.
+          // A real instanceof rather than a cast plus a guard the cast made
+          // dead -- that dead guard is what has CI failing on 28d72b6.
           const materials = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
-          const wallMat = materials[0] as THREE.MeshLambertMaterial;
-          if (wallMat) {
+          const wallMat = materials[0];
+          if (wallMat instanceof THREE.MeshLambertMaterial) {
             wallMat.opacity = opacity;
             wallMat.transparent = transparent;
             wallMat.needsUpdate = true;
@@ -1405,7 +1440,9 @@ export class TileManager {
     if (node.tile.z < this.buildingSourceZoom) return true;
     const source = BuildingCache.sourceTileFor(node.tile, this.buildingSourceZoom);
     if (!this.buildingCache.has(source)) return true; // nothing known to draw yet
-    if (!this.buildingCache.forTile(node.tile, this.buildingSourceZoom)) return true; // owns none
+    // ownsBuildings, not forTile: this runs from isCovered on every qualifying
+    // node every frame, and forTile allocates two arrays and reorders the LRU.
+    if (!this.buildingCache.ownsBuildings(node.tile, this.buildingSourceZoom)) return true;
     return !!node.mesh?.getObjectByName("buildingMesh");
   }
 

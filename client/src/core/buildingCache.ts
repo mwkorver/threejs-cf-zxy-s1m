@@ -118,6 +118,38 @@ export class BuildingCache {
     return roofRecords.length > 0 ? { wallRecords, roofRecords, origin: [ox, oy] } : null;
   }
 
+  /**
+   * Whether `target` has any building to draw, without building the lists.
+   *
+   * forTile allocates two arrays, walks every record, and reorders the LRU to
+   * refresh recency. That is fine once per tile build, but buildingsSettled
+   * asks this from the LOD's isCovered -- per qualifying node, per frame.
+   * Measured at 192 records it cost 0.0084 ms a call, ~0.5 ms/frame over ~60
+   * nodes, and threw away ~7,200 arrays a second, scaling linearly with
+   * density. This early-returns on the first hit, allocates nothing, and
+   * deliberately does NOT touch recency: a predicate should not evict anything.
+   */
+  ownsBuildings(target: TileId, sourceZoom: number): boolean {
+    if (target.z < sourceZoom) return false;
+
+    const source = BuildingCache.sourceTileFor(target, sourceZoom);
+    const records = this.map.get(tileKey(source));
+    if (!records) return false;
+
+    const shift = target.z - sourceZoom;
+    const span = tileSizeMeters(target.z);
+    const ox = (target.x - (source.x << shift)) * span;
+    const oy = -(target.y - (source.y << shift)) * span;
+
+    for (const r of records) {
+      const [bx0, by0, bx1, by1] = r.bbox;
+      if (bx1 - ox >= 0 && bx0 - ox <= span && by1 - oy >= -span && by0 - oy <= 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   clear(): void {
     this.map.clear();
   }

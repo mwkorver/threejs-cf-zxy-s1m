@@ -60,6 +60,18 @@ export function tileSizeMeters(z: number): number {
 }
 
 /**
+ * Mirrors `ST_AsMVTGeom(geometry, envelope, 4096, 64, true)` in
+ * tiler/src/tiler/buildings.py. The final `true` is clip_geom, so a building
+ * crossing a source-tile boundary arrives already cut, and the cut runs along
+ * the envelope expanded by the buffer.
+ *
+ * If the server's values ever drift from these, the only consequence is that
+ * seam walls stop being recognised and reappear -- nothing breaks.
+ */
+const MVT_EXTENT = 4096;
+const MVT_BUFFER = 64;
+
+/**
  * Sutherland-Hodgman clip of a flat [x,y,...] ring to an axis-aligned rect.
  *
  * Used so a roof is drawn by every tile it overlaps, each tile emitting only
@@ -174,24 +186,30 @@ export function decodeBuildings(pbfBuffer: ArrayBuffer, tile: TileId): BuildingR
 
       // Centroid of the first outer ring. Only used to decide tile ownership,
       // so the cheap vertex average is enough -- no need for a true area centroid.
-      const outer = polygons[0]![0]!;
+      // Across every polygon's outer ring, not just the first. A MultiPolygon
+      // reaching only part two would otherwise fail the overlap test and lose
+      // its roof, and wall ownership would be decided by part one alone.
       let sx = 0;
       let sy = 0;
+      let n = 0;
       let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
       let maxY = -Infinity;
-      for (let k = 0; k < outer.length; k += 2) {
-        const x = outer[k]!;
-        const y = outer[k + 1]!;
-        sx += x;
-        sy += y;
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
+      for (const poly of polygons) {
+        const outer = poly[0]!;
+        for (let k = 0; k < outer.length; k += 2) {
+          const x = outer[k]!;
+          const y = outer[k + 1]!;
+          sx += x;
+          sy += y;
+          n++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
       }
-      const n = outer.length / 2;
 
       out.push({
         id,
@@ -248,12 +266,27 @@ export function buildTileBuildings(
   targetTile: TileId,
   groundAt: (u: number, v: number) => number,
   zScale: number,
-  origin: readonly [number, number] = [0, 0]
+  origin: readonly [number, number] = [0, 0],
+  sourceZoom: number = targetTile.z
 ): ExtrudedBuildingMesh | null {
   if (wallBuildings.length === 0 && roofBuildings.length === 0) return null;
   const [ox, oy] = origin;
 
   const size = tileSizeMeters(targetTile.z);
+
+  // The four lines the server cut along, in SOURCE-tile local metres. A wall
+  // segment lying on one of them is not a real wall -- it is the edge where the
+  // building was sliced by the tile envelope. Opaque walls hid these; the wall
+  // opacity control makes them read as a wall straight through the building.
+  const srcSize = tileSizeMeters(sourceZoom);
+  const pad = (MVT_BUFFER / MVT_EXTENT) * srcSize;
+  const cutXs = [-pad, srcSize + pad];
+  const cutYs = [pad, -srcSize - pad]; // y is negative going south
+  // One MVT unit at the source zoom; cut vertices are exactly on the line, so
+  // this only has to absorb float error from the integer -> metre scaling.
+  const eps = (srcSize / MVT_EXTENT) * 0.1;
+  const onSameLine = (a: number, b: number, lines: number[]): boolean =>
+    lines.some((l) => Math.abs(a - l) < eps && Math.abs(b - l) < eps);
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
@@ -286,11 +319,18 @@ export function buildTileBuildings(
       // Walls around every ring, holes included: a courtyard has interior walls.
       for (const ring of polygon) {
         for (let j = 0; j < ring.length; j += 2) {
-          const x1 = ring[j]! - ox;
-          const y1 = ring[j + 1]! - oy;
           const k = (j + 2) % ring.length;
-          const x2 = ring[k]! - ox;
-          const y2 = ring[k + 1]! - oy;
+          // Raw, un-rebased: the cut lines are fixed in source-tile space.
+          const rx1 = ring[j]!;
+          const ry1 = ring[j + 1]!;
+          const rx2 = ring[k]!;
+          const ry2 = ring[k + 1]!;
+          if (onSameLine(rx1, rx2, cutXs) || onSameLine(ry1, ry2, cutYs)) continue;
+
+          const x1 = rx1 - ox;
+          const y1 = ry1 - oy;
+          const x2 = rx2 - ox;
+          const y2 = ry2 - oy;
 
           const dx = x2 - x1;
           const dy = y2 - y1;
