@@ -18,7 +18,19 @@ import { updateSky } from "./core/sky";
 const sceneCtx = setupScene();
 
 // 2. Initialize caching and tile management
-const cacheBudget = 256 * 1024 * 1024;
+//
+// 512 MB, raised from 256. The old figure was never what the app used: building
+// geometry lives on the tile mesh rather than in the Bundle, so BundleCache
+// could not see it, and measurement over Newark found 254.9 MB of bundles
+// against 135.6 MB of untracked building geometry -- 390 MB real, against a
+// budget that believed it was at 99.6% of 256. Rolling the camera made it
+// visible, because the forward-biased root grid inflates the working set.
+//
+// Raised rather than clamped: 390 MB is affordable here, and a budget that
+// reflects what is actually held is worth more than a smaller one that is
+// quietly wrong. TileManager keeps BundleCache's share at this total minus live
+// building bytes, so the two together respect it.
+const cacheBudget = 512 * 1024 * 1024;
 const texturePool = new TexturePool();
 const bundleCache = new BundleCache(cacheBudget, texturePool);
 
@@ -36,7 +48,14 @@ const tileManager = new TileManager(
 );
 tileManager.terrainMinZoom = 0;
 tileManager.texturePool = texturePool;
-tileManager.maxActiveTiles = Math.floor((cacheBudget / (1024 * 1024)) * 0.8);
+// ~2 MB per tile, not the 1 MB this assumed. Measured over Newark at 210 active
+// tiles: 254.9 MB of bundles plus 135.6 MB of building geometry is 1.86 MB each.
+// The old figure is why the tile cap failed to protect the byte budget -- it
+// permitted twice the tiles the budget could hold. Raising the budget without
+// correcting this would just have bought more tiles rather than more headroom;
+// together they leave the cap at ~204, the same number, now for the right reason.
+const MB_PER_TILE = 2;
+tileManager.maxActiveTiles = Math.floor((cacheBudget / (1024 * 1024) / MB_PER_TILE) * 0.8);
 tileManager.buildingSourceZoom = config.buildingSourceZoom;
 tileManager.prefetchLookaheadSec = config.prefetchLookahead;
 tileManager.prefetchSamples = config.prefetchSamples;

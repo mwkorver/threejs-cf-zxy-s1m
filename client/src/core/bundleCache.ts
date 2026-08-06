@@ -29,7 +29,28 @@ export class BundleCache {
    *   it instead of disposed. Eviction skips pinned keys, so a released
    *   texture is never one a live mesh still renders.
    */
-  constructor(readonly byteBudget: number, private readonly texturePool?: TexturePool) {}
+  constructor(private byteBudgetValue: number, private readonly texturePool?: TexturePool) {}
+
+  get byteBudget(): number {
+    return this.byteBudgetValue;
+  }
+
+  /**
+   * Narrow or widen the share of the GPU budget bundles may hold.
+   *
+   * Bundles are not the only thing on the GPU: building geometry belongs to the
+   * tile mesh, so this cache cannot see it. TileManager keeps this at the total
+   * budget minus live building bytes, which is what makes the two together
+   * respect one ceiling. Without it the cache read 254.9 MB of 256 while real
+   * usage was 390 MB, and so never evicted hard enough.
+   *
+   * Evicts immediately on shrink, so lowering it takes effect now rather than
+   * at the next put().
+   */
+  setByteBudget(bytes: number, pinnedKeys?: Set<string>): void {
+    this.byteBudgetValue = Math.max(0, bytes);
+    this.evict(pinnedKeys);
+  }
 
   get(key: string): Bundle | undefined {
     const bundle = this.map.get(key);

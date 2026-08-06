@@ -119,6 +119,11 @@ export class TileManager {
    * Tracked so it is at least visible rather than invisible.
    */
   private buildingBytes = 0;
+  /**
+   * The whole GPU budget, shared between bundles and building geometry. Set
+   * from BundleCache's initial budget, since that is where main.ts declares it.
+   */
+  private totalGpuBudget = 0;
 
   // Footprint overlay. The full S1M+usgs13 set (~360 KB gzipped) is fetched once
   // from the static /footprints/*.json files and held in memory; the mesh is
@@ -213,7 +218,11 @@ export class TileManager {
     readonly maxZoom = 18,
     readonly lodFactor = 2.2,
     readonly cullTiles = true
-  ) {}
+  ) {
+    // The cache's starting budget is the whole GPU budget; from here on it only
+    // gets the share buildings are not using.
+    this.totalGpuBudget = bundleCache.byteBudget;
+  }
 
   /**
    * Update active tiles and LOD based on camera position (relative to worldAnchor) and frustum.
@@ -777,6 +786,7 @@ export class TileManager {
     const bMesh = node.mesh?.getObjectByName("buildingMesh") as THREE.Mesh | undefined;
     if (!bMesh) return;
     this.buildingBytes -= buildingGeometryBytes(bMesh.geometry);
+    this.rebalanceGpuBudget();
     bMesh.geometry.dispose();
     const mats = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
     mats[0]?.dispose(); // walls only; mats[1] is the shared terrain material
@@ -1268,6 +1278,7 @@ export class TileManager {
       bMesh.visible = this.showBuildings;
       mesh.add(bMesh);
       this.buildingBytes += buildingGeometryBytes(buildingGeometry);
+      this.rebalanceGpuBudget();
     }
 
     mesh.position.set(
@@ -1281,7 +1292,20 @@ export class TileManager {
     node.gridSize = bundle.gridSize;
   }
 
-  /** Live building geometry in bytes. Outside the BundleCache budget -- see the field. */
+  /**
+   * Hand BundleCache whatever the buildings are not using.
+   *
+   * One ceiling, two consumers. Bundles cannot see building geometry, so
+   * without this the cache evicts against a number that ignores a third of
+   * actual GPU use -- measured at 254.9 MB of bundles beside 135.6 MB of
+   * buildings, i.e. 390 MB against a budget reading 99.6% of 256.
+   */
+  private rebalanceGpuBudget(): void {
+    if (this.totalGpuBudget <= 0) return;
+    this.bundleCache.setByteBudget(this.totalGpuBudget - this.buildingBytes, this.activeKeys);
+  }
+
+  /** Live building geometry in bytes. Shares the GPU budget with BundleCache. */
   public getBuildingBytes(): number {
     return this.buildingBytes;
   }
