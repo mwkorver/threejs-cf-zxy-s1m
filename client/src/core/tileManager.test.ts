@@ -1051,3 +1051,66 @@ describe("TileManager parent fallback retention and memory safety", () => {
 
 
 
+
+// ---- GPU budget rebalance safety ----
+
+describe("TileManager GPU budget rebalance", () => {
+  // Regression: rebalancing mid-traversal evicted against a half-rebuilt pin
+  // set, releasing textures still on screen. Because TexturePool recycles the
+  // THREE.Texture object, the freed one was handed to another tile -- the
+  // source tile went black and the recipient rendered the wrong imagery.
+  it("never evicts against a partially rebuilt pin set", async () => {
+    const tm = makeManager({ maxZoom: 14, cullTiles: true });
+    const cache = (tm as any).bundleCache as BundleCache;
+
+    // Record the pin set size at every eviction the frame triggers.
+    const pinnedSizes: number[] = [];
+    const origSet = cache.setByteBudget.bind(cache);
+    cache.setByteBudget = (bytes: number, pinned?: Set<string>) => {
+      pinnedSizes.push(pinned ? pinned.size : -1);
+      return origSet(bytes, pinned);
+    };
+
+    const cam = new THREE.PerspectiveCamera(60, 1.6, 1, 1e9);
+    cam.up.set(0, 0, 1);
+    cam.position.set(0, 0, 2000);
+    cam.lookAt(0, 1, 0);
+    cam.updateMatrixWorld(true);
+    tm.update(cam.position.clone(), cam);
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Give loaded nodes building geometry, so pruning one moves buildingBytes.
+    let planted = 0;
+    for (const root of (tm as any).rootNodes.values()) {
+      // Culled roots are the ones that get pruned, and they never loaded a
+      // mesh of their own -- give them one so the disposal path is reachable.
+      if (!root.mesh) {
+        root.mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(1, 1),
+          new THREE.MeshBasicMaterial(),
+        );
+      }
+      const bMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        [new THREE.MeshLambertMaterial(), new THREE.MeshBasicMaterial()],
+      );
+      bMesh.name = "buildingMesh";
+      root.mesh.add(bMesh);
+      (tm as any).buildingBytes += 1024 * 1024;
+      planted++;
+    }
+    expect(planted).toBeGreaterThan(0);
+
+    pinnedSizes.length = 0;
+    // Over the tile cap, updateNode hard-prunes frustum-culled nodes from
+    // inside the walk -- the path that reaches disposeBuildingMesh mid-rebuild.
+    tm.maxActiveTiles = 1;
+    tm.update(cam.position.clone(), cam);
+
+    const finalPinned = tm.getActiveKeys().size;
+    expect(pinnedSizes.length).toBeGreaterThan(0); // the rebalance did run
+    for (const size of pinnedSizes) {
+      expect(size).toBe(finalPinned);
+    }
+  });
+});

@@ -124,6 +124,12 @@ export class TileManager {
    * from BundleCache's initial budget, since that is where main.ts declares it.
    */
   private totalGpuBudget = 0;
+  /**
+   * Set when buildingBytes moves, cleared when the budget is reapplied. Exists
+   * because the byte change and the eviction it implies must happen at
+   * different times -- see rebalanceGpuBudget.
+   */
+  private buildingBudgetDirty = false;
 
   // Footprint overlay. The full S1M+usgs13 set (~360 KB gzipped) is fetched once
   // from the static /footprints/*.json files and held in memory; the mesh is
@@ -434,6 +440,15 @@ export class TileManager {
           this.updateTransitionNode(node, cameraPosGlobal, frustum);
         }
       }
+    }
+
+    // 6b. Settle the GPU budget now the walk is done and activeKeys is whole
+    // again. Every live mesh is pinned at this point, so eviction can only take
+    // bundles nothing renders -- the precondition TexturePool recycling relies
+    // on. Doing this inside the walk is what put another tile's imagery on
+    // screen and blacked out the tile it was taken from.
+    if (this.buildingBudgetDirty) {
+      this.rebalanceGpuBudget();
     }
 
     // 7. Update scene visibility & sync mesh additions/removals
@@ -786,7 +801,9 @@ export class TileManager {
     const bMesh = node.mesh?.getObjectByName("buildingMesh") as THREE.Mesh | undefined;
     if (!bMesh) return;
     this.buildingBytes -= buildingGeometryBytes(bMesh.geometry);
-    this.rebalanceGpuBudget();
+    // Deferred, not applied here: pruneNode reaches this from inside update()'s
+    // tree walk, when activeKeys is only half rebuilt -- see rebalanceGpuBudget.
+    this.buildingBudgetDirty = true;
     bMesh.geometry.dispose();
     const mats = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
     mats[0]?.dispose(); // walls only; mats[1] is the shared terrain material
@@ -1278,7 +1295,9 @@ export class TileManager {
       bMesh.visible = this.showBuildings;
       mesh.add(bMesh);
       this.buildingBytes += buildingGeometryBytes(buildingGeometry);
-      this.rebalanceGpuBudget();
+      // Deferred for the same reason as the disposal side: settled once per
+      // frame in update(), where the pin set is known to be complete.
+      this.buildingBudgetDirty = true;
     }
 
     mesh.position.set(
@@ -1299,9 +1318,21 @@ export class TileManager {
    * without this the cache evicts against a number that ignores a third of
    * actual GPU use -- measured at 254.9 MB of bundles beside 135.6 MB of
    * buildings, i.e. 390 MB against a budget reading 99.6% of 256.
+   *
+   * MUST NOT be called mid-traversal. Eviction's one safety rule is that a
+   * pinned key is never evicted, and update() clears activeKeys before walking
+   * the tree, so during the walk the pin set is only partially rebuilt. Evicting
+   * against it releases textures out from under meshes that are still on screen
+   * -- and because TexturePool recycles the THREE.Texture object, the next
+   * acquire() hands that same object to a different tile: the released tile goes
+   * black (release() closes the ImageBitmap and nulls .image) and the tile that
+   * got it renders another tile's imagery. Callers that fire during the walk
+   * (pruneNode -> disposeBuildingMesh) set buildingBudgetDirty instead, and
+   * update() settles it below once the pin set is whole again.
    */
   private rebalanceGpuBudget(): void {
     if (this.totalGpuBudget <= 0) return;
+    this.buildingBudgetDirty = false;
     this.bundleCache.setByteBudget(this.totalGpuBudget - this.buildingBytes, this.activeKeys);
   }
 
