@@ -22,7 +22,7 @@ infra/cdk.out/
 cdk.context.json
 
 # Dev tile access key — single source of truth, mirrored into
-# client/.env.local by infra/deploy-edge.sh. Never commit either.
+# client/.env.local by infra/deploy.sh. Never commit either.
 .tile-key
 .env.local
 *.local

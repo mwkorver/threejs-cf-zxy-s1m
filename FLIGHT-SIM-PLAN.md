@@ -15,7 +15,7 @@ shaped the way it is, and that reasoning is still the interesting part.
 was never built. Individual sections are annotated where they say something no
 longer true.
 
-Last reconciled against the code: **2026-08-06**.
+Last reconciled against the code: **2026-08-09**.
 
 ---
 

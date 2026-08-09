@@ -58,19 +58,14 @@ describe("hysteresis-band roots are bounded by time", () => {
     const cam = camera();
 
     const roots: number[] = [];
-    const active: number[] = [];
     for (let deg = 0; deg <= 360; deg += 15) {
       look(tm, cam, deg);
       roots.push((tm as any).rootNodes.size);
-      active.push(tm.getActiveKeys().size);
     }
-    const maxRoots = Math.max(...roots);
-    const maxActive = Math.max(...active);
-    console.log(`TTL ON   maxRoots=${maxRoots}  maxActive=${maxActive}`);
 
-    // The 5x5 grid plus whatever band roots are still genuinely in view.
-    expect(maxRoots).toBeLessThanOrEqual(36);
-    expect(maxRoots).toBeLessThan(36); // strictly better than the old ceiling
+    // 36 was the old ceiling: the 5x5 grid plus a trail nothing collected.
+    // What survives now is the grid plus band roots still genuinely in view.
+    expect(Math.max(...roots)).toBeLessThan(36);
   });
 
   it("keeps a band root that is still on screen", () => {
@@ -89,7 +84,6 @@ describe("hysteresis-band roots are bounded by time", () => {
       if ((tm as any).isNodeVisible(node, frustum)) visibleBand++;
     }
     // Far-field coverage is not sacrificed: in-view roots survive a TTL of 0.
-    console.log(`in-view roots retained with TTL 0: ${visibleBand}`);
     expect(visibleBand).toBeGreaterThan(0);
   });
 
@@ -122,7 +116,6 @@ describe("at the shipped TTL, with a controlled clock", () => {
         look(tm, cam, deg);
       }
       const afterTurn = (tm as any).rootNodes.size;
-      const activeAfterTurn = tm.getActiveKeys().size;
 
       // Now park, exactly as the report did (SPEED: 0), and let time pass.
       for (let i = 0; i < 10; i++) {
@@ -130,12 +123,8 @@ describe("at the shipped TTL, with a controlled clock", () => {
         look(tm, cam, 360);
       }
       const afterSettle = (tm as any).rootNodes.size;
-      const activeAfterSettle = tm.getActiveKeys().size;
 
-      console.log(
-        `DEFAULT TTL  turning: roots=${afterTurn} active=${activeAfterTurn}` +
-          `  ->  parked: roots=${afterSettle} active=${activeAfterSettle}`,
-      );
+      // Turning built the trail up; parking collects it. Measured 36 -> 26.
       expect(afterSettle).toBeLessThan(afterTurn);
       expect(afterSettle).toBeGreaterThanOrEqual(25); // grid intact
     } finally {

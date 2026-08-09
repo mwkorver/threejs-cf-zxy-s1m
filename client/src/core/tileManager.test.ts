@@ -509,8 +509,7 @@ describe("TileManager frustum culling", () => {
     // Verify some root nodes subdivided and created children
     const { rootNodes } = internals(tm);
     let hasChildren = false;
-    for (const [key, node] of rootNodes.entries()) {
-      console.log(`Node ${key}: hasChildren=${!!node.children}, visible=${node.visible}`);
+    for (const node of rootNodes.values()) {
       if (node.children && node.children.length > 0) {
         hasChildren = true;
         break;

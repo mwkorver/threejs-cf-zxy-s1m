@@ -23,9 +23,11 @@ terrain, with the telemetry and terrain-overlay panel open](docs/hero.jpg)
 Wind River country, Wyoming. NAIP aerial imagery draped on 1 m S1M terrain, both
 streamed as `z/x/y` WebP tiles. Vertical exaggeration is **1.5×**, the panel's
 default, so relief reads steeper than truth. The counters are a live flight, not
-a cold load: 210 tiles resident against a 256 MB GPU budget, 1,028 tiles
-prefetched along the flight vector, and 1,463 of 2,570 tile textures served by
-recycling rather than allocation.</sub>
+a cold load: 1,028 tiles prefetched along the flight vector, and 1,463 of 2,570
+tile textures served by recycling rather than allocation. They are also a
+capture of an older build — the GPU budget has since gone to 512 MB, and the
+210-against-204 tile count in the shot is the working-set overrun that
+[`67e94a9`](../../commit/67e94a9) fixed.</sub>
 
 What's built today: a camera you can fly over 1-meter S1M terrain, centered on
 the Wyoming S1M tile group, with server tiles end-to-end. Everything below —
