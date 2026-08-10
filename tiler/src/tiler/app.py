@@ -4,6 +4,7 @@ Deliberately tiny and rigid — path parameters only, no query strings, so
 CloudFront cache keys stay path-only and every tile is immutable.
 """
 
+import logging
 from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException, Response
@@ -16,6 +17,10 @@ from .registry import LAYERS
 from .resolver import MosaicResolver, DemIndexResolver
 from .settings import settings
 from .terrain import TransientTerrainError, render_farfield_tile, render_terrain_tile
+
+logger = logging.getLogger(__name__)
+# Lambda's root handler is already attached and defaults to WARNING; these are
+# warnings, so they surface without reconfiguring anyone else's logging.
 
 app = FastAPI(title="flight-sim tiler", version="0.0.1")
 
@@ -101,10 +106,17 @@ def basemap_tile(z: int, x: int, y: int) -> Response:
 
     try:
         body = render_basemap_tile(z, x, y, tilesize=settings.tile_size)
-    except TransientBasemapError:
+    except TransientBasemapError as exc:
         # Upstream fetch failed transiently — 503 so the client retries and this
         # immutable tile isn't cached with a hole. (CloudFront error-caches 5xx
         # ~10s by default; the client's fetchTile backs off and retries 503.)
+        #
+        # Logged with the reason attached. _fetch_child records exactly why it
+        # gave up -- "HTTP 403", a timeout, a TLS reset -- and catching this bare
+        # threw that away, so a days-long outage looked identical from the
+        # outside whether USDA was down, rate-limiting, or blocking this account.
+        # That distinction is the whole question when imagery stops arriving.
+        logger.warning("basemap %d/%d/%d unavailable: %s", z, x, y, exc)
         raise HTTPException(503, "basemap upstream unavailable, retry", headers={"Retry-After": "2"})
     if body is None:
         raise HTTPException(404, "no coverage")
@@ -160,10 +172,11 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
     if body is None:
         try:
             body = render_farfield_tile(z, x, y, tilesize=settings.tile_size)
-        except TransientTerrainError:
+        except TransientTerrainError as exc:
             # A child fetch failed transiently — 503 so the client retries and
             # this immutable tile isn't cached with a sea-level hole (same
-            # contract as the basemap endpoint).
+            # contract as the basemap endpoint, including logging the reason).
+            logger.warning("terrain %d/%d/%d unavailable: %s", z, x, y, exc)
             raise HTTPException(503, "terrain upstream unavailable, retry", headers={"Retry-After": "2"})
         dem_source = "farfield"
 
