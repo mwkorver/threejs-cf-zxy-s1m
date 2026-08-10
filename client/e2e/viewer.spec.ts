@@ -84,13 +84,17 @@ test.describe("WebGL Flight Simulator Viewer UI & Controls", () => {
   test("Visual snapshot of WebGL canvas matches reference", async ({ page }) => {
     // Position camera deterministically for visual regression snapshot
     await page.evaluate(() => {
-      if (window.__VIEWER_STATE__) {
-        window.__VIEWER_STATE__.setCameraPos(0, -5000, 7700);
-      }
-      if (window.__STEP_FRAME__) {
-        window.__STEP_FRAME__(16.6);
-      }
+      window.__VIEWER_STATE__?.setCameraPos(0, -5000, 7700);
     });
+
+    // Wait for the tiles, rather than hoping one frame was enough. Stepping a
+    // single frame and screenshotting captured whatever had happened to arrive,
+    // so the baseline encoded one particular race. isSceneReady is true only
+    // once the tile pool is idle and every visible node has drawn.
+    await page.waitForFunction(() => window.__VIEWER_STATE__?.isSceneReady() === true, null, {
+      timeout: 30_000,
+    });
+    await page.evaluate(() => window.__STEP_FRAME__?.(16.6));
 
     // Capture visual snapshot of the canvas locator with tight pixel tolerance
     await expect(page.locator("canvas")).toHaveScreenshot("webgl-canvas-preset.png", {

@@ -10,6 +10,19 @@ declare global {
     getAltitudeFt: () => number;
     isHudVisible: () => boolean;
     stepFrame: (dtMs?: number) => void;
+    /** True once the tile pool is idle and every visible node has drawn. */
+    isSceneReady: () => boolean;
+    /**
+     * Live GPU resource counts straight off WebGLRenderer.info, for leak
+     * assertions. `textures` and `geometries` are what three.js currently holds
+     * on the GPU; they fall only when something is disposed.
+     */
+    getRendererInfo: () => {
+      geometries: number;
+      textures: number;
+      calls: number;
+      triangles: number;
+    };
   }
 
   interface Window {

@@ -566,6 +566,30 @@ export class TileManager {
     return this.prefetchTotal;
   }
 
+  /**
+   * Whether everything the current view needs has arrived and been drawn.
+   *
+   * Two conditions, and both are needed. The worker pool having nothing
+   * outstanding says no tile is still coming; every visible node being loaded
+   * says what did arrive is actually on screen. Checking only the pool passes
+   * during the gap between a response and the mesh being built, and checking
+   * only the nodes passes before the requests have even been enqueued.
+   *
+   * The pool count includes prefetch, since prefetch goes through the same
+   * queue. That is fine for a camera at rest, where prefetch velocity decays
+   * and the queue drains -- which is the state a test waits in. It does mean
+   * this will not read ready during sustained flight, so treat it as "settled",
+   * not as "enough is on screen to look at".
+   */
+  isSceneReady(): boolean {
+    if (this.workerPool.outstanding() > 0) return false;
+    if (this.transitionNodes.size > 0) return false;
+    for (const node of this.visibleNodesList) {
+      if (!node.loaded) return false;
+    }
+    return this.visibleNodesList.length > 0;
+  }
+
   /** @returns true if the node was frustum-culled (renders nothing on screen). */
   private updateNode(node: TileNode, cameraPosGlobal: THREE.Vector3, frustum?: THREE.Frustum): boolean {
     // Per-tile ground→world Z scale at the tile's center latitude.

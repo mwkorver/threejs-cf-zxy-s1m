@@ -42,6 +42,16 @@ export class TileWorkerPool {
   private nextRequestId = 0;
   private isFallback = false;
 
+  /**
+   * Tiles queued or in flight. Zero means the pool has nothing left to deliver,
+   * which is what lets a test wait on the scene settling instead of guessing at
+   * a timeout. Counts both maps: a task moves from pending to running when it
+   * is dispatched, and is removed from running when the worker responds.
+   */
+  outstanding(): number {
+    return this.pendingTasks.size + this.runningTasks.size;
+  }
+
   constructor() {
     this.isFallback = typeof Worker === "undefined";
     if (this.isFallback) {

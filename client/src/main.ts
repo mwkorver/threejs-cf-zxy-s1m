@@ -110,6 +110,7 @@ let lastFrameTime = performance.now();
 let fpsFrameCount = 0;
 let fpsLastTime = performance.now();
 let currentFps = 60;
+let hudPrimed = false;
 /** How often the DOM HUD is rewritten, and the window the FPS figure averages over. */
 const HUD_UPDATE_MS = 250;
 
@@ -145,9 +146,17 @@ function frameLoop() {
   // updateCompass directly, so the rose keeps rotating smoothly, and
   // __VIEWER_STATE__ reads live state through getters rather than anything the
   // HUD publishes.
+  // Primed on the very first frame regardless of the interval: otherwise the
+  // panel sits on the placeholder zeroes baked into its markup for the first
+  // quarter second, and anything sampling it in that window -- a test, a
+  // screenshot -- reads "0" instead of the real figures. FPS is not computed on
+  // that frame, since there is no elapsed window to average over yet.
   fpsFrameCount++;
-  if (now - fpsLastTime >= HUD_UPDATE_MS) {
-    currentFps = Math.round((fpsFrameCount * 1000) / (now - fpsLastTime));
+  if (!hudPrimed || now - fpsLastTime >= HUD_UPDATE_MS) {
+    if (hudPrimed) {
+      currentFps = Math.round((fpsFrameCount * 1000) / (now - fpsLastTime));
+    }
+    hudPrimed = true;
     fpsFrameCount = 0;
     fpsLastTime = now;
 
@@ -190,6 +199,13 @@ if (config.testMode) {
     stepFrame: (_dtMs = 16.6) => {
       sceneCtx.renderer.render(sceneCtx.scene, sceneCtx.camera);
     },
+    isSceneReady: () => tileManager.isSceneReady(),
+    getRendererInfo: () => ({
+      geometries: sceneCtx.renderer.info.memory.geometries,
+      textures: sceneCtx.renderer.info.memory.textures,
+      calls: sceneCtx.renderer.info.render.calls,
+      triangles: sceneCtx.renderer.info.render.triangles,
+    }),
   };
   window.__STEP_FRAME__ = (_dtMs = 16.6) => {
     sceneCtx.renderer.render(sceneCtx.scene, sceneCtx.camera);
