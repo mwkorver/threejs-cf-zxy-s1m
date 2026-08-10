@@ -1129,6 +1129,15 @@ export class TileManager {
       const capturedTile = { ...tile };
       this.workerPool.requestTile(capturedTile, priority, options)
         .then((res) => {
+          // The guards above ran before this went out. The camera may have
+          // arrived since, in which case triggerLoad already loaded this tile
+          // and built a mesh from it -- and replacing that entry would recycle
+          // a texture still on screen. The tile is already there, so the
+          // result is redundant; drop it and close its bitmap.
+          if (this.bundleCache.get(capturedKey)) {
+            res.imageBitmap?.close();
+            return;
+          }
           const bundle = this.buildBundleFromResult(capturedKey, capturedTile, res);
           this.bundleCache.put(bundle, this.activeKeys);
         })
@@ -1207,6 +1216,11 @@ export class TileManager {
       const capturedTile = { ...tile };
       this.workerPool.requestTile(capturedTile, 1e8, options)
         .then((res) => {
+          // Same race as the velocity prefetch above.
+          if (this.bundleCache.get(capturedKey)) {
+            res.imageBitmap?.close();
+            return;
+          }
           const bundle = this.buildBundleFromResult(capturedKey, capturedTile, res);
           this.bundleCache.put(bundle, this.activeKeys);
         })

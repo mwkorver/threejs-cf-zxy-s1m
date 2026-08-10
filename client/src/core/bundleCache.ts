@@ -62,12 +62,29 @@ export class BundleCache {
     return bundle;
   }
 
+  /**
+   * @param pinnedKeys keys whose bundles something may still be rendering.
+   *   Honoured when REPLACING an entry as well as when evicting: see below.
+   */
   put(bundle: Bundle, pinnedKeys?: Set<string>): void {
     const existing = this.map.get(bundle.key);
     if (existing) {
       this.map.delete(bundle.key);
       this.currentBytes -= existing.bytes;
-      this.disposeBundle(existing);
+      // Replacing is not a licence to free. Eviction has always spared pinned
+      // keys; this path did not, and it is reached routinely -- a prefetch
+      // in flight when the camera arrives lands here just after triggerLoad
+      // built a mesh from the entry being replaced. disposeBundle would hand
+      // that mesh's texture back to TexturePool, which nulls its image and
+      // gives the same object to the next tile that asks: the live tile goes
+      // black and another draws its imagery.
+      //
+      // The dropped bundle is not recycled, only released to GC -- one texture
+      // that misses the pool rather than one that corrupts two tiles. The mesh
+      // still holds it, and picks up the new bundle when it is next rebuilt.
+      if (!pinnedKeys?.has(bundle.key)) {
+        this.disposeBundle(existing);
+      }
     }
 
     this.map.set(bundle.key, bundle);
