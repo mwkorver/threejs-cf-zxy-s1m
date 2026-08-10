@@ -1435,6 +1435,26 @@ export class TileManager {
     node: TileNode,
     bundle: Bundle
   ): void {
+    // Retire the mesh this one replaces, before node.mesh stops pointing at it.
+    //
+    // syncScene only ever adds and removes node.mesh, so a mesh still in the
+    // scene when node.mesh is reassigned is orphaned: nothing holds a reference
+    // that can take it out again, and it draws for the rest of the session --
+    // in the same footprint as its replacement, which is the mottled "camo"
+    // z-fight the LOD swap logic works so hard to avoid elsewhere.
+    //
+    // Nothing reached this before imagery retries: a loaded node never
+    // reloaded, so every node was built exactly once. The material is disposed
+    // because this mesh owns it; the texture is NOT, because the bundle owns
+    // that and TexturePool recycles it.
+    if (node.mesh) {
+      this.disposeBuildingMesh(node); // reads node.mesh, so before reassignment
+      if (node.mesh.parent === this.scene) {
+        this.scene.remove(node.mesh);
+      }
+      (node.mesh.material as THREE.Material).dispose();
+    }
+
     const geom = bundle.geometry;
     const texture = bundle.texture;
     let demSourceVal = 0.0;

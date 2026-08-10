@@ -165,3 +165,35 @@ describe("a tile whose load fails outright", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("rebuilding a node that already has a mesh", () => {
+  // syncScene only ever adds/removes node.mesh, so a mesh left in the scene
+  // when node.mesh is reassigned can never be removed again. It kept drawing
+  // in the same footprint as its replacement -- the mottled z-fight the LOD
+  // swap logic avoids everywhere else.
+  it("leaves exactly one mesh in the scene", async () => {
+    const tm = makeTm();
+    const scene = (tm as any).scene as THREE.Scene;
+    stubPool(tm, () => Promise.resolve(resultWithoutImagery(true)));
+    const n = node();
+
+    (tm as any).triggerLoad(n, 0);
+    await new Promise((r) => setTimeout(r, 0));
+    n.visible = true;
+    (tm as any).syncScene(n);
+
+    const first = n.mesh;
+    expect(scene.children).toContain(first);
+
+    // The retry rebuilds the tile with a fresh bundle.
+    n.retryAfter = performance.now() - 1;
+    (tm as any).triggerLoad(n, 0);
+    await new Promise((r) => setTimeout(r, 0));
+    n.visible = true;
+    (tm as any).syncScene(n);
+
+    expect(n.mesh).not.toBe(first);
+    expect(scene.children).not.toContain(first); // the old one is gone
+    expect(scene.children.filter((c) => c instanceof THREE.Mesh)).toHaveLength(1);
+  });
+});
