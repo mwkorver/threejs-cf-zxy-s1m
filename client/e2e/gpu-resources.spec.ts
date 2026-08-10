@@ -80,17 +80,26 @@ test.describe("GPU resource lifetime", () => {
 
   test("geometries are released when the working set moves on", async ({ page }) => {
     await open(page);
+    const capText = (await page.locator("#hud-tiles").textContent()) ?? "";
+    const maxActiveTiles = Number(capText.split("/")[1]?.trim());
+    expect(maxActiveTiles).toBeGreaterThan(0);
 
-    await flyTo(page, 0, -5000, 7700);
-    const near = await info(page);
-    expect(near.calls).toBeGreaterThan(0); // it is actually drawing
+    // A tile can hold terrain geometry and building geometry, and the LOD keeps
+    // at most maxActiveTiles of them -- so that is the bound, whatever a given
+    // run happens to load. Measured against a moment-in-time reading instead,
+    // this was flaky: both sides of the comparison move.
+    const ceiling = maxActiveTiles * 2 + NON_TILE_SLACK;
 
-    // Somewhere else entirely, then back. Geometry held by tiles long out of
-    // view would show up as a floor that only ever rises.
-    await flyTo(page, 120_000, 90_000, 9000);
-    await flyTo(page, 0, -5000, 7700);
-    const returned = await info(page);
+    expect((await info(page)).calls).toBeGreaterThan(0); // it is actually drawing
 
-    expect(returned.geometries).toBeLessThanOrEqual(near.geometries * 2);
+    // Away and back, repeatedly. Geometry belonging to tiles long out of view
+    // would accumulate across the cycles and breach the bound.
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await flyTo(page, 0, -5000, 7700);
+      expect((await info(page)).geometries).toBeLessThanOrEqual(ceiling);
+
+      await flyTo(page, 120_000, 90_000, 9000);
+      expect((await info(page)).geometries).toBeLessThanOrEqual(ceiling);
+    }
   });
 });

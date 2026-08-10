@@ -1,4 +1,18 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+
+/**
+ * Wait for `n` frames to actually render, rather than for a wall-clock delay.
+ * A CI runner has no GPU and rasterises in software, so a fixed delay covers a
+ * wildly different amount of work there than it does on a developer's machine.
+ */
+async function advanceFrames(page: Page, n: number): Promise<void> {
+  const start = await page.evaluate(() => window.__VIEWER_STATE__?.getFrameCount() ?? 0);
+  await page.waitForFunction(
+    ([from, want]) => (window.__VIEWER_STATE__?.getFrameCount() ?? 0) >= from! + want!,
+    [start, n] as const,
+    { timeout: 30_000 },
+  );
+}
 
 test.describe("WebGL Tile Coverage Gaps & GPU Memory Pressure Tests", () => {
   test("Canvas maintains 0% void gaps during rapid scroll zoom with network latency", async ({ page }) => {
@@ -25,7 +39,7 @@ test.describe("WebGL Tile Coverage Gaps & GPU Memory Pressure Tests", () => {
     await canvas.hover();
     for (let i = 0; i < 5; i++) {
       await page.mouse.wheel(0, -300);
-      await page.waitForTimeout(50);
+      await advanceFrames(page, 3);
     }
 
     // Force frame step
@@ -102,8 +116,10 @@ test.describe("WebGL Tile Coverage Gaps & GPU Memory Pressure Tests", () => {
     const cacheMemoryReadouts: number[] = [];
 
     for (let step = 0; step < 10; step++) {
-      await page.waitForTimeout(100);
-      await page.evaluate(() => window.__STEP_FRAME__?.(100));
+      // Sampled per rendered frames, not per millisecond: this runs during
+      // sustained flight, where isSceneReady is never true by design, so frames
+      // are the only cadence that means the same thing on every machine.
+      await advanceFrames(page, 6);
 
       const cacheText = await page.locator("#hud-cache").textContent();
       const mb = parseFloat(cacheText ?? "0");

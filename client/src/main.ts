@@ -111,6 +111,13 @@ let fpsFrameCount = 0;
 let fpsLastTime = performance.now();
 let currentFps = 60;
 let hudPrimed = false;
+/**
+ * Frames actually rendered since load. Tests wait on this rather than on
+ * wall-clock: a headless CI runner has no GPU and rasterises in software, where
+ * a fixed delay can cover almost no frames at all and an assertion about motion
+ * measures the renderer's speed instead of the thing under test.
+ */
+let framesRendered = 0;
 /** How often the DOM HUD is rewritten, and the window the FPS figure averages over. */
 const HUD_UPDATE_MS = 250;
 
@@ -134,6 +141,7 @@ function frameLoop() {
 
   tileManager.update(sceneCtx.camera.position, sceneCtx.camera);
   sceneCtx.renderer.render(sceneCtx.scene, sceneCtx.camera);
+  framesRendered++;
 
   // The HUD is DOM, not WebGL: updateHUD writes eight textContent values, and
   // at frame rate that is ~480 layout-dirtying writes a second to show numbers
@@ -200,6 +208,7 @@ if (config.testMode) {
       sceneCtx.renderer.render(sceneCtx.scene, sceneCtx.camera);
     },
     isSceneReady: () => tileManager.isSceneReady(),
+    getFrameCount: () => framesRendered,
     getRendererInfo: () => ({
       geometries: sceneCtx.renderer.info.memory.geometries,
       textures: sceneCtx.renderer.info.memory.textures,

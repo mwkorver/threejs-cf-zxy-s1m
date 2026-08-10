@@ -12,6 +12,8 @@ declare global {
     stepFrame: (dtMs?: number) => void;
     /** True once the tile pool is idle and every visible node has drawn. */
     isSceneReady: () => boolean;
+    /** Frames rendered since load. Wait on this, not on wall-clock. */
+    getFrameCount: () => number;
     /**
      * Live GPU resource counts straight off WebGLRenderer.info, for leak
      * assertions. `textures` and `geometries` are what three.js currently holds

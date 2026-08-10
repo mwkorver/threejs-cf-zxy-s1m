@@ -36,6 +36,37 @@ jobs:
       # pool, and the shared tile-URL routing. No network: tileLoader is mocked.
       - run: npm --prefix client test
 
+  e2e:
+    name: playwright (WebGL in a real browser)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      # Chromium only -- the suite declares a single project, and the other
+      # browsers are a download this never uses.
+      - run: npx playwright install --with-deps chromium
+      # What vitest cannot reach: a real WebGL context, tiles actually loading,
+      # and renderer.info showing whether GPU resources come back. Tile requests
+      # are stubbed in-test, so this is hermetic. The runner has no GPU and
+      # rasterises in software, which is why nothing here waits on wall-clock --
+      # the tests advance by rendered frames. The one snapshot test skips itself
+      # when CI is set: its baseline is a picture of a specific GPU.
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: client/playwright-report/
+          retention-days: 7
+
   tiler:
     name: ruff · pytest (Python tiler)
     runs-on: ubuntu-latest
