@@ -110,6 +110,8 @@ let lastFrameTime = performance.now();
 let fpsFrameCount = 0;
 let fpsLastTime = performance.now();
 let currentFps = 60;
+/** How often the DOM HUD is rewritten, and the window the FPS figure averages over. */
+const HUD_UPDATE_MS = 250;
 
 function frameLoop() {
   requestAnimationFrame(frameLoop);
@@ -132,34 +134,45 @@ function frameLoop() {
   tileManager.update(sceneCtx.camera.position, sceneCtx.camera);
   sceneCtx.renderer.render(sceneCtx.scene, sceneCtx.camera);
 
+  // The HUD is DOM, not WebGL: updateHUD writes eight textContent values, and
+  // at frame rate that is ~480 layout-dirtying writes a second to show numbers
+  // that flicker too fast to read. It rides the FPS counter's existing cadence
+  // instead -- which is why that interval was already here. Everything feeding
+  // it is sampled inside the same branch, so the per-frame cost drops to the
+  // clock comparison.
+  //
+  // Deliberately not on this path: the compass. flightController calls
+  // updateCompass directly, so the rose keeps rotating smoothly, and
+  // __VIEWER_STATE__ reads live state through getters rather than anything the
+  // HUD publishes.
   fpsFrameCount++;
-  if (now - fpsLastTime >= 250) {
+  if (now - fpsLastTime >= HUD_UPDATE_MS) {
     currentFps = Math.round((fpsFrameCount * 1000) / (now - fpsLastTime));
     fpsFrameCount = 0;
     fpsLastTime = now;
+
+    const globalX = sceneCtx.camera.position.x + config.worldAnchor[0];
+    const globalY = sceneCtx.camera.position.y + config.worldAnchor[1];
+    const [lon, lat] = mercatorToLonLat(globalX, globalY);
+    const pool = texturePool.stats();
+
+    hudCtx.updateHUD({
+      fps: currentFps,
+      lat,
+      lon,
+      altitude: sceneCtx.camera.position.z,
+      heading: 0,
+      speedKnots,
+      activeTiles: tileManager.getActiveKeys().size,
+      maxActiveTiles: tileManager.maxActiveTiles,
+      bytesUsed: bundleCache.bytesUsed(),
+      cacheBudget,
+      prefetchNow: tileManager.getLastPrefetchCount(),
+      prefetchTotal: tileManager.getPrefetchTotal(),
+      texCreated: pool.created,
+      texReused: pool.reused,
+    });
   }
-
-  const globalX = sceneCtx.camera.position.x + config.worldAnchor[0];
-  const globalY = sceneCtx.camera.position.y + config.worldAnchor[1];
-  const [lon, lat] = mercatorToLonLat(globalX, globalY);
-  const pool = texturePool.stats();
-
-  hudCtx.updateHUD({
-    fps: currentFps,
-    lat,
-    lon,
-    altitude: sceneCtx.camera.position.z,
-    heading: 0,
-    speedKnots,
-    activeTiles: tileManager.getActiveKeys().size,
-    maxActiveTiles: tileManager.maxActiveTiles,
-    bytesUsed: bundleCache.bytesUsed(),
-    cacheBudget,
-    prefetchNow: tileManager.getLastPrefetchCount(),
-    prefetchTotal: tileManager.getPrefetchTotal(),
-    texCreated: pool.created,
-    texReused: pool.reused,
-  });
 }
 
 // 6. Test state hooks for Playwright & automated UI testing
