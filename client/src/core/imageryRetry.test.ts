@@ -197,3 +197,23 @@ describe("rebuilding a node that already has a mesh", () => {
     expect(scene.children.filter((c) => c instanceof THREE.Mesh)).toHaveLength(1);
   });
 });
+
+describe("imagery cache provenance", () => {
+  // The viewer looked healthy while every imagery tile was days-old CDN cache
+  // and the origin was 503ing. Without this the difference is invisible.
+  it("passes the cache state into the baked label", () => {
+    const tm = makeTm();
+    const seen: string[] = [];
+    (tm as any).bakeTileLabel = (_bmp: unknown, _tile: unknown, cache: string) => {
+      seen.push(cache);
+      return { width: 8, height: 8 };
+    };
+
+    for (const state of ["hit", "miss", "unknown"] as const) {
+      const res = { ...(resultWithoutImagery(false) as any), imageBitmap: { width: 8, height: 8 }, imageryCache: state };
+      (tm as any).buildBundleFromResult(tileKey(TILE), TILE, res);
+    }
+
+    expect(seen).toEqual(["hit", "miss", "unknown"]);
+  });
+});

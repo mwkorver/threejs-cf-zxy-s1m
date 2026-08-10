@@ -19,6 +19,9 @@ import type { TerrainMesh } from "./terrainMesh";
 import type { ImageryRouting } from "./tileUrls";
 import type { BuildingRecord } from "./buildingMesh";
 
+/** Whether a tile's imagery came from the CDN edge or was baked on demand. */
+export type ImageryCacheState = "hit" | "miss" | "unknown";
+
 /**
  * Everything a tile load needs beyond the tile itself. Extends the imagery
  * routing contract so the worker's imageryRequest call and the pool's option
@@ -99,6 +102,13 @@ export interface WorkerTileSuccessResponse {
   buildingRecords: BuildingRecord[] | null;
   /** null when imagery 404s or failed transiently; the mesh is still good. */
   imageBitmap: ImageBitmap | null;
+  /**
+   * Where the imagery actually came from, read off CloudFront's `x-cache`:
+   * "hit" was already at the edge, "miss" means the origin baked it just now.
+   * "unknown" when the header is unreadable -- notably in dev, where the page
+   * is on localhost and the tiles are cross-origin.
+   */
+  imageryCache: ImageryCacheState;
   /**
    * Imagery failed in a way worth retrying (5xx, network), as opposed to a 404
    * that means there is genuinely nothing to draw. The tile renders untextured

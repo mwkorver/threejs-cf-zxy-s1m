@@ -20,7 +20,7 @@ import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js
 import { TileWorkerPool } from "./tileWorkerPool";
 import { BuildingCache } from "./buildingCache";
 import { buildTileBuildings } from "./buildingMesh";
-import type { TileLoadResult } from "./workerTypes";
+import type { ImageryCacheState, TileLoadResult } from "./workerTypes";
 
 
 /** Chebyshev radius of the root grid, in tiles: 2 gives the 5x5 grid. */
@@ -1123,7 +1123,7 @@ export class TileManager {
 
     let texture: THREE.Texture | undefined;
     if (imageBitmap) {
-      const branded = this.bakeTileLabel(imageBitmap, tile);
+      const branded = this.bakeTileLabel(imageBitmap, tile, res.imageryCache);
       texture = this.texturePool
         ? this.texturePool.acquire(branded as unknown as TexImageSource)
         : new THREE.CanvasTexture(branded as unknown as HTMLCanvasElement);
@@ -1969,7 +1969,11 @@ export class TileManager {
    * uploads but honors it for canvas uploads, so returning the canvas itself
    * would render the branded tile vertically flipped relative to plain ones.
    */
-  private bakeTileLabel(imageBitmap: ImageBitmap, tile: TileId): ImageBitmap {
+  private bakeTileLabel(
+    imageBitmap: ImageBitmap,
+    tile: TileId,
+    cache: ImageryCacheState = "unknown"
+  ): ImageBitmap {
     const brand = this.showSourceLabels ? this.imagerySourceLetter(tile.z) : null;
     const coords = this.showLabels ? `${tile.z}/${tile.x}/${tile.y}` : "";
     if (!brand && !coords) return imageBitmap;
@@ -1981,10 +1985,16 @@ export class TileManager {
 
     const head = coords + (coords && brand ? " - " : "");
     const tail = brand ? brand.ch : "";
+    // A dot after the source letter says whether the origin was actually asked.
+    // Green = the tiler baked this tile on demand; grey = CloudFront served it
+    // from the edge and the origin was never touched. Nothing when the header
+    // is unreadable, which is the cross-origin case in dev.
+    const mark = brand && cache !== "unknown" ? "\u2022" : "";
+    const markColor = cache === "miss" ? "#4ade80" : "#94a3b8";
     const margin = 14;
     let font = 100;
     ctx.font = `bold ${font}px monospace`;
-    const fullW = () => ctx.measureText(head + tail).width;
+    const fullW = () => ctx.measureText(head + tail + mark).width;
     const avail = c.width - 2 * margin;
     if (fullW() > avail) {
       font = Math.max(32, Math.floor((font * avail) / fullW()));
@@ -1995,7 +2005,11 @@ export class TileManager {
     ctx.textAlign = "left";
     let x = c.width - margin - fullW();
     const y = c.height - margin;
-    for (const [text, color] of [[head, "#ffffff"], [tail, brand?.color ?? "#ffffff"]] as const) {
+    for (const [text, color] of [
+      [head, "#ffffff"],
+      [tail, brand?.color ?? "#ffffff"],
+      [mark, markColor],
+    ] as const) {
       if (!text) continue;
       ctx.strokeText(text, x, y);
       ctx.fillStyle = color;

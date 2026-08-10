@@ -3,7 +3,7 @@ import { buildTerrainMesh, buildFlatMesh } from "./terrainMesh";
 import { buildingsRequest, imageryRequest, terrainRequest } from "./tileUrls";
 import { decodeBuildings, type BuildingRecord } from "./buildingMesh";
 
-import type { WorkerRequest, WorkerTileResponse } from "./workerTypes";
+import type { ImageryCacheState, WorkerRequest, WorkerTileResponse } from "./workerTypes";
 
 /**
  * `self` in a dedicated worker is a DedicatedWorkerGlobalScope, but that type
@@ -150,6 +150,10 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
     // Set when imagery failed transiently: the tile still draws, and
     // TileManager re-requests it later rather than settling for no texture.
     let imageryFailed = false;
+    // CloudFront reports "Hit from cloudfront" / "Miss from cloudfront" /
+    // "RefreshHit from cloudfront". A miss means the tiler generated this tile
+    // for real; a hit means the edge served it and the origin was never asked.
+    let imageryCache: ImageryCacheState = "unknown";
     const imageryPromise = (async (): Promise<ImageBitmap | null> => {
       try {
         // Routing (OSM / low-zoom USDA stitch / NAIP COG mosaic) and key
@@ -162,6 +166,12 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
           externalImageryMaxZoom,
         });
         const imgRes = await fetchTile(url, label, 5, signal);
+        const xCache = imgRes.headers.get("x-cache") ?? "";
+        if (xCache.includes("Hit")) {
+          imageryCache = "hit";
+        } else if (xCache.includes("Miss")) {
+          imageryCache = "miss";
+        }
         const imgBlob = await imgRes.blob();
         return await createImageBitmap(imgBlob);
       } catch (err) {
@@ -281,6 +291,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
       buildingRecords,
       imageBitmap,
       imageryPending: imageryFailed,
+      imageryCache,
       minElevation,
       maxElevation
     }, transferList);

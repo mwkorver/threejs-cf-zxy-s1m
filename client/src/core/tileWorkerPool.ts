@@ -262,6 +262,7 @@ export class TileWorkerPool {
         buildingRecords: data.buildingRecords,
         imageBitmap: data.imageBitmap,
         imageryPending: data.imageryPending,
+        imageryCache: data.imageryCache,
         minElevation: data.minElevation,
         maxElevation: data.maxElevation
       });
@@ -344,6 +345,9 @@ export class TileWorkerPool {
       // The fallback path lets loadImageryFor's failure surface as a rejection,
       // so reaching here at all means imagery is not pending.
       imageryPending: false,
+      // The fallback path fetches through loadImageryFor, which does not surface
+      // response headers.
+      imageryCache: "unknown" as const,
       minElevation,
       maxElevation
     };

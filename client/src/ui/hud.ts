@@ -163,6 +163,8 @@ export function setupHUD(
         <div class="hud-legend">
           ${key('<span class="hud-key" style="color:#ffd400">U</span>', "USDA server")}
           ${key('<span class="hud-key" style="color:#00e5ff">N</span>', "NAIP COG (DuckDB)")}
+          ${key('<span class="hud-key" style="color:#4ade80">&bull;</span>', "baked on demand")}
+          ${key('<span class="hud-key" style="color:#94a3b8">&bull;</span>', "served from CDN cache")}
         </div>
       </div>
 

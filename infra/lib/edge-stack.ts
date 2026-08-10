@@ -142,7 +142,12 @@ export class EdgeStack extends Stack {
           accessControlAllowHeaders: { items: ["*"] },
           accessControlAllowMethods: { items: ["GET", "HEAD"] },
           accessControlAllowOrigins: { items: ["*"] },
-          accessControlExposeHeaders: { items: ["X-DEM-Source"] },
+          // X-Cache lets the viewer label a tile by whether CloudFront served
+          // it from the edge or the origin baked it. Only needed cross-origin:
+          // the deployed app is same-origin with its tiles, but `npm run dev`
+          // on localhost is not, and without this the header reads as null
+          // there and the marker silently disappears.
+          accessControlExposeHeaders: { items: ["X-DEM-Source", "X-Cache"] },
           originOverride: true,
         },
       },
