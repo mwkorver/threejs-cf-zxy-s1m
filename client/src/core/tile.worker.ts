@@ -147,6 +147,9 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
       }
     })();
 
+    // Set when imagery failed transiently: the tile still draws, and
+    // TileManager re-requests it later rather than settling for no texture.
+    let imageryFailed = false;
     const imageryPromise = (async (): Promise<ImageBitmap | null> => {
       try {
         // Routing (OSM / low-zoom USDA stitch / NAIP COG mosaic) and key
@@ -170,24 +173,39 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
           console.warn(`No imagery coverage for tile ${tile.z}/${tile.x}/${tile.y} (404)`);
           return null;
         }
-        // Transient error (5xx, network glitch, timeout): rethrow so TileManager
-        // retries instead of permanently marking the tile loaded with a fallback hole.
-        throw err;
+        // Transient error (5xx, network glitch, timeout). Reported, not thrown:
+        // throwing took the terrain down with it, and terrain is the tile --
+        // without it there is no mesh at all, so an upstream 503 on one basemap
+        // tile punched a hole in the world and the sky showed through. Observed
+        // over Long Island Sound, where /basemap/9/151/192 answers 503
+        // "basemap upstream unavailable" while its neighbours are fine.
+        //
+        // The original intent -- do not permanently accept a fallback for what
+        // is only a blip -- is kept, and now actually delivered: the tile draws
+        // its terrain untextured and is marked imageryPending, which makes
+        // TileManager re-request it once the cooldown expires, so it upgrades to
+        // real imagery when the upstream recovers.
+        console.warn(`Imagery unavailable for tile ${tile.z}/${tile.x}/${tile.y}, retrying later:`, err);
+        imageryFailed = true;
+        return null;
       }
     })();
 
     // Settle both so a terrain failure can't leak a fulfilled imagery bitmap.
+    // Only terrain can fail the tile: it IS the tile, and imagery is a skin on
+    // it. An imagery rejection now arrives as a null bitmap plus imageryFailed.
     const [terrainSettled, imagerySettled] = await Promise.allSettled([terrainPromise, imageryPromise]);
-    if (terrainSettled.status === "rejected" || imagerySettled.status === "rejected") {
+    if (terrainSettled.status === "rejected") {
       if (imagerySettled.status === "fulfilled") {
         imagerySettled.value?.close();
       }
-      throw terrainSettled.status === "rejected"
-        ? terrainSettled.reason
-        : (imagerySettled as PromiseRejectedResult).reason;
+      throw terrainSettled.reason;
     }
     const { heights, demSource } = terrainSettled.value;
-    const imageBitmap = imagerySettled.value;
+    const imageBitmap = imagerySettled.status === "fulfilled" ? imagerySettled.value : null;
+    if (imagerySettled.status === "rejected") {
+      imageryFailed = true;
+    }
 
     let minElevation = 0;
     let maxElevation = 0;
@@ -262,6 +280,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
       },
       buildingRecords,
       imageBitmap,
+      imageryPending: imageryFailed,
       minElevation,
       maxElevation
     }, transferList);

@@ -24,6 +24,21 @@ import type { TileLoadResult } from "./workerTypes";
 
 
 /** Chebyshev radius of the root grid, in tiles: 2 gives the 5x5 grid. */
+/** Cooldown before re-requesting a tile whose load failed outright. */
+const FAILED_TILE_RETRY_MS = 5000;
+/** Cooldown before re-requesting a drawn tile that is still owed its imagery. */
+const IMAGERY_RETRY_MS = 8000;
+/**
+ * How many times to chase missing imagery before settling for the fallback.
+ *
+ * Not unbounded: fetchTile already makes up to 5 attempts of its own per
+ * request, and these are requester-pays reads, so a tile whose upstream is
+ * durably broken would otherwise bill its way through 5 attempts every 8
+ * seconds for as long as it is on screen. After this it keeps its terrain and
+ * its flat colour, and picks imagery up whenever it is next reloaded.
+ */
+const MAX_IMAGERY_RETRIES = 3;
+
 const ROOT_GRID_RADIUS = 2;
 /**
  * Roots beyond this are dropped on distance alone. Wider than the build radius
@@ -63,6 +78,14 @@ export interface TileNode {
   visible: boolean;
   /** performance.now() before which triggerLoad is skipped after a failure. */
   retryAfter?: number;
+  /**
+   * Loaded and drawing, but with no imagery because the upstream failed in a
+   * way worth retrying. Lets triggerLoad re-request an already-loaded tile so
+   * it upgrades from the flat fallback colour once imagery comes back.
+   */
+  imageryPending?: boolean;
+  /** Imagery retries spent on this node; capped by MAX_IMAGERY_RETRIES. */
+  imageryAttempts?: number;
   /** performance.now() when the node was handed to transitionNodes (stale pool). */
   transitionSince?: number;
   /**
@@ -773,7 +796,11 @@ export class TileManager {
   }
 
   private triggerLoad(node: TileNode, priority: number): void {
-    if (node.loaded) {
+    // A tile whose imagery failed transiently is loaded and drawing, but only
+    // as untextured ground -- so it is deliberately not done. It re-requests
+    // once the cooldown below expires, which is what turns the fallback colour
+    // back into imagery when the upstream recovers.
+    if (node.loaded && !node.imageryPending) {
       return;
     }
     if (node.loading) {
@@ -829,7 +856,10 @@ export class TileManager {
       this.showBuildings &&
       node.tile.z === this.buildingSourceZoom &&
       !this.buildingCache.has(node.tile);
-    if (cached && !needsFootprints) {
+    // Same shape of problem for imagery: the cached bundle is precisely the one
+    // that came back without a texture, so re-serving it would hand the tile
+    // its flat colour again and the retry would be a no-op forever.
+    if (cached && !needsFootprints && !node.imageryPending) {
       node.centerElevation = cached.centerElevation;
       node.demSource = cached.demSource;
       node.minElevation = cached.minElevation;
@@ -870,13 +900,28 @@ export class TileManager {
           this.createMeshFromBundle(node, bundle);
           node.loaded = true;
           node.loading = false;
-          node.retryAfter = undefined;
+          if (res.imageryPending) {
+            node.imageryAttempts = (node.imageryAttempts ?? 0) + 1;
+          } else {
+            node.imageryAttempts = 0;
+          }
+          node.imageryPending =
+            res.imageryPending && node.imageryAttempts < MAX_IMAGERY_RETRIES;
+          // Cooldown even on success when imagery is still owed, so the retry
+          // is paced rather than re-firing every frame against an upstream that
+          // is already failing.
+          node.retryAfter = node.imageryPending ? performance.now() + IMAGERY_RETRY_MS : undefined;
         })
         .catch((err) => {
           node.loading = false;
           if (err instanceof DOMException && err.name === "AbortError") {
             return; // Normal cancellation
           }
+          // Set the cooldown the guard in triggerLoad checks. It never was:
+          // retryAfter was declared, read, and cleared on success, but nothing
+          // assigned it -- so a persistently failing tile was re-requested
+          // every frame, which is what a 503 upstream turned into a hot loop.
+          node.retryAfter = performance.now() + FAILED_TILE_RETRY_MS;
           console.warn(`Failed tile load ${node.key}:`, err);
         });
   }

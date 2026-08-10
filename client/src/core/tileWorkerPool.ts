@@ -261,6 +261,7 @@ export class TileWorkerPool {
         meshData: data.meshData,
         buildingRecords: data.buildingRecords,
         imageBitmap: data.imageBitmap,
+        imageryPending: data.imageryPending,
         minElevation: data.minElevation,
         maxElevation: data.maxElevation
       });
@@ -340,6 +341,9 @@ export class TileWorkerPool {
       // terrain and imagery, and MVT decoding needs no coverage from here.
       buildingRecords: null,
       imageBitmap,
+      // The fallback path lets loadImageryFor's failure surface as a rejection,
+      // so reaching here at all means imagery is not pending.
+      imageryPending: false,
       minElevation,
       maxElevation
     };

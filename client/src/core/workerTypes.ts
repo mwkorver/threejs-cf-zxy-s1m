@@ -97,8 +97,18 @@ export interface WorkerTileSuccessResponse {
    * sent buildings, the pool discarded them, and tsc saw nothing wrong.
    */
   buildingRecords: BuildingRecord[] | null;
-  /** null when imagery 404s: no coverage, but the mesh is still good. */
+  /** null when imagery 404s or failed transiently; the mesh is still good. */
   imageBitmap: ImageBitmap | null;
+  /**
+   * Imagery failed in a way worth retrying (5xx, network), as opposed to a 404
+   * that means there is genuinely nothing to draw. The tile renders untextured
+   * and TileManager re-requests it after a cooldown.
+   *
+   * Required, not optional, for the reason the buildings field records above:
+   * tileWorkerPool forwards this payload field by field, so an omitted optional
+   * still satisfies the type and would be dropped in silence.
+   */
+  imageryPending: boolean;
   minElevation: number;
   maxElevation: number;
 }
