@@ -70,7 +70,7 @@ def imagery_tile(layer: str, year: int, z: int, x: int, y: int) -> Response:
         # upsampled junk; the client clamps.
         raise HTTPException(404, f"z {z} beyond layer maxzoom {lyr.maxzoom}")
     if z < settings.imagery_min_zoom:
-        # Below the mosaic band. /basemap serves this range from the USDA cache;
+        # Below the mosaic band. /basemap serves this range from the USGS service;
         # down here one tile spans whole states, so resolving it against the
         # lake would fan out across region partitions and pull dozens of COGs
         # for a single tile. The client already routes low z to /basemap, so
@@ -94,7 +94,7 @@ def imagery_tile(layer: str, year: int, z: int, x: int, y: int) -> Response:
 
 @app.get("/basemap/{z}/{x}/{y}.webp")
 def basemap_tile(z: int, x: int, y: int) -> Response:
-    """512px WebP low-zoom basemap = 2x2 stitch of USDA NAIP cache children.
+    """512px WebP low-zoom basemap, rendered from the USGS NAIP ImageServer.
 
     Path-only so CloudFront caches it; the browser never hits ArcGIS directly.
     """
@@ -114,7 +114,7 @@ def basemap_tile(z: int, x: int, y: int) -> Response:
         # Logged with the reason attached. _fetch_child records exactly why it
         # gave up -- "HTTP 403", a timeout, a TLS reset -- and catching this bare
         # threw that away, so a days-long outage looked identical from the
-        # outside whether USDA was down, rate-limiting, or blocking this account.
+        # outside whether the upstream was down, rate-limiting, or blocking us.
         # That distinction is the whole question when imagery stops arriving.
         logger.warning("basemap %d/%d/%d unavailable: %s", z, x, y, exc)
         raise HTTPException(503, "basemap upstream unavailable, retry", headers={"Retry-After": "2"})

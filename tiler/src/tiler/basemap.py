@@ -1,26 +1,35 @@
-"""Low-zoom basemap imagery = 512px stitch of 4 cached USDA NAIP tiles.
+"""Low-zoom basemap imagery = one 512px render from the USGS NAIP ImageServer.
 
 At low zoom the COG mosaic fan-out is slow and coverage-capped, so imagery
-there comes from the USDA CONUS PRIME ImageServer's pre-rendered map cache
-(EPSG:3857, XYZ scheme, 256px JPEG, LODs 0-17). We assemble the 2x2 z+1
-children into one 512px tile server-side so the client gets a 512px texture
-like everywhere else, and CloudFront caches the assembled result path-only.
+there comes from an ArcGIS image service instead, rendered server-side into one
+512px tile that CloudFront then caches path-only.
 
-Mirrors terrain.render_farfield_tile (which stitches 2x2 z+1 Terrarium
-children) and reuses the same rasterio/numpy/rio_tiler stack -- no new native
-deps. The upstream is public-domain USDA imagery; no key, no request-payer.
+The upstream is https://imagery.nationalmap.gov (USGS), replacing the USDA
+CONUS PRIME service this used to call. That one stopped completing TLS
+handshakes -- "SSL: UNEXPECTED_EOF_WHILE_READING", reproduced from both Lambda
+and a laptop on an unrelated network, so it was the service and not a block on
+this account -- and every uncached basemap tile had been 503ing for days.
 
-Failure handling matters because the result is cached immutably: a child that
-FETCHES but is out of coverage returns 404 (or a white nodata tile) -> that
-quadrant is left white, matching the source. A child that fails transiently
-(timeout / 5xx / network) is retried, and if it still fails the WHOLE tile is
-failed (TransientBasemapError -> 503) rather than cached with a hole -- a
-momentary upstream hiccup must not poison an immutable tile with black/blank.
+The two are not interchangeable, which is why this module changed shape rather
+than just its URL. CONUS PRIME published a *pre-rendered tile cache*: this
+fetched four 256px z+1 children over XYZ and stitched them 2x2. The USGS
+service advertises `Image,Metadata,Catalog,Mensuration` with no tileInfo and no
+singleFusedMapCache -- it has no tile endpoint at all (/tile/... 404s), only a
+dynamic exportImage. So one request now renders the tile's own bbox at its full
+size, which is both simpler and three fewer round trips.
+
+Coverage is reported differently too, and the difference matters because the
+result is cached immutably. The cache answered 404 for a tile it did not have;
+exportImage always answers 200 and encodes absence as transparency, so "no
+coverage" is now an all-zero alpha channel rather than a status code. Anything
+partially covered is composited onto white, matching what the stitched version
+did with its missing quadrants. A transient failure (timeout / 5xx / network)
+is retried, and if it still fails the tile is failed (TransientBasemapError ->
+503) rather than cached with a hole.
 """
 
 import time
 import warnings
-from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import numpy as np
@@ -28,78 +37,101 @@ from rasterio.errors import NotGeoreferencedWarning
 from rasterio.io import MemoryFile
 from rio_tiler.utils import render
 
-# ArcGIS cached tile URL: /tile/{level}/{row}/{col} == /tile/{z}/{y}/{x}.
-_CONUS_PRIME = (
-    "https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME"
-    "/ImageServer/tile/{z}/{y}/{x}"
+_USGS_NAIP = (
+    "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery"
+    "/ImageServer/exportImage"
 )
-# Cache tops out at z17, so 512px assembly (children at z+1) is valid to z16.
+# Web Mercator half-circumference: the XYZ grid's extent in EPSG:3857 metres.
+_R = 20037508.342789244
+# No longer an upstream limit -- a dynamic service has no LOD ceiling the way
+# the old tile cache did (it topped out at z17, capping 512px assembly at z16).
+# Kept as this endpoint's own guard: past here the COG mosaic is the right
+# source, and the client routes to it well below this anyway.
 BASEMAP_MAX_ZOOM = 16
 
-# Per-attempt timeout kept low, x2 attempts x 4 concurrent children, so worst
-# case stays well under the Lambda timeout.
+# One request per tile now instead of four concurrent children, so a longer
+# per-attempt timeout still leaves the 60s Lambda budget plenty of room --
+# and it needs one, because exportImage renders on demand rather than serving
+# something already baked.
 _ATTEMPTS = 2
+_TIMEOUT_S = 20.0
 _client = httpx.Client(
-    timeout=httpx.Timeout(8.0),
+    timeout=httpx.Timeout(_TIMEOUT_S),
     headers={"User-Agent": "flight-sim-tiler"},
     limits=httpx.Limits(max_connections=8, max_keepalive_connections=8),
 )
-_pool = ThreadPoolExecutor(max_workers=4)
 
 
 class TransientBasemapError(Exception):
-    """A child could not be fetched (timeout/5xx/network) after retries.
+    """The tile could not be fetched (timeout/5xx/network) after retries.
 
     The endpoint turns this into a 503 so the client retries and the failed
-    (partial) tile is never cached.
+    tile is never cached.
     """
 
 
-def _fetch_child(z: int, x: int, y: int) -> "np.ndarray | None":
-    """(3, 256, 256) RGB, or None if genuinely absent (404); raises on transient failure."""
+def tile_bbox_3857(z: int, x: int, y: int) -> tuple[float, float, float, float]:
+    """(minx, miny, maxx, maxy) of an XYZ tile in EPSG:3857 metres."""
+    span = 2 * _R / (2**z)
+    minx = -_R + x * span
+    maxy = _R - y * span
+    return (minx, maxy - span, minx + span, maxy)
+
+
+def _fetch_tile(z: int, x: int, y: int, tilesize: int) -> "np.ndarray | None":
+    """(3, tilesize, tilesize) RGB on white, or None if wholly out of coverage.
+
+    Raises TransientBasemapError if the upstream never answered usefully.
+    """
+    minx, miny, maxx, maxy = tile_bbox_3857(z, x, y)
+    params = {
+        "bbox": f"{minx},{miny},{maxx},{maxy}",
+        "bboxSR": "3857",
+        "imageSR": "3857",
+        "size": f"{tilesize},{tilesize}",
+        # png32 specifically, not png: ArcGIS drops to a 24-bit PNG when a
+        # render happens to be fully opaque, and then there is no alpha band to
+        # read coverage from. Forcing 32-bit keeps the response shape constant.
+        "format": "png32",
+        "transparent": "true",
+        "f": "image",
+    }
+
     last = "unknown"
     for attempt in range(_ATTEMPTS):
         try:
-            r = _client.get(_CONUS_PRIME.format(z=z, x=x, y=y))
-            if r.status_code == 404:
-                return None  # genuinely out of coverage (e.g. open ocean)
+            r = _client.get(_USGS_NAIP, params=params)
             if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", NotGeoreferencedWarning)
                     with MemoryFile(r.content) as mf, mf.open() as ds:
-                        return ds.read(indexes=[1, 2, 3])
+                        arr = ds.read()
+                if arr.shape[0] < 4:
+                    return arr[:3]  # no alpha band: fully covered
+                alpha = arr[3]
+                if not alpha.any():
+                    return None  # nothing here (open ocean, outside CONUS)
+                # Composite onto white, so partial coverage matches what the
+                # stitched version left behind for its missing quadrants.
+                rgb = arr[:3].astype(np.uint16)
+                a16 = alpha.astype(np.uint16)
+                out = (rgb * a16 + 255 * (255 - a16)) // 255
+                return out.astype(np.uint8)
             last = f"HTTP {r.status_code}"  # 5xx / unexpected -> retry
         except Exception as e:  # timeout / network -> retry
             last = f"{type(e).__name__}: {e}"
         if attempt < _ATTEMPTS - 1:
             time.sleep(0.4 * (attempt + 1))
-    raise TransientBasemapError(f"child {z}/{x}/{y} failed: {last}")
+    raise TransientBasemapError(f"tile {z}/{x}/{y} failed: {last}")
 
 
 def render_basemap_tile(z: int, x: int, y: int, tilesize: int = 512, quality: int = 75) -> bytes | None:
-    """512px WebP from the 2x2 z+1 USDA cache children.
+    """512px WebP rendered from the USGS NAIP image service.
 
-    None if the tile is entirely out of coverage (all children 404). Raises
-    TransientBasemapError if any child failed transiently (caller -> 503).
+    None if the tile is entirely out of coverage. Raises TransientBasemapError
+    if the upstream failed transiently (caller -> 503).
     """
-    src = tilesize // 2  # upstream tiles are 256px
-    # (row, col) offsets -> child (x, y) at z+1.
-    children = [
-        (dj, di, 2 * x + di, 2 * y + dj)
-        for dj in (0, 1)
-        for di in (0, 1)
-    ]
-    # map() re-raises the first child exception (TransientBasemapError) here,
-    # so a transient failure fails the whole tile instead of yielding a hole.
-    arrs = list(_pool.map(lambda c: _fetch_child(z + 1, c[2], c[3]), children))
-
-    if all(a is None for a in arrs):
-        return None  # entirely out of coverage
-
-    # White fill for absent (404) quadrants, matching CONUS PRIME's own nodata.
-    canvas = np.full((3, tilesize, tilesize), 255, dtype=np.uint8)
-    for (dj, di, _cx, _cy), arr in zip(children, arrs):
-        if arr is not None:
-            canvas[:, dj * src:dj * src + src, di * src:di * src + src] = arr
-
-    return render(canvas, img_format="WEBP", quality=quality)
+    arr = _fetch_tile(z, x, y, tilesize)
+    if arr is None:
+        return None
+    return render(arr, img_format="WEBP", quality=quality)

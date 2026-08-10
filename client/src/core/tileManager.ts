@@ -116,9 +116,9 @@ export class TileManager {
   // Toggle for Z/X/Y tile labels visibility
   public showLabels = false;
   // Toggle for baking an imagery-source letter into each tile texture:
-  // U = USDA ImageServer basemap stitch, N = NAIP COG mosaic (DuckDB lookup).
+  // U = USGS ImageServer basemap render, N = NAIP COG mosaic (DuckDB lookup).
   public showSourceLabels = false;
-  // Imagery zoom threshold: tiles at z <= this load from the USDA NAIP
+  // Imagery zoom threshold: tiles at z <= this load from the USGS NAIP
   // ImageServer instead of the COG tiler (which is slow/coverage-capped at low
   // zoom). Set to maxZoom to route everything external.
   public externalImageryMaxZoom = 13;
@@ -1918,7 +1918,7 @@ export class TileManager {
   }
 
   /**
-   * Change the imagery zoom threshold (z <= this uses the USDA ImageServer).
+   * Change the imagery zoom threshold (z <= this uses the USGS ImageServer).
    * Drops cached/loaded tiles so they refetch from the correct source.
    */
   setExternalImageryMaxZoom(z: number): void {
@@ -1941,7 +1941,7 @@ export class TileManager {
 
   /**
    * Which source letter a tile's imagery gets: the worker routes z <=
-   * externalImageryMaxZoom to the USDA basemap stitch (U, yellow) and deeper
+   * externalImageryMaxZoom to the USGS basemap render (U, yellow) and deeper
    * zooms to the NAIP COG mosaic resolved via DuckDB (N, cyan). OSM gets none.
    */
   private imagerySourceLetter(z: number): { ch: string; color: string } | null {

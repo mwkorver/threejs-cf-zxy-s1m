@@ -82,7 +82,7 @@ export async function loadImagery(
   return createImageBitmap(await res.blob());
 }
 
-/** Low-zoom basemap: 512px stitched by the tiler from USDA NAIP cache children.
+/** Low-zoom basemap: 512px rendered by the tiler from the USGS NAIP service.
  *  Used where the COG tiler is slow/coverage-capped. */
 export async function loadImageryExternal(baseUrl: string, t: TileId): Promise<ImageBitmap> {
   const { url, label } = basemapRequest(baseUrl, t);

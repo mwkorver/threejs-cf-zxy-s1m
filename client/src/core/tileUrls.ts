@@ -33,13 +33,13 @@ export interface ImageryRouting {
   layer: string;
   year: number;
   imagerySource?: ImagerySource;
-  /** z <= this uses the USDA basemap stitch; deeper zooms use the COG mosaic. */
+  /** z <= this uses the USGS basemap render; deeper zooms use the COG mosaic. */
   externalImageryMaxZoom: number;
 }
 
 /**
  * THE imagery routing rule. At/below externalImageryMaxZoom imagery comes from
- * the USDA NAIP ImageServer stitch (the COG mosaic is slow and coverage-capped
+ * the USGS NAIP ImageServer render (the COG mosaic is slow and coverage-capped
  * at low zoom); deeper zooms come from the NAIP COG mosaic. OSM overrides both.
  */
 export function resolveImageryKind(
@@ -85,7 +85,7 @@ export function buildingsRequest(baseUrl: string, t: TileId): TileRequest {
   };
 }
 
-/** Low-zoom basemap: the tiler stitches 4 USDA NAIP cache children into 512px. */
+/** Low-zoom basemap: the tiler renders 512px from the USGS NAIP ImageServer. */
 export function basemapRequest(baseUrl: string, t: TileId): TileRequest {
   return {
     url: withKey(`${baseUrl}/basemap/${t.z}/${t.x}/${t.y}.webp`),

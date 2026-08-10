@@ -161,7 +161,7 @@ export function setupHUD(
       <div class="hud-group">
         ${toggle('<input type="checkbox" class="hud-check" id="ctrl-outlines">', "SHOW TMS OUTLINES &amp; LABELS")}
         <div class="hud-legend">
-          ${key('<span class="hud-key" style="color:#ffd400">U</span>', "USDA server")}
+          ${key('<span class="hud-key" style="color:#ffd400">U</span>', "USGS server")}
           ${key('<span class="hud-key" style="color:#00e5ff">N</span>', "NAIP COG (DuckDB)")}
           ${key('<span class="hud-key" style="color:#4ade80">&bull;</span>', "baked on demand")}
           ${key('<span class="hud-key" style="color:#94a3b8">&bull;</span>', "served from CDN cache")}
@@ -199,7 +199,7 @@ export function setupHUD(
         ${slider("hypblend", "TINT BLEND", 'min="0" max="1" step="0.05" value="0.5"', "50%")}
       </div>
 
-      ${slider("extimagery", "USDA SERVER MAX ZOOM (else COG Tiler)", 'min="0" max="18" step="1" value="13"', "13")}
+      ${slider("extimagery", "USGS SERVER MAX ZOOM (else COG Tiler)", 'min="0" max="18" step="1" value="13"', "13")}
       ${slider("exaggeration", "VERTICAL EXAGGERATION", 'min="1" max="10" step="0.5" value="1.5"', "1.5x")}
     `)}
 
@@ -207,7 +207,7 @@ export function setupHUD(
       <div class="hud-group">
         <label class="hud-label" for="ctrl-imagery-source">IMAGERY SOURCE</label>
         <select class="hud-select" id="ctrl-imagery-source">
-          <option value="satellite">NAIP Aerial (USDA)</option>
+          <option value="satellite">NAIP Aerial (USGS)</option>
           <option value="osm">OpenStreetMap Roads</option>
         </select>
       </div>

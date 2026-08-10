@@ -82,7 +82,7 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
     the LIKE filter, which had it evaluated four times per candidate row.
 
     Only high zoom reaches here. z below settings.imagery_min_zoom is served by
-    /basemap from the USDA cache, so this query never runs on the continent-wide
+    /basemap from the USGS service, so this query never runs on the continent-wide
     envelopes where it would fan out across many region partitions -- the
     numbers below were taken at the zooms that actually arrive.
 

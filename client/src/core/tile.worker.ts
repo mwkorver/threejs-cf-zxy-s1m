@@ -156,7 +156,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
     let imageryCache: ImageryCacheState = "unknown";
     const imageryPromise = (async (): Promise<ImageBitmap | null> => {
       try {
-        // Routing (OSM / low-zoom USDA stitch / NAIP COG mosaic) and key
+        // Routing (OSM / low-zoom USGS basemap / NAIP COG mosaic) and key
         // handling live in tileUrls, shared with the main-thread fallback.
         const { url, label } = imageryRequest(tile, {
           baseUrl,

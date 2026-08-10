@@ -19,7 +19,7 @@ const routing = (over: Partial<ImageryRouting> = {}): ImageryRouting => ({
 const t = (z: number, x = 1, y = 2): TileId => ({ z, x, y });
 
 describe("resolveImageryKind", () => {
-  it("routes at/below externalImageryMaxZoom to the USDA basemap stitch", () => {
+  it("routes at/below externalImageryMaxZoom to the USGS basemap render", () => {
     expect(resolveImageryKind(12, "satellite", 13)).toBe("basemap");
     expect(resolveImageryKind(13, "satellite", 13)).toBe("basemap"); // boundary is inclusive
   });

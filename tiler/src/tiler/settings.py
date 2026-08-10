@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     imagery_webp_quality: int = 75  # lossy is fine for imagery; terrain is not
 
     # Zoom at/above which /imagery resolves the COG mosaic. Below it the client
-    # asks /basemap instead (the USDA cache stitch), because down there a tile
+    # asks /basemap instead (the USGS ImageServer render), because down there a tile
     # envelope covers whole states: the lake query fans out across many region
     # partitions and the mosaic read pulls dozens of COGs to fill one tile.
     #
