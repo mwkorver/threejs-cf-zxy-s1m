@@ -2,6 +2,11 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  // A CI runner has no GPU and rasterises WebGL in software on two cores. The
+  // same suite is ~15 s here and 5.6 min there, so the default per-test budget
+  // is not a statement about correctness on that hardware -- it just runs out.
+  // Both failures on the first CI run were timeouts, not assertions.
+  timeout: process.env.CI ? 120_000 : 30_000,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

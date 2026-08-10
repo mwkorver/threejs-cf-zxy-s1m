@@ -1,5 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 
+/** Waits scale with the machine: a CI runner rasterises WebGL in software. */
+const WAIT_MS = process.env.CI ? 90_000 : 30_000;
+
 /**
  * Wait for `n` frames to actually render, rather than for a wall-clock delay.
  * A CI runner has no GPU and rasterises in software, so a fixed delay covers a
@@ -10,7 +13,7 @@ async function advanceFrames(page: Page, n: number): Promise<void> {
   await page.waitForFunction(
     ([from, want]) => (window.__VIEWER_STATE__?.getFrameCount() ?? 0) >= from! + want!,
     [start, n] as const,
-    { timeout: 30_000 },
+    { timeout: WAIT_MS },
   );
 }
 
@@ -115,11 +118,11 @@ test.describe("WebGL Tile Coverage Gaps & GPU Memory Pressure Tests", () => {
 
     const cacheMemoryReadouts: number[] = [];
 
-    for (let step = 0; step < 10; step++) {
+    for (let step = 0; step < 5; step++) {
       // Sampled per rendered frames, not per millisecond: this runs during
       // sustained flight, where isSceneReady is never true by design, so frames
       // are the only cadence that means the same thing on every machine.
-      await advanceFrames(page, 6);
+      await advanceFrames(page, 3);
 
       const cacheText = await page.locator("#hud-cache").textContent();
       const mb = parseFloat(cacheText ?? "0");

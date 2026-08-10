@@ -1,5 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 
+/** Waits scale with the machine: a CI runner rasterises WebGL in software. */
+const WAIT_MS = process.env.CI ? 90_000 : 30_000;
+
 /**
  * Wait for `n` frames to actually render, rather than for a wall-clock delay.
  *
@@ -12,7 +15,7 @@ async function advanceFrames(page: Page, n: number): Promise<void> {
   await page.waitForFunction(
     ([from, want]) => (window.__VIEWER_STATE__?.getFrameCount() ?? 0) >= from! + want!,
     [start, n] as const,
-    { timeout: 30_000 },
+    { timeout: WAIT_MS },
   );
 }
 

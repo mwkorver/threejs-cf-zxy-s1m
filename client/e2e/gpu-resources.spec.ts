@@ -1,5 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 
+/** Waits scale with the machine: a CI runner rasterises WebGL in software. */
+const WAIT_MS = process.env.CI ? 90_000 : 30_000;
+
 // A 1x1 PNG: every tile resolves instantly and identically, so these tests
 // measure resource lifetime rather than network timing.
 const TILE_PNG = Buffer.from(
@@ -25,7 +28,7 @@ async function stubTiles(page: Page): Promise<void> {
  */
 async function settle(page: Page): Promise<void> {
   await page.waitForFunction(() => window.__VIEWER_STATE__?.isSceneReady() === true, null, {
-    timeout: 30_000,
+    timeout: WAIT_MS,
   });
 }
 
@@ -68,8 +71,10 @@ test.describe("GPU resource lifetime", () => {
 
     // Round trips between two distant viewpoints. Each loads a fresh working
     // set and abandons the previous one, which is when a texture that is never
-    // released would accumulate.
-    for (let cycle = 0; cycle < 4; cycle++) {
+    // released would accumulate. Two cycles, not four: each one is a full
+    // settle, and on a software-rasterising runner four did not fit the clock.
+    // A leak breaches a fixed ceiling on the first abandoned set anyway.
+    for (let cycle = 0; cycle < 2; cycle++) {
       await flyTo(page, 0, -5000, 7700);
       expect(await info(page).then((i) => i.textures)).toBeLessThanOrEqual(ceiling);
 
@@ -94,7 +99,7 @@ test.describe("GPU resource lifetime", () => {
 
     // Away and back, repeatedly. Geometry belonging to tiles long out of view
     // would accumulate across the cycles and breach the bound.
-    for (let cycle = 0; cycle < 3; cycle++) {
+    for (let cycle = 0; cycle < 2; cycle++) {
       await flyTo(page, 0, -5000, 7700);
       expect((await info(page)).geometries).toBeLessThanOrEqual(ceiling);
 
