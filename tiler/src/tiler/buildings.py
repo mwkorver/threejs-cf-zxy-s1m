@@ -48,7 +48,27 @@ class BuildingResolver:
 
             file_list = [f[0] for f in files_res]
 
-            # 2. Query target partition files for building geometry and encode MVT
+            # 2. Query target partition files for building geometry and encode MVT.
+            #
+            # The bbox comparisons carry the weight; ST_Intersects only refines
+            # what they let through. Overture's GeoParquet has a bbox STRUCT
+            # column, and comparing its fields against constants is something
+            # DuckDB can answer from Parquet row-group statistics -- so whole
+            # row groups are skipped without being read. ST_Intersects alone is
+            # a spatial function over the geometry column, which no statistic
+            # describes, so it forced a scan of the entire partition however
+            # little of it the tile covered. Partitions are far larger than any
+            # tile, so even a tile with no buildings paid for a full read.
+            #
+            # Measured against S3 (cold metadata, so the upper end): rural z16
+            # 21.6s -> 0.6s, Newark z14 22.2s -> 0.5s, Manhattan z14 20.7s ->
+            # 0.5s. Warm, the same Manhattan z18 tile goes 0.96s -> 0.12s, so
+            # expect 8x rather than 40x once containers are hot.
+            #
+            # Row counts are unchanged, and cannot change: a geometry that
+            # intersects the envelope must have a bbox that overlaps it, so this
+            # is a conservative superset and ST_Intersects still decides. Checked
+            # at 0, 8, 192 and 2700 rows -- identical each time.
             res = self._con.execute(
                 """
                 SELECT ST_AsMVT(building_tiles, 'buildings', 4096, 'geom')
@@ -56,7 +76,9 @@ class BuildingResolver:
                     SELECT id, height, num_floors,
                            ST_AsMVTGeom(geometry, ST_Extent(ST_MakeEnvelope(?, ?, ?, ?)), 4096, 64, true) AS geom
                     FROM read_parquet(?)
-                    WHERE ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))
+                    WHERE bbox.xmin <= ? AND bbox.xmax >= ?
+                      AND bbox.ymin <= ? AND bbox.ymax >= ?
+                      AND ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))
                 ) AS building_tiles
                 """,
                 [
@@ -65,6 +87,10 @@ class BuildingResolver:
                     bounds.right,
                     bounds.top,
                     file_list,
+                    bounds.right,
+                    bounds.left,
+                    bounds.top,
+                    bounds.bottom,
                     bounds.left,
                     bounds.bottom,
                     bounds.right,
