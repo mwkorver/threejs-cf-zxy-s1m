@@ -79,6 +79,7 @@ interface Cell {
   areaP50: number;
   areaP90: number;
   underM2: Record<number, number>;
+  cache: string;
 }
 
 async function fetchTile(tile: TileId, key: string) {
@@ -86,7 +87,11 @@ async function fetchTile(tile: TileId, key: string) {
   const t0 = performance.now();
   const res = await fetch(url);
   const buf = await res.arrayBuffer();
-  return { status: res.status, buf, ms: performance.now() - t0 };
+  // Timing means nothing without knowing who answered: an edge hit measures
+  // CloudFront, a miss measures the tiler. Reported per row so the table is
+  // readable without knowing what was invalidated beforehand.
+  const cache = (res.headers.get("x-cache") ?? "?").split(" ")[0] ?? "?";
+  return { status: res.status, buf, ms: performance.now() - t0, cache };
 }
 
 /** Footprint area in m^2 from the record's bbox, which decodeBuildings already
@@ -102,7 +107,14 @@ function quantile(sorted: number[], q: number): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0;
 }
 
-function measure(area: string, tile: TileId, status: number, buf: ArrayBuffer, ms: number): Cell {
+function measure(
+  area: string,
+  tile: TileId,
+  status: number,
+  buf: ArrayBuffer,
+  ms: number,
+  cache: string,
+): Cell {
   const records = status === 200 ? decodeBuildings(buf, tile) ?? [] : [];
   let vertices = 0;
   for (const r of records) {
@@ -126,6 +138,7 @@ function measure(area: string, tile: TileId, status: number, buf: ArrayBuffer, m
     areaP50: quantile(areas, 0.5),
     areaP90: quantile(areas, 0.9),
     underM2,
+    cache,
   };
 }
 
@@ -140,15 +153,15 @@ describe.runIf(process.env.MEASURE === "1")("building tile cost matrix", () => {
       for (const a of AREAS) {
         for (const z of ZOOMS) {
           const tile = tileFor(a.lat, a.lon, z);
-          const { status, buf, ms } = await fetchTile(tile, key);
-          cells.push(measure(a.name, tile, status, buf, ms));
+          const { status, buf, ms, cache } = await fetchTile(tile, key);
+          cells.push(measure(a.name, tile, status, buf, ms, cache));
         }
       }
 
       const pad = (s: string | number, n: number) => String(s).padStart(n);
       console.log(
         `\n${"area".padEnd(13)} ${"tile".padEnd(17)} ${pad("bytes", 8)} ${pad("ms", 6)} ` +
-          `${pad("recs", 6)} ${pad("verts", 7)} ${pad("B/rec", 6)} ${pad("p50 m2", 8)} ${pad("p90 m2", 8)} ${pad("<100m2", 7)}`,
+          `${pad("recs", 6)} ${pad("verts", 7)} ${pad("B/rec", 6)} ${pad("p50 m2", 8)} ${pad("p90 m2", 8)} ${pad("<100m2", 7)} ${pad("cache", 6)}`,
       );
       for (const c of cells) {
         const t = `${c.tile.z}/${c.tile.x}/${c.tile.y}`;
@@ -156,7 +169,7 @@ describe.runIf(process.env.MEASURE === "1")("building tile cost matrix", () => {
         const pctSmall = c.records ? Math.round((100 * (c.underM2[100] ?? 0)) / c.records) : 0;
         console.log(
           `${c.area.padEnd(13)} ${t.padEnd(17)} ${pad(c.bytes, 8)} ${pad(Math.round(c.ms), 6)} ` +
-            `${pad(c.records, 6)} ${pad(c.vertices, 7)} ${pad(perRec, 6)} ${pad(Math.round(c.areaP50), 8)} ${pad(Math.round(c.areaP90), 8)} ${pad(`${pctSmall}%`, 7)}`,
+            `${pad(c.records, 6)} ${pad(c.vertices, 7)} ${pad(perRec, 6)} ${pad(Math.round(c.areaP50), 8)} ${pad(Math.round(c.areaP90), 8)} ${pad(`${pctSmall}%`, 7)} ${pad(c.cache, 6)}`,
         );
       }
 
