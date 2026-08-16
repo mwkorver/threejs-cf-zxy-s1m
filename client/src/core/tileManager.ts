@@ -168,6 +168,8 @@ export class TileManager {
    * different times -- see rebalanceGpuBudget.
    */
   private buildingBudgetDirty = false;
+  /** Source tiles whose footprints are being fetched, keyed by tileKey. */
+  private buildingSourcesInFlight = new Set<string>();
 
   // Footprint overlay. The full S1M+usgs13 set (~360 KB gzipped) is fetched once
   // from the static /footprints/*.json files and held in memory; the mesh is
@@ -983,6 +985,71 @@ export class TileManager {
   }
 
   /**
+   * Make sure the source tile owning `tile`'s buildings has been asked for.
+   *
+   * Fetching buildings is bolted onto loading the tile that happens to sit at
+   * the source zoom, and past z14 that tile is an invisible ancestor: it
+   * subdivides, hides itself, and is never triggerLoad'd again (updateNode only
+   * loads a parent while its children are unready). triggerLoad would refuse it
+   * anyway -- it returns on node.loaded before it ever reaches the footprint
+   * check. So once BuildingCache's 64-entry LRU drops a source, every tile over
+   * that ground is building-less for good, however long you fly around.
+   *
+   * That is reachable in normal flight rather than at some extreme: forTile
+   * only refreshes recency when a mesh is built, so a source still on screen
+   * ages out behind sources being built ahead of it, and the loss only shows
+   * when one of its tiles is later rebuilt.
+   *
+   * Asking for the source directly decouples the two. Deduplicated on the
+   * source key, and bounded by the cache knowing about empty ground as well as
+   * occupied ground, so this asks once per source rather than once per frame.
+   */
+  private ensureBuildingSource(tile: TileId): void {
+    if (!this.showBuildings || tile.z < this.buildingSourceZoom) return;
+    const source = BuildingCache.sourceTileFor(tile, this.buildingSourceZoom);
+    if (this.buildingCache.has(source)) return;
+
+    const key = tileKey(source);
+    if (this.buildingSourcesInFlight.has(key)) return;
+    this.buildingSourcesInFlight.add(key);
+
+    const options = {
+      baseUrl: this.baseUrl,
+      layer: this.layer,
+      year: this.year,
+      imagerySource: this.imagerySource,
+      terrainMinZoom: this.terrainMinZoom,
+      gridStep: this.gridStep,
+      externalImageryMaxZoom: this.externalImageryMaxZoom,
+      showBuildings: this.showBuildings,
+      buildingSourceZoom: this.buildingSourceZoom,
+    };
+
+    // Below active tiles, above prefetch: the ground is already on screen
+    // without its buildings, so this should not outrank terrain still arriving.
+    this.workerPool
+      .requestTile(source, -5e6, options)
+      .then((res) => {
+        this.buildingSourcesInFlight.delete(key);
+        // Only the records are wanted. The terrain and imagery that came with
+        // them belong to a tile nothing is drawing, so the bundle is not built
+        // and the bitmap is closed rather than left to the GC.
+        res.imageBitmap?.close();
+        if (res.buildingRecords) {
+          this.buildingCache.put(source, res.buildingRecords);
+          this.attachPendingBuildings(source);
+        } else {
+          this.buildingCache.put(source, []); // known empty, stop asking
+        }
+      })
+      .catch(() => {
+        // Transient: dropped from the in-flight set so the next tile built over
+        // this ground tries again, rather than the ground going quiet for good.
+        this.buildingSourcesInFlight.delete(key);
+      });
+  }
+
+  /**
    * Re-attach buildings to tiles that were drawn before their footprints
    * arrived. Without this a tile bundled while the cache was cold stays empty
    * for good, since triggerLoad hands back the cached bundle untouched.
@@ -1111,6 +1178,17 @@ export class TileManager {
       // Tiles over this ground that already drew without buildings can have
       // them now.
       this.attachPendingBuildings(source);
+    } else if (this.showBuildings && tile.z === this.buildingSourceZoom) {
+      // A source tile that answered with nothing is not the same as a source
+      // tile nobody asked about, and only the first is safe to stop asking
+      // about. The worker returns null for both, so it is the zoom that tells
+      // them apart. Recording the empty result is what lets has() mean "we know
+      // about this ground" -- without it, ensureBuildingSource would re-request
+      // open water forever.
+      this.buildingCache.put(
+        BuildingCache.sourceTileFor(tile, this.buildingSourceZoom),
+        [],
+      );
     }
 
     // NOT built here. Building geometry is assembled at mesh-creation time
@@ -1512,6 +1590,11 @@ export class TileManager {
 
     if (buildingGeometry) {
       this.attachBuildingMesh(mesh, buildingGeometry, material);
+    } else {
+      // Nothing to draw -- either this ground genuinely has no buildings, or
+      // the source that knows was never fetched or has been evicted. Only the
+      // cache can tell those apart, so ask it rather than assume.
+      this.ensureBuildingSource(node.tile);
     }
 
     mesh.position.set(
