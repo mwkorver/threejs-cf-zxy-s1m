@@ -223,6 +223,27 @@ export class TileManager {
   private prefetchPrevPos?: THREE.Vector3;
   private prefetchPrevTimeMs = 0;
   private prefetchVelocity = new THREE.Vector3(); // Mercator m/s, local offset space
+
+  // Scratch objects for the per-frame LOD walk.
+  //
+  // update() visits every active node each frame, and each visit was building a
+  // Box3, two corner Vector3s and a closestPoint -- about 1,400 short-lived
+  // objects a frame at ~200 nodes, ~84,000 a second at 60 fps. Reused instead,
+  // following prefetchVelocity above and compassFwd/worldUp in main.ts.
+  //
+  // The rule that keeps this safe: a scratch value must be consumed before the
+  // call that filled it recurses. Each one below is -- the cull box is tested
+  // and discarded before updateNode descends, and closestPoint becomes a number
+  // (dist) on the next line. isNodeVisible gets its OWN box rather than sharing
+  // updateNode's, because isCovered reaches it from inside that walk; sharing
+  // would work today and break silently the moment either use moves.
+  private readonly scratchFwd = new THREE.Vector3();
+  private readonly scratchFrustum = new THREE.Frustum();
+  private readonly scratchProjScreen = new THREE.Matrix4();
+  private readonly scratchCameraPos = new THREE.Vector3();
+  private readonly scratchCullBox = new THREE.Box3();
+  private readonly scratchClosest = new THREE.Vector3();
+  private readonly scratchVisibleBox = new THREE.Box3();
   private lastPrefetchCount = 0;
   /** Prefetches issued since load. The per-frame count is 0 most frames — the
    *  camera is parked, or the tiles ahead are already cached — so a running
@@ -376,7 +397,7 @@ export class TileManager {
     // vanishes looking straight down, so top-down views keep a centered grid.
     let gx = cx, gy = cy;
     if (camera) {
-      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const fwd = this.scratchFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
       const tileW = EARTH_CIRCUMFERENCE / 2 ** this.baseZoom;
       // Estimate forward ground intersection distance: when looking toward the ground (fwd.z < 0),
       // ground distance is -h/fwd.z. Cap at 1.0 tileW so the grid stays centered around the actual
@@ -451,16 +472,15 @@ export class TileManager {
     let frustum: THREE.Frustum | undefined;
     if (this.cullTiles && camera) {
       camera.updateMatrixWorld(true);
-      frustum = new THREE.Frustum();
-      const projScreenMatrix = new THREE.Matrix4();
-      projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-      frustum.setFromProjectionMatrix(projScreenMatrix);
+      frustum = this.scratchFrustum;
+      this.scratchProjScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      frustum.setFromProjectionMatrix(this.scratchProjScreen);
     }
 
     // 6. Run LOD update on each root node recursively
     this.activeKeys.clear();
     this.activeVisibleKeys.clear();
-    const cameraPosGlobal = new THREE.Vector3(cx, cy, localCameraPos.z);
+    const cameraPosGlobal = this.scratchCameraPos.set(cx, cy, localCameraPos.z);
 
     for (const node of this.rootNodes.values()) {
       this.updateNode(node, cameraPosGlobal, frustum);
@@ -629,10 +649,9 @@ export class TileManager {
       // converts to the world Z the frustum is projected in.
       const tileMinZ = this.exagZ(-1000) * zScale;
       const tileMaxZ = this.exagZ(9000) * zScale;
-      const box = new THREE.Box3(
-        new THREE.Vector3(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ),
-        new THREE.Vector3(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ)
-      );
+      const box = this.scratchCullBox;
+      box.min.set(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ);
+      box.max.set(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ);
 
       if (!frustum.intersectsBox(box)) {
         // Node is completely out of view. Normally retained (still pinned) so
@@ -657,7 +676,7 @@ export class TileManager {
     const clampY = Math.max(node.bounds.south, Math.min(node.bounds.north, cameraPosGlobal.y));
     // closestPoint.z must be in world Z (Mercator metres) to match
     // cameraPosGlobal.z — both the frustum and the camera live in world space.
-    const closestPoint = new THREE.Vector3(clampX, clampY, this.exagZ(node.centerElevation ?? 0) * zScale);
+    const closestPoint = this.scratchClosest.set(clampX, clampY, this.exagZ(node.centerElevation ?? 0) * zScale);
     const dist = Math.max(1, cameraPosGlobal.distanceTo(closestPoint));
 
     // Pin this key as active
@@ -1803,10 +1822,9 @@ export class TileManager {
       const zScale = mercatorScale(mercatorToLonLat(node.centerMercator[0], node.centerMercator[1])[1]);
       const tileMinZ = this.exagZ(-1000) * zScale;
       const tileMaxZ = this.exagZ(9000) * zScale;
-      const bbox = new THREE.Box3(
-        new THREE.Vector3(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ),
-        new THREE.Vector3(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ),
-      );
+      const bbox = this.scratchVisibleBox;
+      bbox.min.set(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ);
+      bbox.max.set(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ);
       return frustum.intersectsBox(bbox);
     }
     return true;
