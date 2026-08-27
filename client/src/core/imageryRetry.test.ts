@@ -217,3 +217,47 @@ describe("imagery cache provenance", () => {
     expect(seen).toEqual(["hit", "miss", "unknown"]);
   });
 });
+
+describe("imagery health reported to the HUD", () => {
+  // Flat green ground is what a failing upstream looks like, and it is
+  // indistinguishable from ground that simply has no imagery. Two upstreams
+  // died within ten days and neither was visible from the app. An AWS alarm
+  // cannot see it either: the tiler answers 503 as a SUCCESSFUL invocation, so
+  // Lambda's Errors metric stayed at 0 through both.
+  it("separates tiles still retrying from tiles that gave up", () => {
+    const tm = makeTm();
+    const cam = new THREE.PerspectiveCamera(60, 1.6, 1, 1e9);
+    cam.up.set(0, 0, 1);
+    cam.position.set(0, 0, 4000);
+    cam.lookAt(0, 1, 0);
+    cam.updateMatrixWorld(true);
+
+    // Nothing failing yet.
+    tm.update(cam.position.clone(), cam);
+    expect(tm.getImageryRetrying()).toBe(0);
+    expect(tm.getImageryGaveUp()).toBe(0);
+
+    // Mark some live nodes as failing, in both states.
+    const roots = [...(tm as any).rootNodes.values()] as any[];
+    expect(roots.length).toBeGreaterThan(3);
+    roots[0].imageryPending = true;
+    roots[1].imageryPending = true;
+    roots[2].imageryPending = false;
+    roots[2].imageryAttempts = 3; // spent its retries
+    roots[3].imageryPending = false;
+    roots[3].imageryAttempts = 1; // failed once, still eligible
+
+    tm.update(cam.position.clone(), cam);
+    expect(tm.getImageryRetrying()).toBe(2);
+    expect(tm.getImageryGaveUp()).toBe(1); // not the one with attempts left
+
+    // Recovery clears it, so the HUD returns to OK rather than latching.
+    for (const r of roots) {
+      r.imageryPending = false;
+      r.imageryAttempts = 0;
+    }
+    tm.update(cam.position.clone(), cam);
+    expect(tm.getImageryRetrying()).toBe(0);
+    expect(tm.getImageryGaveUp()).toBe(0);
+  });
+});

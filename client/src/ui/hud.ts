@@ -63,6 +63,10 @@ export interface HudStats {
   prefetchTotal: number;
   texCreated: number;
   texReused: number;
+  /** Visible tiles still chasing imagery an upstream will not serve. */
+  imageryRetrying: number;
+  /** Visible tiles that spent their retries and are drawing untextured. */
+  imageryGaveUp: number;
 }
 
 export interface HudContext {
@@ -148,6 +152,7 @@ export function setupHUD(
     <div>GPU CACHE: <span id="hud-cache">0.00</span> / ${Math.round(cacheBudget / (1024 * 1024))} MB</div>
     <div>PREFETCH: <span id="hud-prefetch">0 now / 0 total</span></div>
     <div>TEX POOL: <span id="hud-texpool">0 new / 0 reused</span></div>
+    <div>IMAGERY: <span id="hud-imagery">OK</span></div>
 
     ${section("TERRAIN &amp; OVERLAYS", `
       <div class="hud-group">
@@ -277,6 +282,7 @@ export function setupHUD(
   const hudCache = document.getElementById("hud-cache")!;
   const hudPrefetch = document.getElementById("hud-prefetch")!;
   const hudTexPool = document.getElementById("hud-texpool")!;
+  const hudImagery = document.getElementById("hud-imagery")!;
 
   const ctrlPreset = document.getElementById("ctrl-preset") as HTMLSelectElement;
   const ctrlImagerySource = document.getElementById("ctrl-imagery-source") as HTMLSelectElement;
@@ -539,6 +545,21 @@ export function setupHUD(
     hudCache.textContent = (stats.bytesUsed / (1024 * 1024)).toFixed(2);
     hudPrefetch.textContent = `${stats.prefetchNow} now / ${stats.prefetchTotal} total`;
     hudTexPool.textContent = `${stats.texCreated} new / ${stats.texReused} reused`;
+
+    // The state the ground is already showing, named. Flat green terrain is
+    // what an imagery upstream failing looks like, and it is indistinguishable
+    // from terrain that simply has no imagery unless something says so.
+    // Retrying resolves itself; given up will not until those tiles reload.
+    if (stats.imageryGaveUp > 0) {
+      hudImagery.textContent = `${stats.imageryGaveUp} tiles unavailable (upstream)`;
+      hudImagery.style.color = "#f87171";
+    } else if (stats.imageryRetrying > 0) {
+      hudImagery.textContent = `retrying ${stats.imageryRetrying}...`;
+      hudImagery.style.color = "#fbbf24";
+    } else {
+      hudImagery.textContent = "OK";
+      hudImagery.style.color = "";
+    }
   }
 
   function updateCompass(bearingDeg: number): void {

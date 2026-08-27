@@ -171,6 +171,19 @@ export class TileManager {
   /** Source tiles whose footprints are being fetched, keyed by tileKey. */
   private buildingSourcesInFlight = new Set<string>();
 
+  // Imagery health, recounted each frame during the walk.
+  //
+  // Surfaced on the HUD because this is the failure that has actually taken the
+  // viewer down: two upstreams died within ten days (USDA 2026-08-10, USGS
+  // 2026-08-18) and both times the only symptom was ground going flat green,
+  // with nothing on screen saying why. An AWS alarm cannot see it either -- the
+  // tiler answers 503 as a SUCCESSFUL Lambda invocation, so Errors stays at 0.
+  //
+  // Two states, because they mean different things to whoever is flying:
+  // retrying still resolves itself, given up does not until the tile reloads.
+  private imageryRetryingCount = 0;
+  private imageryGaveUpCount = 0;
+
   // Footprint overlay. The full S1M+usgs13 set (~360 KB gzipped) is fetched once
   // from the static /footprints/*.json files and held in memory; the mesh is
   // (re)built by clipping that set to the current viewport, so panning/zooming
@@ -480,6 +493,8 @@ export class TileManager {
     // 6. Run LOD update on each root node recursively
     this.activeKeys.clear();
     this.activeVisibleKeys.clear();
+    this.imageryRetryingCount = 0;
+    this.imageryGaveUpCount = 0;
     const cameraPosGlobal = this.scratchCameraPos.set(cx, cy, localCameraPos.z);
 
     for (const node of this.rootNodes.values()) {
@@ -611,6 +626,16 @@ export class TileManager {
     return this.prefetchTotal;
   }
 
+  /** Visible tiles still chasing imagery an upstream would not serve. */
+  getImageryRetrying(): number {
+    return this.imageryRetryingCount;
+  }
+
+  /** Visible tiles that spent their retries and are drawing untextured. */
+  getImageryGaveUp(): number {
+    return this.imageryGaveUpCount;
+  }
+
   /**
    * Whether everything the current view needs has arrived and been drawn.
    *
@@ -681,6 +706,15 @@ export class TileManager {
 
     // Pin this key as active
     this.activeKeys.add(node.key);
+
+    // Counted here rather than by a separate walk: this visit is already
+    // happening. Having spent its retries and still having none is derivable
+    // rather than stored -- imageryAttempts only advances on a failed fetch.
+    if (node.imageryPending) {
+      this.imageryRetryingCount++;
+    } else if ((node.imageryAttempts ?? 0) >= MAX_IMAGERY_RETRIES) {
+      this.imageryGaveUpCount++;
+    }
 
     // Screen-space-error subdivision (Cesium-style): refine while the tile's
     // geometric error projects to more than sseThreshold pixels on screen.

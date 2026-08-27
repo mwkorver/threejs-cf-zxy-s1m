@@ -188,6 +188,8 @@ function frameLoop() {
       prefetchTotal: tileManager.getPrefetchTotal(),
       texCreated: pool.created,
       texReused: pool.reused,
+      imageryRetrying: tileManager.getImageryRetrying(),
+      imageryGaveUp: tileManager.getImageryGaveUp(),
     });
   }
 }
