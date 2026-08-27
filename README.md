@@ -164,7 +164,7 @@ Per zoom band, the source data is:
 | Tiles | Zoom | Source | How |
 |---|---|---|---|
 | Imagery | ≥ 14 | NAIP COGs (requester-pays USDA S3) | DuckDB index → rio-tiler mosaic |
-| Imagery | ≤ 13 | USDA NAIP ImageServer tile cache | `/basemap` 2×2 stitch of 256 px children |
+| Imagery | ≤ 13 | USGS NAIP ImageServer (dynamic `exportImage`) | `/basemap` one 512 px render per tile |
 | Terrain | ≥ 15 | S1M 1 m DEM COGs (`prd-tnm` S3, Albers) | index → mosaic → warp; voids filled from 1/3″ |
 | Terrain | 11–14 | USGS 1/3″ (10 m) DEM COGs (`prd-tnm` S3) | same path, no fill |
 | Terrain | < 11 | `elevation-tiles-prod` Terrarium pyramid | 2×2 stitch passthrough (no COGs) |
@@ -235,8 +235,8 @@ can never drift apart.
   cache keys, per-layer maxzoom from registry `gsd`.
 - `GET /terrain/{z}/{x}/{y}.webp` — 512 px **Terrarium**-encoded Terrain-RGB,
   lossless WebP, vanilla registration (no overlap); the client builds skirts.
-- `GET /basemap/{z}/{x}/{y}.webp` — low-zoom 512 px imagery stitched from the
-  USDA NAIP ImageServer cache (the browser never hits ArcGIS directly).
+- `GET /basemap/{z}/{x}/{y}.webp` — low-zoom 512 px imagery rendered from the
+  USGS NAIP ImageServer (the browser never hits ArcGIS directly).
 - `GET /footprints/{s1m,usgs13}.json` — static gzipped GeoJSON of DEM COG
   footprints, served straight from S3 (no Lambda); rebuilt by
   [`tiler/scripts/build_footprints.py`](tiler/scripts/build_footprints.py).
@@ -250,10 +250,101 @@ cache key.
 
 ---
 
+## External dependencies, and how they fail
+
+This is a prototype standing on public GIS services it does not control, and
+two of them have taken the viewer down. Both failures look like the app is
+broken and are not, so they are worth recognising on sight.
+
+Neither is hypothetical: both happened within ten days of each other in August
+2026, and the notes below are what each one actually looked like.
+
+### Overture retires the release the buildings manifest points at
+
+`/buildings` does a two-step lookup. A manifest names which Overture GeoParquet
+row groups intersect a tile, and only those files are read. That manifest is a
+pointer into **one specific Overture release** — and Overture deletes old
+releases as new ones land.
+
+When that happens, `read_parquet` cannot open files that no longer exist,
+`BuildingResolver.resolve()` returns `None`, and every building tile answers
+`404 "no building coverage"`. Manhattan reports no buildings while holding
+2,700 of them.
+
+**Symptom:** buildings vanish everywhere, at every zoom, and stay gone.
+`curl` a known-good tile — `/buildings/14/4824/6157.pbf` should be ~220 KB.
+
+**Fix:** rebuild the manifest against the current release. The builder lives in
+the sibling repo, not this one:
+
+```bash
+# in ../deckgl-s3-cog-s1m — uses PyArrow deliberately; DuckDB/httpfs hits
+# range-read errors on this dataset
+python3 app/api/build_overture_buildings_index.py \
+  --release 2026-08-19.0 --output /tmp/buildings-index.parquet
+```
+
+It takes about 15 seconds and scans 512 footers. Then publish it to **both**
+paths, because they are not the same file:
+
+- the live one the Lambda reads, set by `TILER_BUILDING_LAKE_PATH` —
+  `s3://threejs-cf-zxy-s1m-<account>-<region>/manifest-index/buildings/buildings.parquet`
+- the seed under `TILER_SEED_BUCKET_PATH`, which `infra/deploy.sh` copies from
+  on a first-run deploy only
+
+Publishing to the seed alone changes nothing until a fresh account deploys.
+Afterwards, invalidate `/buildings/*` so CloudFront stops serving the cached
+404s. Validate before publishing by resolving a known tile: a z14 Newark tile
+(`14/4818/6159`) should report **192** buildings.
+
+### The imagery upstream goes down
+
+`/basemap` renders from the USGS NAIP ImageServer at
+`imagery.nationalmap.gov`. It has returned 502s, 504s, and — in the case of the
+USDA service it replaced — stopped completing TLS handshakes entirely for
+about six days.
+
+**Symptom:** ground renders as flat green terrain (`fallbackColor`, `0x556655`)
+where imagery has not arrived. Terrain, buildings and the DEM are unaffected;
+only the texture is missing.
+
+**What the app does about it, so this degrades rather than breaks:**
+
+- a failed imagery fetch no longer costs the tile its terrain, so you get flat
+  ground rather than a hole with sky through it
+- tiles retry three times, then settle for the fallback rather than billing
+  requester-pays reads against a dead upstream forever
+- the HUD `IMAGERY:` line reads `retrying N...` and then
+  `N tiles unavailable (upstream)`, so the cause is on screen
+- the tiler logs the actual reason (`basemap z/x/y unavailable: ... HTTP 502`),
+  which is the only place it is recorded
+
+**Fix:** wait. It is not your stack. Confirm with a direct request:
+
+```bash
+curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' --max-time 45 \
+  "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage?bbox=-8213617,4975133,-8211171,4977579&bboxSR=3857&imageSR=3857&size=512,512&format=png32&transparent=true&f=image"
+```
+
+Cached tiles keep serving throughout, which is why the viewer can look healthy
+while every uncached tile fails — the `U` label's dot distinguishes them: green
+means the tiler baked it just now, grey means CloudFront served it from the
+edge and the origin was never asked.
+
+### Why there is no alerting
+
+There nearly was, and the reason it is on the HUD instead is worth recording:
+a CloudWatch alarm on `AWS/Lambda Errors` would have stayed silent through both
+outages. The tiler answers 503 through FastAPI's `HTTPException`, which is a
+*successful* invocation — `Errors` read 0.0 the whole time. The client is the
+one component that reliably knows, so that is where the signal lives.
+
+---
+
 ## Getting Started
 
 ### Prerequisites
-* **Node.js** (v20+) — CI runs on Node 20
+* **Node.js** (v20+) — CI runs on Node 24
 * **Python** (3.12+)
 * **Docker** (for AWS SAM container builds)
 * **AWS CLI** & **AWS SAM CLI** (for cloud deployments; reads need credentials
