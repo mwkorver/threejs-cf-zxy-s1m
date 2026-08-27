@@ -17,7 +17,8 @@ USGS 3DEP S1M 1-meter terrain, normalized server-side onto a single EPSG:3857
 `z/x/y` quadtree and streamed to a Three.js client through CloudFront.
 
 ![The viewer in flight over Wyoming: NAIP aerial imagery draped on 1-meter S1M
-terrain, with the telemetry and terrain-overlay panel open](docs/hero.jpg)
+terrain, tracking a river canyon through badlands at 449 m AGL with terrain
+following on and the telemetry panel open](docs/hero.jpg)
 
 <sub>In flight at 43.527 N, −109.703 W — 8,019 m, heading 341° — over the upper
 Wind River country, Wyoming. NAIP aerial imagery draped on 1 m S1M terrain, both
