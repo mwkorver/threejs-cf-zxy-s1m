@@ -35,8 +35,11 @@ import type { TileId } from "./mercator";
 // rather than adding a dependency for one gated file.
 declare const process: { env: Record<string, string | undefined> };
 
-const BASE =
-  import.meta.env.VITE_TILE_BASE_URL ?? "https://d2ua3aiihdkajg.cloudfront.net";
+// No default distribution. This harness drives real tile renders against a
+// real deployment, and NAIP is requester-pays -- so a hardcoded fallback would
+// mean anyone who forked the repo and ran MEASURE=1 silently billed reads to
+// whoever owns that distribution. Make the target explicit or don't run.
+const BASE = import.meta.env.VITE_TILE_BASE_URL ?? "";
 
 function accessKey(): string {
   return (import.meta.env.VITE_TILE_KEY ?? process.env.TILE_ACCESS_KEY ?? "").trim();
@@ -146,6 +149,12 @@ describe.runIf(process.env.MEASURE === "1")("building tile cost matrix", () => {
   it(
     "measures payload, records and reuse across areas and zooms",
     async () => {
+      expect(
+        BASE,
+        "no VITE_TILE_BASE_URL in client/.env.local -- point this at YOUR deployment " +
+          "(infra/deploy.sh writes it); this harness bills requester-pays reads to whoever owns it",
+      ).not.toBe("");
+
       const key = accessKey();
       expect(key, "no VITE_TILE_KEY in client/.env.local -- requests would 403").not.toBe("");
 
