@@ -2,6 +2,21 @@
 
 Serves MVT vector tiles (.pbf) containing 3D building footprints, heights,
 and Overture/MS building IDs for tile envelope z/x/y.
+
+The index this resolves against (settings.building_lake_path) is a pointer into
+ONE Overture release, and Overture deletes old releases as new ones land. When
+that happens read_parquet cannot open the files the index names, resolve()
+returns None, and every building tile answers 404 -- buildings vanish
+everywhere while the code is entirely correct.
+
+The rebuild is not in this repo. It lives in the sibling project, because that
+is where the lake is maintained:
+
+    ../deckgl-s3-cog-s1m/app/api/build_overture_buildings_index.py
+
+See "External dependencies, and how they fail" in the README for the full
+procedure -- notably that the output must be published to BOTH the live path
+the Lambda reads and the seed deploy.sh copies from.
 """
 
 import logging
@@ -103,5 +118,14 @@ class BuildingResolver:
                 return data if len(data) > 0 else None
             return None
         except Exception as e:
-            logger.warning(f"Building tile query failed for {self.index_path} {z}/{x}/{y}: {e}")
+            # Named, not just reported: a missing-object error here is almost
+            # always the index outliving its Overture release, and that is not
+            # deducible from a stack trace. Whoever reads this line is the
+            # person who needs the pointer.
+            logger.warning(
+                f"Building tile query failed for {self.index_path} {z}/{x}/{y}: {e} "
+                "(if this names missing S3 objects, Overture has retired the release "
+                "this index points at -- rebuild it: see README "
+                "'External dependencies, and how they fail')"
+            )
             return None
