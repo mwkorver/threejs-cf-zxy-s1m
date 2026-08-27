@@ -243,6 +243,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
     // terrain tile, as this used to, ran the tiler's DuckDB query 256 times
     // over between z14 and z18 for the same footprints.
     let buildingRecords: BuildingRecord[] | null = null;
+    let buildingsFailed = false;
     if (showBuildings && tile.z === buildingSourceZoom) {
       try {
         const { url, label } = buildingsRequest(baseUrl, tile);
@@ -256,6 +257,14 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           console.warn(`Building fetch failed for tile ${tile.z}/${tile.x}/${tile.y}:`, err);
         }
+        // A 404 is the tiler saying this ground has no buildings, which is an
+        // answer. Anything else means it could not tell us, which is not -- and
+        // the two must not look alike downstream, because the client stops
+        // asking about ground it believes is empty. Overture retiring the
+        // release the manifest pointed at turned every source tile into a 404's
+        // twin: a 500 that read as "nothing here" would have been cached as
+        // settled fact for the session.
+        buildingsFailed = !(err instanceof Error && err.message.endsWith(": 404"));
         buildingRecords = null;
       }
     }
@@ -292,6 +301,7 @@ async function handleTileRequest(e: MessageEvent<WorkerRequest>): Promise<void> 
       imageBitmap,
       imageryPending: imageryFailed,
       imageryCache,
+      buildingsFailed,
       minElevation,
       maxElevation
     }, transferList);

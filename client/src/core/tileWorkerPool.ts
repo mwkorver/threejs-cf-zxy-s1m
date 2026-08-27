@@ -260,6 +260,7 @@ export class TileWorkerPool {
         centerElevation: data.centerElevation,
         meshData: data.meshData,
         buildingRecords: data.buildingRecords,
+        buildingsFailed: data.buildingsFailed,
         imageBitmap: data.imageBitmap,
         imageryPending: data.imageryPending,
         imageryCache: data.imageryCache,
@@ -341,6 +342,7 @@ export class TileWorkerPool {
       // deliberately skips the buildings fetch: the tests that run it assert on
       // terrain and imagery, and MVT decoding needs no coverage from here.
       buildingRecords: null,
+      buildingsFailed: false,
       imageBitmap,
       // The fallback path lets loadImageryFor's failure surface as a rejection,
       // so reaching here at all means imagery is not pending.

@@ -100,6 +100,15 @@ export interface WorkerTileSuccessResponse {
    * sent buildings, the pool discarded them, and tsc saw nothing wrong.
    */
   buildingRecords: BuildingRecord[] | null;
+  /**
+   * The buildings fetch failed, as opposed to answering "none here".
+   *
+   * buildingRecords is null for both, and the difference decides whether the
+   * client may stop asking about this ground: an empty answer is settled, a
+   * failure is not. Required, not optional, for the reason recorded above --
+   * tileWorkerPool forwards this payload field by field.
+   */
+  buildingsFailed: boolean;
   /** null when imagery 404s or failed transiently; the mesh is still good. */
   imageBitmap: ImageBitmap | null;
   /**

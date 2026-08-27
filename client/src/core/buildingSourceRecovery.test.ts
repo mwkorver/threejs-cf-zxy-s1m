@@ -144,3 +144,42 @@ describe("a building source whose records are evicted while in use", () => {
     expect(n.mesh?.getObjectByName("buildingMesh"), "buildings come back").toBeDefined();
   });
 });
+
+describe("a source tile whose buildings fetch failed", () => {
+  /** A result where buildings came back null -- for the given reason. */
+  function noRecords(failed: boolean): TileLoadResult {
+    return { ...(result(false) as any), buildingsFailed: failed } as TileLoadResult;
+  }
+
+  const Z14: TileId = { z: 14, x: SOURCE.x, y: SOURCE.y };
+
+  // Overture retired the release the manifest named, so every source tile
+  // started answering with nothing. Recorded as "no buildings here", that would
+  // have written emptiness over real cities and stopped the client asking for
+  // the rest of the session -- outlasting the outage that caused it.
+  it("is not recorded as empty ground", async () => {
+    const tm = makeTm();
+    (tm as any).workerPool.requestTile = vi.fn(() => Promise.resolve(noRecords(true)));
+
+    const n = node(Z14);
+    (tm as any).triggerLoad(n, 0);
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Still unknown, so the next tile over this ground will ask again.
+    expect((tm as any).buildingCache.has(SOURCE)).toBe(false);
+  });
+
+  // The opposite case has to keep working, or ensureBuildingSource re-requests
+  // open water on every mesh build forever.
+  it("still records genuinely empty ground so the asking stops", async () => {
+    const tm = makeTm();
+    (tm as any).workerPool.requestTile = vi.fn(() => Promise.resolve(noRecords(false)));
+
+    const n = node(Z14);
+    (tm as any).triggerLoad(n, 0);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect((tm as any).buildingCache.has(SOURCE)).toBe(true);
+    expect((tm as any).buildingCache.forTile(Z14, 14)).toBeNull(); // known, and empty
+  });
+});

@@ -1091,8 +1091,12 @@ export class TileManager {
         if (res.buildingRecords) {
           this.buildingCache.put(source, res.buildingRecords);
           this.attachPendingBuildings(source);
-        } else {
-          this.buildingCache.put(source, []); // known empty, stop asking
+        } else if (!res.buildingsFailed) {
+          // Empty is an answer worth recording; a failure is not. Left
+          // unrecorded, has() stays false and the next mesh built over this
+          // ground asks again -- which is what makes the outage recoverable
+          // rather than cached as fact. Same rule as buildBundleFromResult.
+          this.buildingCache.put(source, []);
         }
       })
       .catch(() => {
@@ -1231,13 +1235,20 @@ export class TileManager {
       // Tiles over this ground that already drew without buildings can have
       // them now.
       this.attachPendingBuildings(source);
-    } else if (this.showBuildings && tile.z === this.buildingSourceZoom) {
-      // A source tile that answered with nothing is not the same as a source
-      // tile nobody asked about, and only the first is safe to stop asking
-      // about. The worker returns null for both, so it is the zoom that tells
-      // them apart. Recording the empty result is what lets has() mean "we know
-      // about this ground" -- without it, ensureBuildingSource would re-request
-      // open water forever.
+    } else if (this.showBuildings && tile.z === this.buildingSourceZoom && !res.buildingsFailed) {
+      // Three outcomes share one null: nobody asked, the ground is empty, and
+      // the fetch failed. Only the middle one is safe to record as settled.
+      //
+      // The zoom separates the first, buildingsFailed the third. That third
+      // case is not hypothetical -- Overture retired the release the manifest
+      // pointed at, every source tile began answering 404-shaped failures, and
+      // without this the client would have written "no buildings here" over
+      // real cities and stopped asking for the rest of the session.
+      //
+      // A genuine 404 IS an answer -- the tiler says this ground has none -- so
+      // the worker leaves buildingsFailed false for it and true for anything
+      // else. Not recording a failure leaves has() false, so the next tile
+      // built over this ground asks again.
       this.buildingCache.put(
         BuildingCache.sourceTileFor(tile, this.buildingSourceZoom),
         [],
