@@ -341,14 +341,6 @@ while every uncached tile fails — the `U` label's dot distinguishes them: gree
 means the tiler baked it just now, grey means CloudFront served it from the
 edge and the origin was never asked.
 
-### Why there is no alerting
-
-There nearly was, and the reason it is on the HUD instead is worth recording:
-a CloudWatch alarm on `AWS/Lambda Errors` would have stayed silent through both
-outages. The tiler answers 503 through FastAPI's `HTTPException`, which is a
-*successful* invocation — `Errors` read 0.0 the whole time. The client is the
-one component that reliably knows, so that is where the signal lives.
-
 ---
 
 ## Getting Started
