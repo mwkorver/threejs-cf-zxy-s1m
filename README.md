@@ -314,7 +314,7 @@ Afterwards, invalidate `/buildings/*` so CloudFront stops serving the cached
 USDA service it replaced — stopped completing TLS handshakes entirely for
 about six days.
 
-The reason we go to the National Map for levels 14 and up is because building tiles from the source NAIP quarter quad COGs requires reading a very large number of them less than or equal to z 14. 
+(The reason we go to the National Map for levels 14 and up is because building tiles from the source NAIP quarter quad COGs requires reading a very large number of them less than or equal to z 14) 
 
 **Symptom:** ground renders as flat green terrain (`fallbackColor`, `0x556655`)
 where imagery has not arrived. Terrain, buildings and the DEM are unaffected;
@@ -331,7 +331,7 @@ only the texture is missing.
 - the tiler logs the actual reason (`basemap z/x/y unavailable: ... HTTP 502`),
   which is the only place it is recorded
 
-**Fix:** wait. It is not your stack. Confirm with a direct request:
+**Fix:** wait. It's not your stack. Unless DOGE has shut down the USGS it should come back. Confirm with a direct request:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' --max-time 45 \
