@@ -6,15 +6,15 @@
 
 > [!NOTE]
 > **Public prototype, released under [MIT](LICENSE) — use, fork, and adapt it freely.**
-> It is provided as-is, with no support or active maintenance; issues and pull
+> It's provided as-is, with no support or active maintenance; issues and pull
 > requests aren't monitored, so please fork rather than wait on changes here.
 > This demo builds off of
 > [deckgl-s3-cog-s1m](https://github.com/mwkorver/deckgl-s3-cog-s1m), which
-> renders the same federal datasets with the opposite architecture.
+> renders the same federal datasets but with the opposite architecture.
 
 A **CONUS flight-simulator-style streaming viewer**: NAIP aerial imagery and
 USGS 3DEP S1M 1-meter terrain, normalized server-side onto a single EPSG:3857
-`z/x/y` quadtree and streamed to a Three.js client through CloudFront.
+`z/x/y` quadtree and streamed to a Three.js client through CloudFront CDN.
 
 ![The viewer in flight over Wyoming: NAIP aerial imagery draped on 1-meter S1M
 terrain, tracking a river canyon through badlands at 449 m AGL with terrain
@@ -23,15 +23,12 @@ following on and the telemetry panel open](docs/hero.jpg)
 <sub>In flight at 43.527 N, −109.703 W — 8,019 m, heading 341° — over the upper
 Wind River country, Wyoming. NAIP aerial imagery draped on 1 m S1M terrain, both
 streamed as `z/x/y` WebP tiles. Vertical exaggeration is **1.5×**, the panel's
-default, so relief reads steeper than truth. The counters are a live flight, not
+default, so relief reads a bit steeper than truth. The counters are a live flight, not
 a cold load: 1,028 tiles prefetched along the flight vector, and 1,463 of 2,570
-tile textures served by recycling rather than allocation. They are also a
-capture of an older build — the GPU budget has since gone to 512 MB, and the
-210-against-204 tile count in the shot is the working-set overrun that
-[`67e94a9`](../../commit/67e94a9) fixed.</sub>
+tile textures served by recycling rather than allocation. </sub>
 
-What's built today: a camera you can fly over 1-meter S1M terrain, centered on
-the Wyoming S1M tile group, with server tiles end-to-end. Everything below —
+What's built today: a camera you can fly over 1-meter S1M terrain, starting at
+the Wyoming area S1M tile group, with server tiles end-to-end. Everything below —
 the architecture, the tile contracts, and how to run it — is self-contained;
 [FLIGHT-SIM-PLAN.md](FLIGHT-SIM-PLAN.md) holds the longer-form design record
 and the phases still ahead, and is worth reading only if you want the reasoning
@@ -67,7 +64,7 @@ Part of the interest in building this was to find out whether anything we built
 into [**pTolemy3D**](https://github.com/mwkorver/ptolemy3d) over twenty years ago
 still holds up. That viewer solved
 streaming-terrain flight in Java and JOGL, against JPEG2000 imagery and a very
-different web — but the hard parts of flying a camera over tiles have not changed much.
+different web back then — but the hard parts of flying a camera over tiles have not changed much.
 
 Several of its ideas came across intact: a background loading pipeline so the
 render loop never stalls, nearest-tile-first scheduling so the closest terrain
@@ -97,7 +94,7 @@ mean locking down most of what makes it worth adopting.
 [**cogeo-mosaic**](https://github.com/developmentseed/cogeo-mosaic) is the
 closer call, and the honest answer is narrower than "the asset set is dynamic."
 
-That defence doesn't hold up. NAIP is re-flown per state every year or two, and
+That defence doesn't actually hold up. NAIP is re-flown per state less than once a year, and
 S1M grows in batches — the last index rebuild added 1,536 tiles and retired 128
 out of ~11.7k. That's a periodic batch job, not a stream, and a MosaicJSON
 regenerated on the same cadence would track it perfectly well. The
