@@ -169,6 +169,15 @@ Per zoom band, the source data is:
 | Terrain | ≥ 15 | S1M 1 m DEM COGs (`prd-tnm` S3, Albers) | index → mosaic → warp; voids filled from 1/3″ |
 | Terrain | 11–14 | USGS 1/3″ (10 m) DEM COGs (`prd-tnm` S3) | same path, no fill |
 | Terrain | < 11 | `elevation-tiles-prod` Terrarium pyramid | 2×2 stitch passthrough (no COGs) |
+| Buildings | ≥ 14 | Overture GeoParquet (S3) | DuckDB `ST_AsMVT` → MVT, extruded client-side |
+
+![Downtown Seattle at 550 m: Overture building footprints extruded over NAIP
+imagery along the I-5 corridor, drawn from one z14 source tile and shared down
+the quadtree](docs/buildings-seattle.jpg)
+
+<sub>Buildings are the one layer the database emits in its final wire format:
+`ST_AsMVT` assembles the vector tile inside DuckDB, and the client extrudes the
+footprints onto terrain it already has.</sub>
 
 ---
 
