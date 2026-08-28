@@ -230,7 +230,7 @@ can never drift apart.
 | [`client/`](client) | TypeScript client: flat Mercator world, terrain meshes with skirts, three.js renderer | [§5](FLIGHT-SIM-PLAN.md#5-client-architecture-notes), [§6](FLIGHT-SIM-PLAN.md#6-engine-decision-custom-renderer-vs-cesiumjs), [§10.2](FLIGHT-SIM-PLAN.md#10-open-questions-settle-in-phase-0) |
 | [`infra/`](infra) | SAM/CloudFormation: tiler stack → edge (CloudFront) stack | [§3](FLIGHT-SIM-PLAN.md#3-architecture), [§7](FLIGHT-SIM-PLAN.md#7-reuse-from-deckgl-s3-cog-s1m) |
 
-### Tile contracts (v0)
+### Tile contracts
 
 - `GET /imagery/{layer}/{year}/{z}/{x}/{y}.webp` — 512 px WebP q≈75, path-only
   cache keys, per-layer maxzoom from registry `gsd`.
@@ -344,120 +344,52 @@ one component that reliably knows, so that is where the signal lives.
 
 ## Getting Started
 
-### Prerequisites
-* **Node.js** (v20+) — CI runs on Node 24
-* **Python** (3.12+)
-* **Docker** (for AWS SAM container builds)
-* **AWS CLI** & **AWS SAM CLI** (for cloud deployments; reads need credentials
-  because NAIP is requester-pays)
-
-### 1. Installation
+Needs Node 20+, Python 3.12+, Docker (for SAM container builds), and the AWS +
+SAM CLIs with credentials for anything cloud-side — NAIP is requester-pays, so
+reads are billed to the caller.
 
 ```bash
-# tiler (installable package; [dev] adds pytest + ruff)
-cd tiler && pip install -e ".[dev]"
-
-# client
-cd client && npm install
+(cd tiler  && pip install -e ".[dev]")   # tiler: [dev] adds pytest + ruff
+(cd client && npm install)               # client
 ```
 
-> [!NOTE]
-> The tiler's virtualenv stores absolute paths, so it does **not** survive the
-> repo directory being renamed or moved. If `pytest` suddenly can't import
-> `tiler`, recreate it: `rm -rf .venv && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"`.
+The tiler's virtualenv stores absolute paths, so it does not survive the repo
+being moved or renamed; if `pytest` stops importing `tiler`, delete `.venv` and
+reinstall.
 
-### 2. Local Development
+Run both locally — tiler on `:8000`, client on `:5180`:
 
 ```bash
-# tiler on :8000
-cd tiler && uvicorn tiler.app:app --reload
-
-# client on :5180
-cd client && npm run dev
+(cd tiler  && uvicorn tiler.app:app --reload)   # one terminal
+(cd client && npm run dev)                      # another
 ```
 
-The viewer defaults to the deployed CloudFront distribution. Override the
-source with a query param:
+The viewer points at the deployed distribution by default. `?src=tiler-local`
+sends it to the local uvicorn, `?src=local` to the baked tiles in
+`client/public/tiles/`.
 
-| URL | Tiles come from |
-|---|---|
-| `http://localhost:5180/` | deployed CloudFront (default) |
-| `http://localhost:5180/?src=tiler-local` | local uvicorn on `:8000` |
-| `http://localhost:5180/?src=local` | baked static tiles in `client/public/tiles/` |
-
-Inspect real tiles for any CONUS location (needs AWS credentials) — writes a
-self-contained swipe-comparison page, imagery vs S1M hillshade:
+Both suites are hermetic — S3 and HTTP are mocked, so no credentials and no
+network:
 
 ```bash
-cd tiler && python scripts/preview.py 40.48 -74.66 15 --layer naip --year 2023
+(cd client && npm run typecheck && npm test)
+(cd tiler  && ruff check . && python -m pytest)
 ```
 
-### 3. Testing
-
-CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the checks
-below on every push to `master` and every pull request. Both suites are
-**hermetic** — all S3 and HTTP reads are mocked, so no AWS credentials and no
-network access are required.
-
-TypeScript client (`tsc` + Vitest) — covers the tile math, the LOD/transition
-logic, the worker pool, and the shared tile-URL routing:
+Deployment is two CDK stacks in `us-west-2`, the region holding the lake and
+the source COGs. One script does all of it — build, both stacks, bucket seed,
+invalidation, and `client/.env.local`:
 
 ```bash
-cd client && npm run typecheck && npm test
-```
-
-Python tiler (Ruff + pytest) — covers the endpoint contracts, the Terrarium
-encoding round-trip, tile assembly, and the transient-failure handling:
-
-```bash
-cd tiler && ruff check . && python -m pytest
-```
-
-Ruff is deliberately scoped to `E9` (syntax/IO errors) and `F` (pyflakes:
-undefined names, unused imports), so a lint failure always means something is
-actually broken rather than merely unfashionable.
-
-### 4. Deployment
-
-Deploys to **`us-west-2`**, the region holding the GeoParquet lake and the
-source COG buckets (`naip-visualization`, `prd-tnm`), keeping compute and the
-bulk of imagery reads in-region.
-
-Infrastructure is two AWS CDK (TypeScript) stacks under [infra/](infra/) —
-`flight-sim-tiler` then `flight-sim-edge`, the second consuming the first's
-Function URL directly rather than having it read back out at deploy time.
-
-```bash
-# One-time per account:
-#   npx cdk bootstrap aws://<account-id>/us-west-2
-# On a machine running colima rather than Docker Desktop, point Docker at
-# colima's socket first — CDK builds the tiler image locally:
-#   export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock
 infra/deploy.sh
 ```
 
-That builds the client, deploys both stacks, seeds the static bucket on first
-run, uploads the bundle, invalidates the app entry points, and writes
-`client/.env.local`. `.github/workflows/deploy.yml` does the same from CI on
-manual dispatch.
-
-The Function URL is `AWS_IAM`-authed (CloudFront OAC signs origin requests), so
-it can't be `curl`ed directly — smoke-test by invoking the Lambda with a
-Function-URL event instead. See [infra/README.md](infra/README.md) for that,
-the footprint rebuild, the runtime gotchas baked into the code, and what to
-check in `cdk diff` before deploying over the live stacks.
-
-`deploy.sh` reads the dev access key from the gitignored repo-root `.tile-key`,
-passes it to CloudFormation as a `NoEcho` parameter, and mirrors both the key
-and the distribution domain into `client/.env.local` so the browser and the
-edge can't drift apart. With no key present the distribution deploys open —
-which is also the escape hatch if you lock yourself out.
-
-The key is **not** a real secret: it ships in the client bundle and is visible
-in devtools. It exists to keep crawlers and shared URLs from burning
-requester-pays reads on a dev distribution, and it is enforced at
-*viewer-request* — CloudFront serves cache hits without contacting the origin,
-so origin-side auth would leave every already-cached tile open.
+[infra/README.md](infra/README.md) has everything else you need before pointing
+that at a real account: the one-time bootstrap, the colima `DOCKER_HOST`
+export, why the distribution deploys disabled, how the dev access key works,
+smoke-testing the IAM-authed Function URL, and what to read in `cdk diff`
+before deploying over live stacks. Index and asset builders are in
+[tiler/scripts/](tiler/scripts/).
 
 ---
 
