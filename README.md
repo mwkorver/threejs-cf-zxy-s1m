@@ -262,9 +262,9 @@ cache key.
 
 ## External dependencies, and how they fail
 
-This is a prototype standing on public GIS services it does not control, and
+This is a prototype partially standing on 2 public data services it does not control, and
 two of them have taken the viewer down. Both failures look like the app is
-broken and are not, so they are worth recognising on sight.
+broken and are not, so they are worth recognizing on sight.
 
 Neither is hypothetical: both happened within ten days of each other in August
 2026, and the notes below are what each one actually looked like.
@@ -313,6 +313,8 @@ Afterwards, invalidate `/buildings/*` so CloudFront stops serving the cached
 `imagery.nationalmap.gov`. It has returned 502s, 504s, and — in the case of the
 USDA service it replaced — stopped completing TLS handshakes entirely for
 about six days.
+
+The reason we go to the National Map for levels 14 and up is because building tiles from the source NAIP quarter quad COGs requires reading a very large number of them less than or equal to z 14. 
 
 **Symptom:** ground renders as flat green terrain (`fallbackColor`, `0x556655`)
 where imagery has not arrived. Terrain, buildings and the DEM are unaffected;
