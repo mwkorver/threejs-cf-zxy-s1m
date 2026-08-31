@@ -76,7 +76,7 @@ camera pitch here caused LOD inversions and was replaced by screen-space error.
 [**README-PTOLEMY3D.md**](README-PTOLEMY3D.md) traces each pattern from the
 original implementation to where it now lives in `client/src/core/`.
 
-### Why not TiTiler or cogeo-mosaic?
+### Why not TiTiler, cogeo-mosaic, or PostGIS?
 
 Good question, since both exist and this repo leans on
 [rio-tiler](https://github.com/cogeotiff/rio-tiler) for the actual reads.
@@ -122,6 +122,17 @@ the index grows without the per-tile read growing with it.
 So the verdict is scale-dependent rather than absolute. For a project-sized
 asset set MosaicJSON wins, and wins easily. For CONUS, with a lake already
 maintained next door, this way does.
+
+**PostGIS** deserves its own mention, because it is the obvious answer and
+would have been the easy one: put the footprints in a table, add a GiST index,
+and "which COGs intersect this tile" is a one-liner someone else has already
+optimised over twenty years. It is ruled out by the constraint that shapes
+everything else here — this had to be serverless, all the way down. A PostGIS
+instance is a server that runs, and bills, whether or not anyone is flying;
+reaching it from Lambda means a VPC, and a function that scales out means
+connection management in front of it. DuckDB gives the same spatial query with
+no server at all: the index is a file on S3, and compute exists only for as
+long as a cold tile takes to build. Idle cost is storage and nothing else.
 
 ## Architecture
 
