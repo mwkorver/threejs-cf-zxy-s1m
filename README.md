@@ -107,8 +107,21 @@ in step forever. One index is simpler than two.
 
 Not simpler *code*, though, which is worth saying plainly: DuckDB rides along
 in the Lambda, and the SQL is mine to maintain. cogeo-mosaic is less code and
-far better tested. This is a reuse decision, not a capability one — without an
-existing shared lake, MosaicJSON wins.
+far better tested.
+
+Scale is the other half of it, and it cuts the other way. A MosaicJSON is one
+document mapping quadkeys to assets, and CONUS NAIP runs to roughly 220k
+quarter quads per coverage year — indexed at z12 that is a document of tens of
+megabytes per vintage, fetched and parsed to answer one tile. cogeo-mosaic's
+answer is a DynamoDB or SQLite backend, which works; but at that point the
+choice is between two databases rather than between a database and a file, and
+the less-code argument has spent itself. Parquet stays flat here: row-group
+statistics mean only the groups whose bbox overlaps the tile are ever read, so
+the index grows without the per-tile read growing with it.
+
+So the verdict is scale-dependent rather than absolute. For a project-sized
+asset set MosaicJSON wins, and wins easily. For CONUS, with a lake already
+maintained next door, this way does.
 
 ## Architecture
 
