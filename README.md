@@ -130,13 +130,24 @@ optimised over twenty years.
 
 The reason it isn't here is less architectural than it sounds. This is a
 prototype that sits idle for weeks between the afternoons anyone looks at it,
-and I did not want a server-side stack to park — something to stop, start back
-up, patch, and pay for in the gaps. A PostGIS instance is exactly that, plus a
-VPC to reach it from Lambda. DuckDB answers the same query with nothing
-running: the index is a file on S3, and compute exists only for as long as a
-cold tile takes to build. That is also why the distribution itself ships
-disabled and `DEMO_ENABLED=true` is a deliberate act — switch it off and there
-is nothing left running to forget about.
+and I did not want a server-side stack to look after.
+
+That argument is weaker than it used to be, and it is worth being accurate
+about: Aurora Serverless v2 has scaled to zero ACUs since late 2024, so a
+paused PostGIS cluster bills storage and nothing else. It parks itself. What
+rules it out here is the wake-up — resuming from zero takes on the order of 15
+seconds, and the query it would serve sits on the cold-tile path with the
+browser waiting. Avoiding that means never letting it pause, which is the cost
+back again. There is also a neat catch: RDS Proxy, the standard answer to a
+Lambda opening connections to Postgres, is on the list of configurations that
+disable auto-pause. Connection pooling and scale-to-zero are mutually
+exclusive.
+
+DuckDB sidesteps the question rather than answering it. The index is a file on
+S3, so there is nothing to wake, and compute exists only for as long as a cold
+tile takes to build. That is the same instinct as the distribution shipping
+disabled and `DEMO_ENABLED=true` being a deliberate act — switch it off and
+nothing is left running to forget about.
 
 ## Architecture
 
