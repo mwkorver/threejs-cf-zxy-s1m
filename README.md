@@ -168,6 +168,22 @@ Per zoom band, the source data is:
 | Terrain | < 11 | `elevation-tiles-prod` Terrarium pyramid | 2×2 stitch passthrough (no COGs) |
 | Buildings | ≥ 14 | Overture GeoParquet (S3) | DuckDB `ST_AsMVT` → MVT, extruded client-side |
 
+That split is a scoping decision, not a ranking of quality. What this demo set
+out to test is the top of the table — 1-meter S1M terrain with NAIP at native
+resolution, roughly z15–20, where the tile count explodes and the streaming
+either works or visibly doesn't. Everything below is the approach to it:
+context you pass through on the way down, where a 10 m DEM and a rendered
+basemap are indistinguishable from something better. Those bands therefore lean
+on whatever already exists — an external image service at low-zoom imagery, a
+global Terrarium pyramid under z11 — rather than being built out.
+
+It also explains why the two outages described further down differ so much in
+severity. The imagery one lands on the approach — ground goes flat green while
+terrain, buildings and the DEM keep working, because that band was only ever
+context. The Overture one lands on the subject, and the feature simply
+disappears. Same class of dependency, different blast radius, entirely because
+of which half of the table it sits in.
+
 ![Downtown Seattle at 550 m: Overture building footprints extruded over NAIP
 imagery along the I-5 corridor, drawn from one z14 source tile and shared down
 the quadtree](docs/buildings-seattle.jpg)
