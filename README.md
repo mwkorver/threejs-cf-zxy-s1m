@@ -405,9 +405,30 @@ Run both locally — tiler on `:8000`, client on `:5180`:
 (cd client && npm run dev)                      # another
 ```
 
-The viewer points at the deployed distribution by default. `?src=tiler-local`
-sends it to the local uvicorn, `?src=local` to the baked tiles in
-`client/public/tiles/`.
+A word on what a fresh clone can and cannot do, because none of the three tile
+sources work out of the box. **NAIP is requester-pays**, so AWS credentials are
+a precondition for this project rather than an optional extra:
+
+| Source | What it needs |
+|---|---|
+| deployed distribution (default) | `VITE_TILE_BASE_URL` in `client/.env.local`, which only `infra/deploy.sh` writes. Without it the app renders "No tile source configured" and stops. |
+| `?src=tiler-local` | the uvicorn tiler above, plus credentials — it reads the lake and requester-pays COGs on every tile |
+| `?src=local` | baked tiles under `client/public/tiles/`, which are **gitignored** and not in a clone. Generate them with `tiler/scripts/bake.py`, which also needs credentials |
+
+To bake that block:
+
+```bash
+(cd tiler && .venv/bin/python scripts/bake.py 40.48 -74.66 14 --grid 4)
+```
+
+It writes a 4×4 z14 block — 49 files, ~4 MB — into `client/public/tiles/`. That
+is a fixed block, not a world: it exists so the client can be worked on without
+paying tiler latency on every frame, not so you can fly. The viewer starts over
+Wyoming by default, so aim it at the block explicitly:
+
+```
+http://localhost:5180/?src=local&lat=40.48&lon=-74.66
+```
 
 Both suites are hermetic — S3 and HTTP are mocked, so no credentials and no
 network:
