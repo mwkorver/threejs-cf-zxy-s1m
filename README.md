@@ -145,9 +145,7 @@ exclusive.
 
 DuckDB sidesteps the question rather than answering it. The index is a file on
 S3, so there is nothing to wake, and compute exists only for as long as a cold
-tile takes to build. That is the same instinct as the distribution shipping
-disabled and `DEMO_ENABLED=true` being a deliberate act — switch it off and
-nothing is left running to forget about.
+tile takes to build.
 
 ## Architecture
 
