@@ -126,13 +126,17 @@ maintained next door, this way does.
 **PostGIS** deserves its own mention, because it is the obvious answer and
 would have been the easy one: put the footprints in a table, add a GiST index,
 and "which COGs intersect this tile" is a one-liner someone else has already
-optimised over twenty years. It is ruled out by the constraint that shapes
-everything else here — this had to be serverless, all the way down. A PostGIS
-instance is a server that runs, and bills, whether or not anyone is flying;
-reaching it from Lambda means a VPC, and a function that scales out means
-connection management in front of it. DuckDB gives the same spatial query with
-no server at all: the index is a file on S3, and compute exists only for as
-long as a cold tile takes to build. Idle cost is storage and nothing else.
+optimised over twenty years.
+
+The reason it isn't here is less architectural than it sounds. This is a
+prototype that sits idle for weeks between the afternoons anyone looks at it,
+and I did not want a server-side stack to park — something to stop, start back
+up, patch, and pay for in the gaps. A PostGIS instance is exactly that, plus a
+VPC to reach it from Lambda. DuckDB answers the same query with nothing
+running: the index is a file on S3, and compute exists only for as long as a
+cold tile takes to build. That is also why the distribution itself ships
+disabled and `DEMO_ENABLED=true` is a deliberate act — switch it off and there
+is nothing left running to forget about.
 
 ## Architecture
 
