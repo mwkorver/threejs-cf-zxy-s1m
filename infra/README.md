@@ -192,3 +192,62 @@ Cache policy notes (plan [§4.1](../FLIGHT-SIM-PLAN.md#41-imagery), [§8](../FLI
 - Tiles are immutable: `Cache-Control: public, max-age=31536000, immutable`.
 - Origin shield + pre-genned z0–z12 pyramid are the cold-latency mitigations,
   in that order; hot-tile write-behind only if Phase 0/1 p99 demands.
+
+---
+
+## When an upstream fails
+
+Two public services this repo does not control have each taken the viewer down.
+The README describes what they look like from the outside; this is what to do
+about them.
+
+### Rebuilding the Overture buildings manifest
+
+`/buildings` resolves against a manifest naming which Overture GeoParquet row
+groups intersect a tile. That manifest points into **one specific Overture
+release**, and Overture deletes old releases as new ones land — at which point
+`read_parquet` cannot open the files it names, `BuildingResolver.resolve()`
+returns `None`, and every building tile answers `404 "no building coverage"`.
+
+Confirm it is this and not something else — a known-good tile,
+`/buildings/14/4824/6157.pbf`, should be ~220 KB.
+
+The builder lives in the sibling repo, not this one, because that is where the
+Overture lake is maintained:
+
+```bash
+# in ../deckgl-s3-cog-s1m — uses PyArrow deliberately; DuckDB/httpfs hits
+# range-read errors on this dataset
+python3 app/api/build_overture_buildings_index.py \
+  --release 2026-08-19.0 --output /tmp/buildings-index.parquet
+```
+
+About 15 seconds, scanning 512 footers. **Validate before publishing** by
+resolving a known tile: z14 Newark (`14/4818/6159`) should report **192**
+buildings.
+
+Then publish to **both** paths — they are not the same file:
+
+- the live one the Lambda reads, `TILER_BUILDING_LAKE_PATH` —
+  `s3://threejs-cf-zxy-s1m-<account>-<region>/manifest-index/buildings/buildings.parquet`
+- the seed under `TILER_SEED_BUCKET_PATH`, which `deploy.sh` copies from on a
+  first-run deploy only
+
+Publishing to the seed alone changes nothing until a fresh account deploys.
+Afterwards invalidate `/buildings/*`, or CloudFront keeps serving the cached
+404s.
+
+### Checking the imagery upstream
+
+`/basemap` renders from the USGS NAIP ImageServer. When it is down there is
+nothing to fix here; confirm it is upstream and wait:
+
+```bash
+curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' --max-time 45 \
+  "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage?bbox=-8213617,4975133,-8211171,4977579&bboxSR=3857&imageSR=3857&size=512,512&format=png32&transparent=true&f=image"
+```
+
+Cached tiles keep serving throughout, which is why the viewer can look healthy
+while every uncached tile fails. The `U` label's dot tells them apart: green
+means the tiler baked it just now, grey means CloudFront served it from the
+edge and the origin was never asked.

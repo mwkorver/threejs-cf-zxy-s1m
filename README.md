@@ -202,6 +202,13 @@ basemap are indistinguishable from something better. Those bands therefore lean
 on whatever already exists — an external image service at low-zoom imagery, a
 global Terrarium pyramid under z11 — rather than being built out.
 
+For imagery there is a mechanical reason too, not just a priority. NAIP ships
+as quarter-quad COGs, roughly 5 x 7 km each, so the number a single tile
+overlaps grows fourfold every zoom out: fine at z14, but a z9 tile spans about
+119 of them against a 64-asset cap. Below z14 the mosaic stops being the
+cheaper way to answer, which is why that band is a single rendered request to
+an image service instead.
+
 It also explains why the two outages described further down differ so much in
 severity. The imagery one lands on the approach — ground goes flat green while
 terrain, buildings and the DEM keep working, because that band was only ever
@@ -300,86 +307,38 @@ cache key.
 
 ## External dependencies, and how they fail
 
-This is a prototype partially standing on 2 public data services it does not control, and
-two of them have taken the viewer down. Both failures look like the app is
-broken and are not, so they are worth recognizing on sight.
+This prototype stands on public data services it does not control, and two of
+them have taken the viewer down — within ten days of each other in August 2026.
+Both failures look like the app is broken. Neither is, so they are worth
+recognising on sight.
 
-Neither is hypothetical: both happened within ten days of each other in August
-2026, and the notes below are what each one actually looked like.
+**Overture retires the release the buildings manifest points at.** `/buildings`
+resolves against a manifest naming which Overture GeoParquet row groups
+intersect a tile, and that manifest points into one specific release. Overture
+deletes old releases as new ones land, and then every building tile answers
+`404 "no building coverage"` — Manhattan reports nothing while holding 2,700 of
+them.
 
-### Overture retires the release the buildings manifest points at
+*Symptom:* buildings vanish everywhere, at every zoom, and stay gone.
 
-`/buildings` does a two-step lookup. A manifest names which Overture GeoParquet
-row groups intersect a tile, and only those files are read. That manifest is a
-pointer into **one specific Overture release** — and Overture deletes old
-releases as new ones land.
+**The imagery upstream goes down.** `/basemap` renders from the USGS NAIP
+ImageServer at `imagery.nationalmap.gov`, which has returned 502s and 504s; the
+USDA service it replaced stopped completing TLS handshakes for about six days.
 
-When that happens, `read_parquet` cannot open files that no longer exist,
-`BuildingResolver.resolve()` returns `None`, and every building tile answers
-`404 "no building coverage"`. Manhattan reports no buildings while holding
-2,700 of them.
+*Symptom:* ground renders flat green (`fallbackColor`, `0x556655`) where
+imagery never arrived. Terrain, buildings and the DEM are unaffected — only the
+texture is missing.
 
-**Symptom:** buildings vanish everywhere, at every zoom, and stay gone.
-`curl` a known-good tile — `/buildings/14/4824/6157.pbf` should be ~220 KB.
+That one degrades rather than breaks, deliberately: a failed imagery fetch no
+longer costs the tile its terrain, so you get flat ground rather than a hole
+with sky through it; tiles retry three times and then settle for the fallback
+instead of billing requester-pays reads against a dead upstream forever; and
+the HUD `IMAGERY:` line reads `retrying N...` then `N tiles unavailable
+(upstream)`, so the cause is on screen rather than in a log.
 
-**Fix:** rebuild the manifest against the current release. The builder lives in
-the sibling repo, not this one:
-
-```bash
-# in ../deckgl-s3-cog-s1m — uses PyArrow deliberately; DuckDB/httpfs hits
-# range-read errors on this dataset
-python3 app/api/build_overture_buildings_index.py \
-  --release 2026-08-19.0 --output /tmp/buildings-index.parquet
-```
-
-It takes about 15 seconds and scans 512 footers. Then publish it to **both**
-paths, because they are not the same file:
-
-- the live one the Lambda reads, set by `TILER_BUILDING_LAKE_PATH` —
-  `s3://threejs-cf-zxy-s1m-<account>-<region>/manifest-index/buildings/buildings.parquet`
-- the seed under `TILER_SEED_BUCKET_PATH`, which `infra/deploy.sh` copies from
-  on a first-run deploy only
-
-Publishing to the seed alone changes nothing until a fresh account deploys.
-Afterwards, invalidate `/buildings/*` so CloudFront stops serving the cached
-404s. Validate before publishing by resolving a known tile: a z14 Newark tile
-(`14/4818/6159`) should report **192** buildings.
-
-### The imagery upstream goes down
-
-`/basemap` renders from the USGS NAIP ImageServer at
-`imagery.nationalmap.gov`. It has returned 502s, 504s, and — in the case of the
-USDA service it replaced — stopped completing TLS handshakes entirely for
-about six days.
-
-(The reason we go to the National Map for levels 14 and up is because building tiles from the source NAIP quarter quad COGs requires reading a very large number of them less than or equal to z 14) 
-
-**Symptom:** ground renders as flat green terrain (`fallbackColor`, `0x556655`)
-where imagery has not arrived. Terrain, buildings and the DEM are unaffected;
-only the texture is missing.
-
-**What the app does about it, so this degrades rather than breaks:**
-
-- a failed imagery fetch no longer costs the tile its terrain, so you get flat
-  ground rather than a hole with sky through it
-- tiles retry three times, then settle for the fallback rather than billing
-  requester-pays reads against a dead upstream forever
-- the HUD `IMAGERY:` line reads `retrying N...` and then
-  `N tiles unavailable (upstream)`, so the cause is on screen
-- the tiler logs the actual reason (`basemap z/x/y unavailable: ... HTTP 502`),
-  which is the only place it is recorded
-
-**Fix:** wait. It's not your stack. Unless DOGE has shut down the USGS it should come back. Confirm with a direct request:
-
-```bash
-curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' --max-time 45 \
-  "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage?bbox=-8213617,4975133,-8211171,4977579&bboxSR=3857&imageSR=3857&size=512,512&format=png32&transparent=true&f=image"
-```
-
-Cached tiles keep serving throughout, which is why the viewer can look healthy
-while every uncached tile fails — the `U` label's dot distinguishes them: green
-means the tiler baked it just now, grey means CloudFront served it from the
-edge and the origin was never asked.
+Recovery for both — rebuilding the manifest, the two paths it must be published
+to, and how to confirm the upstream rather than guess — is in
+[infra/README.md](infra/README.md#when-an-upstream-fails).
 
 ---
 
