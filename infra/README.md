@@ -1,7 +1,7 @@
 # Infrastructure (plan [§3](../FLIGHT-SIM-PLAN.md#3-architecture), [§7](../FLIGHT-SIM-PLAN.md#7-reuse-from-deckgl-s3-cog-s1m))
 
 Two CDK stacks — **tiler → edge** — all in **us-west-2**, the region holding
-the GeoParquet lake and the source COG buckets (`naip-visualization`,
+the GeoParquet index and the source COG buckets (`naip-visualization`,
 `prd-tnm`), so requester-pays reads are same-region GET pennies (plan
 [§2 row 10](../FLIGHT-SIM-PLAN.md#2-locked-decisions)).
 
@@ -228,7 +228,7 @@ buildings.
 
 Then publish to **both** paths — they are not the same file:
 
-- the live one the Lambda reads, `TILER_BUILDING_LAKE_PATH` —
+- the live one the Lambda reads, `TILER_BUILDING_INDEX_PATH` —
   `s3://threejs-cf-zxy-s1m-<account>-<region>/manifest-index/buildings/buildings.parquet`
 - the seed under `TILER_SEED_BUCKET_PATH`, which `deploy.sh` copies from on a
   first-run deploy only

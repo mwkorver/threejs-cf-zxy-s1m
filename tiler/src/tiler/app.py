@@ -41,7 +41,7 @@ IMMUTABLE = "public, max-age=31536000, immutable"
 @lru_cache(maxsize=1)
 def get_resolver() -> MosaicResolver:
     """One resolver (one DuckDB connection) per Lambda container."""
-    return MosaicResolver(settings.lake_path, settings.aws_region)
+    return MosaicResolver(settings.index_path, settings.aws_region)
 
 
 @lru_cache(maxsize=1)
@@ -72,7 +72,7 @@ def imagery_tile(layer: str, year: int, z: int, x: int, y: int) -> Response:
     if z < settings.imagery_min_zoom:
         # Below the mosaic band. /basemap serves this range from the USGS service;
         # down here one tile spans whole states, so resolving it against the
-        # lake would fan out across region partitions and pull dozens of COGs
+        # index would fan out across region partitions and pull dozens of COGs
         # for a single tile. The client already routes low z to /basemap, so
         # this only catches hand-built URLs -- but that is exactly the request
         # that would otherwise be expensive.
@@ -196,7 +196,7 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
 @lru_cache(maxsize=1)
 def get_building_resolver() -> BuildingResolver:
     """One BuildingResolver (DuckDB + MVT exporter) per container."""
-    return BuildingResolver(settings.building_lake_path, settings.aws_region)
+    return BuildingResolver(settings.building_index_path, settings.aws_region)
 
 
 @app.get("/buildings/{z}/{x}/{y}.pbf")

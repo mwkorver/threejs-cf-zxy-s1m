@@ -84,7 +84,7 @@ def _new_instance(region: str) -> duckdb.DuckDBPyConnection:
         )
     except duckdb.Error:
         _create_static_secret(con, region)
-    # NAIP lake partitions live behind requester-pays buckets; harmless for
+    # NAIP index partitions live behind requester-pays buckets; harmless for
     # public ones. Same setting the existing repo runs in production.
     con.execute("SET s3_requester_pays=true;")
 

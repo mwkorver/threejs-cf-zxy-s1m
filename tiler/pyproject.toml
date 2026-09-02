@@ -14,7 +14,7 @@ dependencies = [
     "fastapi>=0.115",
     "mangum>=0.19",          # Lambda adapter
     "rio-tiler>=7.0",        # COG reads, mosaic, warp (the actual tiler)
-    "duckdb>=1.1",           # in-process lake queries = mosaic resolver
+    "duckdb>=1.1",           # in-process index queries = mosaic resolver
     "numpy>=2.0",
     "pyproj>=3.6",           # 4326<->Albers for S1M index (plan §4.2)
     "shapely>=2.0",          # S1M footprint refine (index has no ST_Intersects)

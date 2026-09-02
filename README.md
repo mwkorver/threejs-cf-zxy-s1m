@@ -128,8 +128,8 @@ statistics mean only the groups whose bbox overlaps the tile are ever read, so
 the index grows without the per-tile read growing with it.
 
 So the verdict is scale-dependent rather than absolute. For a project-sized
-asset set MosaicJSON wins, and wins easily. For CONUS, with a lake already
-maintained next door, this way does.
+asset set MosaicJSON wins, and wins easily. For CONUS, with an index already
+published next door, this way does.
 
 **PostGIS** deserves its own mention, because it is the obvious answer and
 would have been the easy one: put the footprints in a table, add a GiST index,
@@ -379,7 +379,7 @@ a precondition for this project rather than an optional extra:
 | Source | What it needs |
 |---|---|
 | deployed distribution (default) | `VITE_TILE_BASE_URL` in `client/.env.local`, which only `infra/deploy.sh` writes. Without it the app renders "No tile source configured" and stops. |
-| `?src=tiler-local` | the uvicorn tiler above, plus credentials — it reads the lake and requester-pays COGs on every tile |
+| `?src=tiler-local` | the uvicorn tiler above, plus credentials — it reads the index and requester-pays COGs on every tile |
 | `?src=local` | baked tiles under `client/public/tiles/`, which are **gitignored** and not in a clone. Generate them with `tiler/scripts/bake.py`, which also needs credentials |
 
 To bake that block:
@@ -405,7 +405,7 @@ network:
 (cd tiler  && ruff check . && python -m pytest)
 ```
 
-Deployment is two CDK stacks in `us-west-2`, the region holding the lake and
+Deployment is two CDK stacks in `us-west-2`, the region holding the index and
 the source COGs. One script does all of it — build, both stacks, bucket seed,
 invalidation, and `client/.env.local`:
 

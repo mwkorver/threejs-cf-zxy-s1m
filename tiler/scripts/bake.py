@@ -42,7 +42,7 @@ def main() -> None:
         for dx in range(-half, args.grid - half)
     ]
     layer = LAYERS[args.layer]
-    mr = MosaicResolver(settings.lake_path, settings.aws_region)
+    mr = MosaicResolver(settings.index_path, settings.aws_region)
     sr = DemIndexResolver(settings.s1m_index_path, settings.aws_region)
 
     # DuckDB connections aren't thread-safe: resolve sequentially, render in

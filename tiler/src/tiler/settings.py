@@ -1,5 +1,6 @@
 """Runtime configuration. All values overridable via TILER_* env vars."""
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 # Master copy that a new account's deployment seeds its own bucket from: the
@@ -17,10 +18,12 @@ class Settings(BaseSettings):
 
     # The mosaic index: published stac-geoparquet (STAC Items -- id/geometry/
     # bbox/datetime/properties/assets), Hive tree collection=/region=/year=.
-    # NOT the GeoParquet lake, despite this field's name: the lake is a separate
-    # upstream artifact with a 15-column ingest schema, and this is the 9-column
-    # projection of it. The name is kept because TILER_LAKE_PATH is set by the
-    # CDK stack and renaming it is a cross-repo change, not because it is right.
+    # NOT the GeoParquet lake, which is the separate upstream artifact with a
+    # 15-column ingest schema that this is the 9-column projection OF. This
+    # field and its env var were called `lake_path`/TILER_LAKE_PATH until the
+    # name was doing real damage: "lake" here means "the thing the ingest
+    # pipeline maintains", so calling the index one licensed the conclusion --
+    # which reached the README -- that the pipeline maintains this too.
     #
     # This tiler reads collection=naip-visualization (RGB); the analytic RGBIR
     # collection alongside it belongs to deckgl-s3-cog-s1m. Ownership splits by
@@ -30,9 +33,17 @@ class Settings(BaseSettings):
     # do not reach this index on their own. See the README's cogeo-mosaic
     # section.
     #
+    # TILER_LAKE_PATH still works: a deployment on the old CDK stack sets it,
+    # and settings are read at cold start, so dropping it would break every
+    # running Lambda the moment this image shipped. Remove the alias once no
+    # stack sets the old name.
+    #
     # Requester-pays, which duck.py already sets. Point at a local copy for
     # offline dev.
-    lake_path: str = "s3://naip-geoparquet-index/manifest-index"
+    index_path: str = Field(
+        default="s3://naip-geoparquet-index/manifest-index",
+        validation_alias=AliasChoices("TILER_INDEX_PATH", "TILER_LAKE_PATH"),
+    )
 
     # Seed source bucket used to bootstrap new account deployments.
     seed_bucket_path: str = _SEED_BUCKET_ROOT
@@ -55,7 +66,7 @@ class Settings(BaseSettings):
 
     # Zoom at/above which /imagery resolves the COG mosaic. Below it the client
     # asks /basemap instead (the USGS ImageServer render), because down there a tile
-    # envelope covers whole states: the lake query fans out across many region
+    # envelope covers whole states: the index query fans out across many region
     # partitions and the mosaic read pulls dozens of COGs to fill one tile.
     #
     # Enforced server-side for the same reason the DEM bands are: the client
@@ -72,8 +83,14 @@ class Settings(BaseSettings):
     # Zoom at/above which USGS 1/3" DEM is used instead of far-field.
     usgs_min_zoom: int = 11
 
-    # Overture Maps / MS Building footprints GeoParquet lake path & min zoom floor
-    building_lake_path: str = _SEED_BUCKET_ROOT + "manifest-index/buildings/buildings.parquet"
+    # Overture Maps / MS Building footprints index & min zoom floor. One
+    # GeoParquet FILE, not a partitioned tree -- the old name (building_lake_path
+    # / TILER_BUILDING_LAKE_PATH) called a single object a lake. Old env var
+    # still honoured, same cold-start reason as index_path above.
+    building_index_path: str = Field(
+        default=_SEED_BUCKET_ROOT + "manifest-index/buildings/buildings.parquet",
+        validation_alias=AliasChoices("TILER_BUILDING_INDEX_PATH", "TILER_BUILDING_LAKE_PATH"),
+    )
     building_min_zoom: int = 14
 
     # Hard cap on /terrain z: above this the CDN would cache upsampled junk

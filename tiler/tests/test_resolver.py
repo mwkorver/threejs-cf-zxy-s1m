@@ -9,7 +9,7 @@ from tiler.resolver import (
     CogAsset,
     MosaicResolver,
     build_tile_query,
-    lake_read_paths,
+    index_read_paths,
 )
 
 USGS_INDEX = os.path.join(
@@ -18,18 +18,18 @@ USGS_INDEX = os.path.join(
 
 
 def test_read_path_narrows_to_partition_subtree():
-    # Path scoping shrinks the S3 LIST (ported from _lake_read_path)
-    p = lake_read_paths("s3://bucket/lake/", "naip-visualization", ["nj"])
-    assert p == ["s3://bucket/lake/collection=naip-visualization/region=nj/year=*/*.parquet"]
+    # Path scoping shrinks the S3 LIST (ported from _lake_read_path in the sibling repo)
+    p = index_read_paths("s3://bucket/index/", "naip-visualization", ["nj"])
+    assert p == ["s3://bucket/index/collection=naip-visualization/region=nj/year=*/*.parquet"]
 
 
 def test_query_has_prune_and_refine():
-    paths = ["s3://b/lake/collection=naip/region=nj/year=*/*.parquet"]
+    paths = ["s3://b/index/collection=naip/region=nj/year=*/*.parquet"]
     sql, params = build_tile_query(paths, west=-74.5, south=40.4, east=-74.4,
                                    north=40.5, requested_year=2021)
     # Nothing variable is spliced into the SQL text — the query string is the
     # same for every tile so DuckDB can reuse one prepared statement.
-    assert "s3://b/lake" not in sql
+    assert "s3://b/index" not in sql
     assert "-74.5" not in sql and "40.4" not in sql and "2021" not in sql
     # Bindings, in placeholder order: paths, bbox prune (E,W,N,S), envelope
     # refine (W,S,E,N), paths again for the year subquery, year, row cap.
@@ -60,14 +60,14 @@ def test_query_has_prune_and_refine():
 # --- region pruning comes from the index, not a hardcoded table ---
 #
 # Pruning narrows the S3 LIST before the real query. The bounds driving it are
-# read from the lake's own bbox columns (min/max per region, answered from
+# read from the index's own bbox columns (min/max per region, answered from
 # Parquet row-group stats) and cached per container, so they can't go stale as
 # coverage grows and can't be wrong at a region's edge.
 
 def _resolver_with_extents(extents_rows):
     """MosaicResolver whose DuckDB connection returns canned rows."""
     with patch("tiler.resolver.duck.connect") as connect:
-        r = MosaicResolver("s3://bucket/lake", "us-west-2")
+        r = MosaicResolver("s3://bucket/index", "us-west-2")
     r._con = type("Con", (), {"execute": lambda self, sql, params=None: type("R", (), {"fetchall": lambda s: extents_rows})()})()
     assert connect.called
     return r
@@ -108,7 +108,7 @@ def test_resolve_reads_only_the_regions_reaching_the_tile():
     with patch("tiler.resolver.build_tile_query", side_effect=fake_query):
         r.resolve("naip-visualization", 2023, 12, 1204, 1541)  # a New Jersey tile
 
-    assert seen["paths"] == ["s3://bucket/lake/collection=naip-visualization/region=nj/year=*/*.parquet"]
+    assert seen["paths"] == ["s3://bucket/index/collection=naip-visualization/region=nj/year=*/*.parquet"]
 
 
 def test_resolve_returns_empty_when_no_region_reaches_the_tile():

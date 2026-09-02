@@ -7,7 +7,7 @@ import { GithubOidcStack } from "../lib/github-oidc-stack.js";
 const app = new App();
 
 // Region is the deploy target, not a constant: us-west-2 is where the
-// GeoParquet lake and the source COG buckets (naip-visualization, prd-tnm)
+// GeoParquet index and the source COG buckets (naip-visualization, prd-tnm)
 // live, so compute stays in-region with the bulk of the reads. Override with
 // CDK_DEPLOY_REGION / the usual AWS_REGION if you really want it elsewhere and
 // accept the cross-region read cost.

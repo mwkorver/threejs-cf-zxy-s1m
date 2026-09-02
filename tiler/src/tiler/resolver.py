@@ -1,7 +1,7 @@
 """Mosaic resolver: which COGs intersect tile z/x/y?
 
 Region pruning to shrink the S3 LIST, a cheap bbox-column prune, then an exact
-ST_Intersects refine. Lake geometry/bbox columns are EPSG:4326; tile bounds come
+ST_Intersects refine. Index geometry/bbox columns are EPSG:4326; tile bounds come
 from morecantile's geographic bounds, so no CRS juggling.
 
 Not cogeo-mosaic, but not because the asset set is too dynamic for MosaicJSON —
@@ -9,7 +9,7 @@ it isn't. NAIP is re-flown per state every year or two and S1M grows in batches,
 so a mosaic regenerated on the same cadence as the index would track it fine,
 and the newest-vintage-per-region rule could be baked in at build time.
 
-The reason is ownership: the lake is shared infrastructure this repo reads but
+The reason is ownership: the index is shared infrastructure this repo reads but
 does not write (deckgl-s3-cog-s1m's ingest pipeline maintains it), and it
 already answers "which COGs intersect this tile." MosaicJSON would mean
 deriving and republishing a second index from an upstream this repo doesn't
@@ -52,13 +52,13 @@ class CogAsset:
         return self.source_bucket in REQUESTER_PAYS_BUCKETS
 
 
-def lake_read_paths(lake_root: str, collection: str, states: list[str]) -> list[str]:
+def index_read_paths(index_root: str, collection: str, states: list[str]) -> list[str]:
     """Narrow read_parquet to the collection partition subtree for specific states.
 
-    Lake layout: collection=<id>/region=<state>/year=<yyyy>/*.parquet.
+    Index layout: collection=<id>/region=<state>/year=<yyyy>/*.parquet.
     """
     return [
-        f"{lake_root.rstrip('/')}/collection={collection}/region={state}/year=*/*.parquet"
+        f"{index_root.rstrip('/')}/collection={collection}/region={state}/year=*/*.parquet"
         for state in states
     ]
 
@@ -92,7 +92,7 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
     it may over-select but must never miss -- and ST_Intersects then prunes the
     much smaller survivor set down to real hits. Keep both.
 
-    The bbox half is a per-row prefilter, NOT row-group pruning: this lake
+    The bbox half is a per-row prefilter, NOT row-group pruning: this index
     declares no GeoParquet `covering`, and its `bbox` is STAC's plain DOUBLE[],
     whose Parquet statistics sit on one leaf mixing all four dimensions (on
     nj/2023 the min is a longitude and the max a latitude), so nothing is
@@ -115,7 +115,7 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
     Note this is the opposite arrangement to DemIndexResolver.resolve below,
     whose bbox columns really are stats-bearing: that index is built here with
     separate bbox_xmin/xmax/ymin/ymax DOUBLEs and carries no native geo_bbox,
-    while this lake is the reverse. Near-identical SQL, opposite mechanisms.
+    while this index is the reverse. Near-identical SQL, opposite mechanisms.
     """
     sql = """
         with candidates as (
@@ -154,10 +154,10 @@ def build_tile_query(read_paths: list[str], west: float, south: float, east: flo
 
 
 class MosaicResolver:
-    """Lake-backed lookup of source COGs for an imagery tile."""
+    """Index-backed lookup of source COGs for an imagery tile."""
 
-    def __init__(self, lake_root: str, region: str = "us-west-2"):
-        self.lake_root = lake_root
+    def __init__(self, index_root: str, region: str = "us-west-2"):
+        self.index_root = index_root
         self._con = duck.connect(region)
         # collection -> {region: (xmin, ymin, xmax, ymax)}, filled on first use.
         self._extents: dict[str, dict[str, tuple[float, float, float, float]]] = {}
@@ -181,7 +181,7 @@ class MosaicResolver:
         if cached is not None:
             return cached
 
-        glob = f"{self.lake_root.rstrip('/')}/collection={collection}/region=*/year=*/*.parquet"
+        glob = f"{self.index_root.rstrip('/')}/collection={collection}/region=*/year=*/*.parquet"
         sql = """
             select region,
                    min(bbox[1]), min(bbox[2]),
@@ -193,7 +193,7 @@ class MosaicResolver:
             rows = self._con.execute(sql, [glob]).fetchall()
         except duckdb.IOException as e:
             # No partitions for this collection -> empty glob -> 404 upstream.
-            logger.warning(f"Lake extent scan failed for {collection}: {e}")
+            logger.warning(f"Index extent scan failed for {collection}: {e}")
             rows = []
         extents = {r[0]: (r[1], r[2], r[3], r[4]) for r in rows}
         self._extents[collection] = extents
@@ -211,13 +211,13 @@ class MosaicResolver:
         if not regions:
             return []
 
-        paths = lake_read_paths(self.lake_root, collection, sorted(regions))
+        paths = index_read_paths(self.index_root, collection, sorted(regions))
         sql, params = build_tile_query(paths, bounds.left, bounds.bottom, bounds.right, bounds.top, year)
         try:
             rows = self._con.execute(sql, params).fetchall()
         except duckdb.IOException as e:
             # No partition for this collection -> empty glob -> 404 upstream.
-            logger.warning(f"Lake read failed for {collection} {year} {z}/{x}/{y}: {e}")
+            logger.warning(f"Index read failed for {collection} {year} {z}/{x}/{y}: {e}")
             return []
         except Exception:
             # Anything else (auth/expired creds, malformed query) is a real
@@ -234,7 +234,7 @@ class DemIndexResolver:
     use this shape — so the dataset is chosen by which parquet index is passed
     to the constructor, not by the class.
 
-    Ported from deckgl-s3-cog-s1m's s1m.py. Unlike the imagery lake, these
+    Ported from deckgl-s3-cog-s1m's s1m.py. Unlike the imagery index, these
     indexes store geometry/bbox in EPSG:6350 Albers, so we transform the tile's
     geographic bounds to an Albers envelope, do the cheap bbox-range prune from
     row-group statistics, then refine against the footprint exactly.
