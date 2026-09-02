@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import numpy as np
 import pytest
+from helpers import decode_webp
 
 from tiler import basemap
 from tiler.basemap import (
@@ -19,14 +20,6 @@ from tiler.basemap import (
     render_basemap_tile,
     tile_bbox_3857,
 )
-
-
-def _decode_webp(body: bytes) -> np.ndarray:
-    """Decode a WebP tile to (H, W, 3) uint8 for pixel-level assertions."""
-    from rasterio.io import MemoryFile
-
-    with MemoryFile(body) as m, m.open() as ds:
-        return np.transpose(ds.read(), (1, 2, 0))
 
 
 def _rgba_png(rgb: tuple[int, int, int], alpha: int, size: int = 512) -> bytes:
@@ -82,7 +75,7 @@ def test_happy_path_encodes_the_rendered_image():
         body = render_basemap_tile(7, 1, 1, tilesize=512)
 
     assert body is not None
-    img = _decode_webp(body)
+    img = decode_webp(body)
     assert img.shape == (512, 512, 3)
     assert np.allclose(img, 120, atol=5)  # atol covers quality-75 quantization
 
