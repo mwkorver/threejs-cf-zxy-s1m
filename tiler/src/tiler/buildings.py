@@ -1,9 +1,9 @@
-"""Building tile resolver: query GeoParquet building lake via DuckDB ST_AsMVT.
+"""Building tile resolver: query the GeoParquet building index via DuckDB ST_AsMVT.
 
 Serves MVT vector tiles (.pbf) containing 3D building footprints, heights,
 and Overture/MS building IDs for tile envelope z/x/y.
 
-The index this resolves against (settings.building_lake_path) is a pointer into
+The index this resolves against (settings.building_index_path) is a pointer into
 ONE Overture release, and Overture deletes old releases as new ones land. When
 that happens read_parquet cannot open the files the index names, resolve()
 returns None, and every building tile answers 404 -- buildings vanish
@@ -31,7 +31,7 @@ TMS = morecantile.tms.get("WebMercatorQuad")
 
 
 class BuildingResolver:
-    """Lake-backed lookup of 3D building vector features for tile z/x/y."""
+    """Index-backed lookup of 3D building vector features for tile z/x/y."""
 
     def __init__(self, index_path: str, region: str = "us-west-2"):
         self.index_path = index_path

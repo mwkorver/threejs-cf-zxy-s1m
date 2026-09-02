@@ -8,7 +8,7 @@ location and write a self-contained HTML swipe-comparison page.
 Both layers ride the same z/x/y quadtree, so the output shows them registering
 pixel-for-pixel and adjacent tiles meeting with no seam. The terrain side is
 hillshaded from the tile's *decoded* Terrarium elevation, so it also verifies
-the S1M encode/decode round-trip. Needs AWS creds (lake + NAIP reads).
+the S1M encode/decode round-trip. Needs AWS creds (index + NAIP reads).
 """
 
 import argparse
@@ -75,7 +75,7 @@ def main() -> None:
     coords = [(center.x + dx, center.y + dy) for dy in rng for dx in rng]
     px = args.grid * 512
 
-    mr = MosaicResolver(settings.lake_path, settings.aws_region)
+    mr = MosaicResolver(settings.index_path, settings.aws_region)
     sr = DemIndexResolver(settings.s1m_index_path, settings.aws_region)
     layer = LAYERS[args.layer]
 

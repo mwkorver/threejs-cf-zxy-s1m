@@ -147,7 +147,7 @@ def invalidate(distribution_id: str, paths: list[str]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--which", choices=["s1m", "usgs13", "both"], default="both")
-    ap.add_argument("--bucket", default=None, help="target bucket (default: derived from lake_path)")
+    ap.add_argument("--bucket", default=None, help="target bucket (default: derived from index_path)")
     ap.add_argument("--prefix", default="footprints", help="S3 key prefix (default: footprints)")
     ap.add_argument("--invalidate", action="store_true", help="create a CloudFront invalidation for the uploaded paths")
     ap.add_argument("--distribution-id", default=os.environ.get("EDGE_DISTRIBUTION_ID", None), help="CloudFront Distribution ID to invalidate")
@@ -156,7 +156,7 @@ def main() -> None:
                     help="keep footprints outside CONUS (default: drop them — no NAIP there)")
     args = ap.parse_args()
 
-    # Derived from the DEM index, not the imagery lake. Footprints are served
+    # Derived from the DEM index, not the imagery index. Footprints are served
     # by this deployment's own static bucket (the one CloudFront's /footprints/*
     # behavior points at), which is where the DEM index lives too. The lake is
     # a shared, requester-pays bucket this repo reads and does not own, so

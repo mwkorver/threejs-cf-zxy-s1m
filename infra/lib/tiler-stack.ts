@@ -64,7 +64,7 @@ export class TilerStack extends Stack {
                 // prefix wildcard would also match buckets belonging to anyone
                 // else who picks the same prefix.
                 `arn:aws:s3:::${staticBucket}/*`,
-                "arn:aws:s3:::naip-geoparquet-index/*", // canonical NAIP lake index
+                "arn:aws:s3:::naip-geoparquet-index/*", // canonical NAIP index
               ],
             }),
             new iam.PolicyStatement({
@@ -113,9 +113,9 @@ export class TilerStack extends Stack {
       reservedConcurrentExecutions: 100,
       role,
       environment: {
-        TILER_LAKE_PATH: "s3://naip-geoparquet-index/manifest-index",
+        TILER_INDEX_PATH: "s3://naip-geoparquet-index/manifest-index",
         TILER_S1M_INDEX_PATH: `s3://${staticBucket}/manifest-index/s1m/S1M_Products.parquet`,
-        TILER_BUILDING_LAKE_PATH: `s3://${staticBucket}/manifest-index/buildings/buildings.parquet`,
+        TILER_BUILDING_INDEX_PATH: `s3://${staticBucket}/manifest-index/buildings/buildings.parquet`,
         TILER_SEED_BUCKET_PATH: `s3://${seedBucket}/threejs-cf-zxy-s1m/`,
         // GDAL tuning for COG-over-S3 reads. Names verified against the GDAL in
         // the image -- an unrecognised key is silently ignored, so a typo reads
