@@ -10,6 +10,7 @@ cold tiler latency on every frame. Needs AWS creds.
 """
 
 import argparse
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -79,12 +80,19 @@ def main() -> None:
     # Manifest the client reads to know what's available without probing.
     xs = sorted({c[0] for c in coords})
     ys = sorted({c[1] for c in coords})
-    manifest = (
-        f'{{"layer":"{args.layer}","year":{args.year},"z":{z},'
-        f'"x":[{xs[0]},{xs[-1]}],"y":[{ys[0]},{ys[-1]}],'
-        f'"center":{{"lat":{args.lat},"lon":{args.lon}}}}}\n'
+    manifest = {
+        "layer": args.layer,
+        "year": args.year,
+        "z": z,
+        "x": [xs[0], xs[-1]],
+        "y": [ys[0], ys[-1]],
+        "center": {"lat": args.lat, "lon": args.lon},
+    }
+    # allow_nan=False so a --lat nan (argparse's float() accepts it) fails here
+    # rather than writing a file the client's JSON.parse will reject at runtime.
+    (args.out / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, allow_nan=False) + "\n"
     )
-    (args.out / "manifest.json").write_text(manifest)
     print(f"wrote {args.out / 'manifest.json'}")
 
 
