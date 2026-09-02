@@ -48,18 +48,16 @@ function makeManager(
 ): TileManager {
   const scene = new THREE.Scene();
   const cache = new BundleCache(64 * 1024 * 1024); // 64MB — large enough to never evict during tests
-  return new TileManager(
-    "http://test-tiler",
-    "test-layer",
-    2023,
-    scene,
-    cache,
-    overrides.worldAnchor ?? [0, 0],
-    overrides.baseZoom ?? 12,
-    overrides.maxZoom ?? 12,
-    overrides.lodFactor ?? 2.2,
-    overrides.cullTiles ?? false,
-  );
+  return new TileManager(scene, cache, {
+    baseUrl: "http://test-tiler",
+    layer: "test-layer",
+    year: 2023,
+    worldAnchor: overrides.worldAnchor ?? [0, 0],
+    baseZoom: overrides.baseZoom ?? 12,
+    maxZoom: overrides.maxZoom ?? 12,
+    lodFactor: overrides.lodFactor ?? 2.2,
+    cullTiles: overrides.cullTiles ?? false,
+  });
 }
 
 // ---- Root node initialization ----
@@ -221,10 +219,10 @@ describe("TileManager root eviction", () => {
   it("removes mesh from scene when node is evicted", async () => {
     const scene = new THREE.Scene();
     const cache = new BundleCache(64 * 1024 * 1024);
-    const tm = new TileManager(
-      "http://test-tiler", "test-layer", 2023, scene, cache,
-      [0, 0], 12, 12, 2.2, false,
-    );
+    const tm = new TileManager(scene, cache, {
+      baseUrl: "http://test-tiler", layer: "test-layer", year: 2023,
+      worldAnchor: [0, 0], maxZoom: 12, cullTiles: false,
+    });
 
     tm.update(new THREE.Vector3(0, 0, 1000));
     // Let the main-thread fallback microtasks settle so triggerLoad's .then()
@@ -420,10 +418,10 @@ describe("TileManager frustum culling", () => {
   it("culls nodes outside the view frustum when cullTiles is true", () => {
     const scene = new THREE.Scene();
     const cache = new BundleCache(64 * 1024 * 1024);
-    const tm = new TileManager(
-      "http://test-tiler", "test-layer", 2023, scene, cache,
-      [0, 0], 12, 12, 2.2, true, // cullTiles = true
-    );
+    const tm = new TileManager(scene, cache, {
+      baseUrl: "http://test-tiler", layer: "test-layer", year: 2023,
+      worldAnchor: [0, 0], maxZoom: 12, cullTiles: true,
+    });
 
     // Camera looking straight down at (0, 0, 3000) with narrow FOV
     const camera = new THREE.PerspectiveCamera(30, 1, 1, 10000);
@@ -465,10 +463,10 @@ describe("TileManager frustum culling", () => {
     const anchor = lonLatToMercator(0, 49); // 49°N, sec(lat) ≈ 1.524
     const scene = new THREE.Scene();
     const cache = new BundleCache(64 * 1024 * 1024);
-    const tm = new TileManager(
-      "http://test-tiler", "test-layer", 2023, scene, cache,
-      anchor, 12, 12, 2.2, true, // cullTiles = true
-    );
+    const tm = new TileManager(scene, cache, {
+      baseUrl: "http://test-tiler", layer: "test-layer", year: 2023,
+      worldAnchor: anchor, maxZoom: 12, cullTiles: true,
+    });
 
     // Camera at world Z = 10000, looking straight down. All 25 root tiles
     // are under the camera and must be visible — none culled by Z range.
@@ -494,10 +492,10 @@ describe("TileManager frustum culling", () => {
   it("retains children structure for culled nodes and only hides them when camera rotates away", () => {
     const scene = new THREE.Scene();
     const cache = new BundleCache(64 * 1024 * 1024);
-    const tm = new TileManager(
-      "http://test-tiler", "test-layer", 2023, scene, cache,
-      [0, 0], 12, 14, 2.2, true, // baseZoom = 12, maxZoom = 14, cullTiles = true
-    );
+    const tm = new TileManager(scene, cache, {
+      baseUrl: "http://test-tiler", layer: "test-layer", year: 2023,
+      worldAnchor: [0, 0], maxZoom: 14, cullTiles: true,
+    });
 
     // 1. Position camera looking down at (0, 0, 3000) to force subdivision of roots
     const camera = new THREE.PerspectiveCamera(30, 1, 1, 10000);
@@ -543,10 +541,10 @@ describe("TileManager clear", () => {
   it("clears all state and removes meshes from scene", () => {
     const scene = new THREE.Scene();
     const cache = new BundleCache(64 * 1024 * 1024);
-    const tm = new TileManager(
-      "http://test-tiler", "test-layer", 2023, scene, cache,
-      [0, 0], 12, 12, 2.2, false,
-    );
+    const tm = new TileManager(scene, cache, {
+      baseUrl: "http://test-tiler", layer: "test-layer", year: 2023,
+      worldAnchor: [0, 0], maxZoom: 12, cullTiles: false,
+    });
 
     tm.update(new THREE.Vector3(0, 0, 1000));
     expect(tm.getActiveKeys().size).toBe(25);
@@ -677,10 +675,10 @@ describe("TileManager vertical exaggeration", () => {
   it("setVerticalExaggeration updates existing mesh scale.z", () => {
     const scene = new THREE.Scene();
     const cache = new BundleCache(64 * 1024 * 1024);
-    const tm = new TileManager(
-      "http://test-tiler", "test-layer", 2023, scene, cache,
-      [0, 0], 12, 12, 2.2, false,
-    );
+    const tm = new TileManager(scene, cache, {
+      baseUrl: "http://test-tiler", layer: "test-layer", year: 2023,
+      worldAnchor: [0, 0], maxZoom: 12, cullTiles: false,
+    });
 
     tm.update(new THREE.Vector3(0, 0, 1000));
 
@@ -1013,16 +1011,10 @@ describe("TileManager parent fallback retention and memory safety", () => {
     // Set up a tiny 1KB budget to force eviction
     const tinyCache = new BundleCache(1024);
     const scene = new THREE.Scene();
-    const tm = new TileManager(
-      "http://test-tiler",
-      "test-layer",
-      2023,
-      scene,
-      tinyCache,
-      [0, 0],
-      12,
-      14
-    );
+    const tm = new TileManager(scene, tinyCache, {
+      baseUrl: "http://test-tiler", layer: "test-layer", year: 2023,
+      worldAnchor: [0, 0], maxZoom: 14,
+    });
 
     // Move camera to initial position
     tm.update(new THREE.Vector3(0, 0, 10000));

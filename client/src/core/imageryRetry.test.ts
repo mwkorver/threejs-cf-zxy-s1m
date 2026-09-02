@@ -26,10 +26,10 @@ vi.mock("./tileLoader", () => ({
 const TILE: TileId = { z: 9, x: 151, y: 192 };
 
 function makeTm(): TileManager {
-  return new TileManager(
-    "http://t", "l", 2023, new THREE.Scene(), new BundleCache(512 * 1024 * 1024),
-    [0, 0], 12, 18, 2.2, false,
-  );
+  return new TileManager(new THREE.Scene(), new BundleCache(512 * 1024 * 1024), {
+    baseUrl: "http://t", layer: "l", year: 2023, worldAnchor: [0, 0],
+    maxZoom: 18, cullTiles: false,
+  });
 }
 
 function node(): TileNode {

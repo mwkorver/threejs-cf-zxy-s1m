@@ -53,9 +53,10 @@ function loadedNode(tm: TileManager, tile: TileId, cache: BundleCache) {
 }
 
 function makeTm(cache: BundleCache): TileManager {
-  const tm = new TileManager(
-    "http://t", "l", 2023, new THREE.Scene(), cache, [0, 0], 12, 18, 2.2, false,
-  );
+  const tm = new TileManager(new THREE.Scene(), cache, {
+    baseUrl: "http://t", layer: "l", year: 2023, worldAnchor: [0, 0],
+    maxZoom: 18, cullTiles: false,
+  });
   tm.showBuildings = true;
   return tm;
 }

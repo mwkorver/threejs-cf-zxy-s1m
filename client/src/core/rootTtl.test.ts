@@ -27,10 +27,10 @@ vi.mock("./tileLoader", () => ({
 // intermittently. Bounding the depth keeps what is under test and drops the
 // cost.
 function makeManager(): TileManager {
-  const tm = new TileManager(
-    "http://t", "l", 2023, new THREE.Scene(), new BundleCache(512 * 1024 * 1024),
-    [0, 0], 12, 14, 2.2, true,
-  );
+  const tm = new TileManager(new THREE.Scene(), new BundleCache(512 * 1024 * 1024), {
+    baseUrl: "http://t", layer: "l", year: 2023, worldAnchor: [0, 0],
+    maxZoom: 14,
+  });
   tm.maxActiveTiles = 204;
   return tm;
 }

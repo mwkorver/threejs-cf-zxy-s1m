@@ -34,19 +34,6 @@ const cacheBudget = 512 * 1024 * 1024;
 const texturePool = new TexturePool();
 const bundleCache = new BundleCache(cacheBudget, texturePool);
 
-const tileManager = new TileManager(
-  config.baseUrl,
-  config.layer,
-  config.year,
-  sceneCtx.scene,
-  bundleCache,
-  config.worldAnchor,
-  12,
-  config.maxZoom,
-  config.lodFactor,
-  config.cullTiles
-);
-tileManager.texturePool = texturePool;
 // ~2 MB per tile, not the 1 MB this assumed. Measured over Newark at 210 active
 // tiles: 254.9 MB of bundles plus 135.6 MB of building geometry is 1.86 MB each.
 // The old figure is why the tile cap failed to protect the byte budget -- it
@@ -54,10 +41,21 @@ tileManager.texturePool = texturePool;
 // correcting this would just have bought more tiles rather than more headroom;
 // together they leave the cap at ~204, the same number, now for the right reason.
 const MB_PER_TILE = 2;
-tileManager.maxActiveTiles = Math.floor((cacheBudget / (1024 * 1024) / MB_PER_TILE) * 0.8);
-tileManager.buildingSourceZoom = config.buildingSourceZoom;
-tileManager.prefetchLookaheadSec = config.prefetchLookahead;
-tileManager.prefetchSamples = config.prefetchSamples;
+
+const tileManager = new TileManager(sceneCtx.scene, bundleCache, {
+  baseUrl: config.baseUrl,
+  layer: config.layer,
+  year: config.year,
+  worldAnchor: config.worldAnchor,
+  texturePool,
+  maxZoom: config.maxZoom,
+  lodFactor: config.lodFactor,
+  cullTiles: config.cullTiles,
+  maxActiveTiles: Math.floor((cacheBudget / (1024 * 1024) / MB_PER_TILE) * 0.8),
+  buildingSourceZoom: config.buildingSourceZoom,
+  prefetchLookaheadSec: config.prefetchLookahead,
+  prefetchSamples: config.prefetchSamples,
+});
 
 // Debug console handles
 window.tileManager = tileManager;

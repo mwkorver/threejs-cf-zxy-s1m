@@ -82,6 +82,26 @@ export interface TileNode {
   outOfViewSince?: number;
 }
 
+/** Everything TileManager is configured with at construction. */
+export interface TileManagerOptions {
+  baseUrl: string;
+  layer: string;
+  year: number;
+  worldAnchor: [number, number];
+  /** Recycles tile textures; share the instance with BundleCache. */
+  texturePool?: TexturePool;
+  /** Root grid zoom (default 12). */
+  baseZoom?: number;
+  maxZoom?: number;
+  lodFactor?: number;
+  cullTiles?: boolean;
+  /** Startup tunables, all settable later too. */
+  maxActiveTiles?: number;
+  buildingSourceZoom?: number;
+  prefetchLookaheadSec?: number;
+  prefetchSamples?: number;
+}
+
 export class TileManager {
   private rootNodes = new Map<string, TileNode>();
   private activeKeys = new Set<string>();
@@ -313,18 +333,45 @@ export class TileManager {
     saturation: { value: 1.15 }
   };
   
+  readonly baseUrl: string;
+  readonly layer: string;
+  readonly year: number;
+  readonly worldAnchor: [number, number];
+  /** Root grid zoom. Public because changing it reseeds the tree. */
+  public baseZoom: number;
+  readonly maxZoom: number;
+  readonly lodFactor: number;
+  readonly cullTiles: boolean;
+
+  /**
+   * Scene and cache are positional because they are the two collaborators this
+   * cannot exist without; everything else arrives named.
+   *
+   * It used to be ten positional parameters, which meant main.ts passing a
+   * bare `12` for baseZoom -- not a choice, just padding to reach maxZoom,
+   * lodFactor and cullTiles behind it -- and then setting four more fields
+   * immediately afterwards. Named options make the padding unnecessary and let
+   * the startup settings arrive in the same place as everything else.
+   */
   constructor(
-    readonly baseUrl: string,
-    readonly layer: string,
-    readonly year: number,
     readonly scene: THREE.Scene,
     readonly bundleCache: BundleCache,
-    readonly worldAnchor: [number, number],
-    public baseZoom = 12,
-    readonly maxZoom = 18,
-    readonly lodFactor = 2.2,
-    readonly cullTiles = true
+    opts: TileManagerOptions
   ) {
+    this.baseUrl = opts.baseUrl;
+    this.layer = opts.layer;
+    this.year = opts.year;
+    this.worldAnchor = opts.worldAnchor;
+    this.baseZoom = opts.baseZoom ?? 12;
+    this.maxZoom = opts.maxZoom ?? 18;
+    this.lodFactor = opts.lodFactor ?? 2.2;
+    this.cullTiles = opts.cullTiles ?? true;
+    if (opts.texturePool !== undefined) this.texturePool = opts.texturePool;
+    if (opts.maxActiveTiles !== undefined) this.maxActiveTiles = opts.maxActiveTiles;
+    if (opts.buildingSourceZoom !== undefined) this.buildingSourceZoom = opts.buildingSourceZoom;
+    if (opts.prefetchLookaheadSec !== undefined) this.prefetchLookaheadSec = opts.prefetchLookaheadSec;
+    if (opts.prefetchSamples !== undefined) this.prefetchSamples = opts.prefetchSamples;
+
     // The cache's starting budget is the whole GPU budget; from here on it only
     // gets the share buildings are not using.
     this.totalGpuBudget = bundleCache.byteBudget;
