@@ -67,48 +67,21 @@ const SOURCE = BuildingCache.sourceTileFor(Z15, 14);
 const SPAN15 = EARTH_CIRCUMFERENCE / 2 ** 15;
 const RECS = [record(SPAN15 * 0.4, -SPAN15 * 0.6, SPAN15 * 0.6, -SPAN15 * 0.4)];
 
-describe("buildings arriving after the tile was drawn", () => {
-  it("extrudes onto a tile whose bundle is still cached", () => {
-    const cache = new BundleCache(512 * 1024 * 1024);
-    const tm = makeTm(cache);
-    const node = loadedNode(tm, Z15, cache);
-    expect(node.mesh.getObjectByName("buildingMesh")).toBeUndefined();
-
-    (tm as any).rootNodes.set("r", { key: "r", tile: SOURCE, children: [node] });
-    (tm as any).buildings.cache.put(SOURCE, RECS);
-    (tm as any).buildings.attachPending(SOURCE);
-
-    expect(node.mesh.getObjectByName("buildingMesh")).toBeDefined();
-  });
-
-  // A mesh outlives its bundle: eviction spares only PINNED keys, so a loaded
-  // node that is currently hidden keeps its mesh while its bundle goes. The old
-  // path asked BundleCache for that bundle and silently gave up without it.
-  it("extrudes onto a tile whose bundle has been evicted", () => {
-    const cache = new BundleCache(512 * 1024 * 1024);
-    const tm = makeTm(cache);
-    const node = loadedNode(tm, Z15, cache);
-
-    cache.setByteBudget(0, new Set()); // nothing pinned: the bundle goes
-    expect(cache.get(tileKey(Z15))).toBeUndefined();
-
-    (tm as any).rootNodes.set("r", { key: "r", tile: SOURCE, children: [node] });
-    (tm as any).buildings.cache.put(SOURCE, RECS);
-    (tm as any).buildings.attachPending(SOURCE);
-
-    expect(node.mesh.getObjectByName("buildingMesh")).toBeDefined();
-  });
-
-  // A base-zoom change parks whole subtrees in transitionNodes, and those tiles
-  // are on screen like any other. The walk used to start only from rootNodes.
+describe("the manager's node walk reaches parked subtrees", () => {
+  // BuildingLayer walks whatever forEachNode hands it; that callback is
+  // TileManager's, and a base-zoom change parks whole subtrees in
+  // transitionNodes where they are on screen like any other tile. The walk
+  // used to start only from rootNodes, so those went building-less.
+  //
+  // The extrusion itself is covered in buildingLayer.test.ts, without a
+  // manager. What is under test here is only that the callback sees them.
   it("extrudes onto a tile parked in transitionNodes", () => {
     const cache = new BundleCache(512 * 1024 * 1024);
     const tm = makeTm(cache);
     const node = loadedNode(tm, Z15, cache);
 
     (tm as any).transitionNodes.set("t", { key: "t", tile: SOURCE, children: [node] });
-    (tm as any).buildings.cache.put(SOURCE, RECS);
-    (tm as any).buildings.attachPending(SOURCE);
+    tm.buildings.recordResult(SOURCE, RECS, false);
 
     expect(node.mesh.getObjectByName("buildingMesh")).toBeDefined();
   });
@@ -125,7 +98,7 @@ describe("source tile whose footprints aged out of BuildingCache", () => {
     const node = loadedNode(tm, SOURCE, cache);
     node.loaded = false; // re-entering view
 
-    expect((tm as any).buildings.cache.has(SOURCE)).toBe(false);
+    expect(tm.buildings.needsFootprintsFor(SOURCE)).toBe(true); // nothing cached
     expect(cache.get(tileKey(SOURCE))).toBeDefined(); // terrain still warm
 
     (tm as any).triggerLoad(node, 0);
@@ -140,7 +113,7 @@ describe("source tile whose footprints aged out of BuildingCache", () => {
     const node = loadedNode(tm, SOURCE, cache);
     node.loaded = false;
 
-    (tm as any).buildings.cache.put(SOURCE, RECS);
+    tm.buildings.recordResult(SOURCE, RECS, false);
     (tm as any).triggerLoad(node, 0);
 
     expect(node.loaded).toBe(true); // short-circuit intact

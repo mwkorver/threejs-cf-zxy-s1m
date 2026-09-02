@@ -166,7 +166,7 @@ export class TileManager {
    * budget lie in the other direction. Constructed in the constructor, once
    * workerPool exists.
    */
-  private buildings!: BuildingLayer;
+  public readonly buildings: BuildingLayer;
 
   /** Toggle for 3D vector buildings rendering. */
   public get showBuildings(): boolean {
