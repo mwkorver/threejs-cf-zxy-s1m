@@ -109,10 +109,22 @@ export class TileManager {
   // ImageServer instead of the COG tiler (which is slow/coverage-capped at low
   // zoom). Set to maxZoom to route everything external.
   public externalImageryMaxZoom = 13;
-  // Terrain zoom floor: tiles at z < this skip the DEM fetch entirely and
-  // render as flat sea-level quads (relief is subpixel at those altitudes).
-  // Keeps low zoom off the tiler's far-field path; z14 = USGS 1/3, z15+ = S1M.
-  public terrainMinZoom = 14;
+  /**
+   * Terrain zoom floor: tiles below this skip the DEM fetch and render as flat
+   * sea-level quads.
+   *
+   * Zero, so nothing is flat -- every tile gets real elevation. It was 14 back
+   * when the tiler had no answer below that and low zoom would have meant a
+   * wasted request; the far-field path removed that constraint. /terrain now
+   * serves the whole pyramid (z>=15 S1M, 11-14 USGS 1/3", <11 a 2x2 stitch of
+   * elevation-tiles-prod), and the far-field tier is a passthrough cheap enough
+   * that there is nothing to save by faking the geometry.
+   *
+   * Kept as a knob rather than deleted: setTerrainMinZoom raises it to compare
+   * real relief against flat ground at a given zoom, which is how you tell a
+   * terrain bug from a camera bug.
+   */
+  public terrainMinZoom = 0;
   // Recycles tile textures rather than allocating one per tile. Share the same
   // instance with BundleCache, which returns evicted textures to it.
   public texturePool?: TexturePool;

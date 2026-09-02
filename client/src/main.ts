@@ -46,7 +46,6 @@ const tileManager = new TileManager(
   config.lodFactor,
   config.cullTiles
 );
-tileManager.terrainMinZoom = 0;
 tileManager.texturePool = texturePool;
 // ~2 MB per tile, not the 1 MB this assumed. Measured over Newark at 210 active
 // tiles: 254.9 MB of bundles plus 135.6 MB of building geometry is 1.86 MB each.
