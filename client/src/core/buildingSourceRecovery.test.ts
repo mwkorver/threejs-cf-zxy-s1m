@@ -97,7 +97,7 @@ function node(tile: TileId): TileNode {
 
 /** Push `n` unrelated sources through the cache to age SOURCE out of its LRU. */
 function floodCache(tm: TileManager, n: number): void {
-  const cache = (tm as any).buildingCache as BuildingCache;
+  const cache = (tm as any).buildings.cache as BuildingCache;
   for (let i = 0; i < n; i++) {
     cache.put({ z: 14, x: 1 + i, y: 1 }, records());
   }
@@ -112,7 +112,7 @@ describe("a building source whose records are evicted while in use", () => {
     pool.requestTile = vi.fn((t: TileId) => Promise.resolve(result(t.z === 14)));
 
     // The source is warm, so the z16 tile builds with its building.
-    (tm as any).buildingCache.put(SOURCE, records());
+    (tm as any).buildings.cache.put(SOURCE, records());
     const n = node(Z16);
     // Hang it off a root, as the LOD tree does -- attachPendingBuildings walks
     // down from rootNodes, so a standalone node would be unreachable.
@@ -124,7 +124,7 @@ describe("a building source whose records are evicted while in use", () => {
     // Flight moves on. forTile only refreshes recency when a mesh is built, so
     // a source still on screen ages out once enough others have been built.
     floodCache(tm, 64);
-    expect((tm as any).buildingCache.has(SOURCE)).toBe(false);
+    expect((tm as any).buildings.cache.has(SOURCE)).toBe(false);
 
     // That tile is rebuilt later -- an LOD swap, a prune and reload, any of the
     // churn that happens constantly at speed.
@@ -166,7 +166,7 @@ describe("a source tile whose buildings fetch failed", () => {
     await new Promise((r) => setTimeout(r, 0));
 
     // Still unknown, so the next tile over this ground will ask again.
-    expect((tm as any).buildingCache.has(SOURCE)).toBe(false);
+    expect((tm as any).buildings.cache.has(SOURCE)).toBe(false);
   });
 
   // The opposite case has to keep working, or ensureBuildingSource re-requests
@@ -179,7 +179,7 @@ describe("a source tile whose buildings fetch failed", () => {
     (tm as any).triggerLoad(n, 0);
     await new Promise((r) => setTimeout(r, 0));
 
-    expect((tm as any).buildingCache.has(SOURCE)).toBe(true);
-    expect((tm as any).buildingCache.forTile(Z14, 14)).toBeNull(); // known, and empty
+    expect((tm as any).buildings.cache.has(SOURCE)).toBe(true);
+    expect((tm as any).buildings.cache.forTile(Z14, 14)).toBeNull(); // known, and empty
   });
 });

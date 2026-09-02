@@ -18,9 +18,8 @@ import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { TileWorkerPool } from "./tileWorkerPool";
-import { BuildingCache } from "./buildingCache";
-import { buildTileBuildings } from "./buildingMesh";
-import type { ImageryCacheState, TileLoadResult } from "./workerTypes";
+import { BuildingLayer } from "./buildingLayer";
+import type { ImageryCacheState, TileLoadResult, TileWorkerTaskOptions } from "./workerTypes";
 
 
 /** Chebyshev radius of the root grid, in tiles: 2 gives the 5x5 grid. */
@@ -47,18 +46,6 @@ const ROOT_GRID_RADIUS = 2;
  * distance -- see rootStaleTtlMs.
  */
 const ROOT_EVICT_RADIUS = 3;
-
-/** Byte size of a building geometry's own buffers, for the live-memory counter. */
-function buildingGeometryBytes(g: THREE.BufferGeometry): number {
-  let n = g.getIndex()?.array.byteLength ?? 0;
-  for (const name of ["position", "normal", "uv"]) {
-    // Indexed off .attributes rather than getAttribute(), whose type claims a
-    // value is always present; under noUncheckedIndexedAccess this stays honest.
-    const a = g.attributes[name];
-    if (a) n += a.array.byteLength;
-  }
-  return n;
-}
 
 export interface TileNode {
   /** Terrain grid size of the mesh currently attached, for rebuilding buildings. */
@@ -137,39 +124,44 @@ export class TileManager {
   public imagerySource: "satellite" | "osm" = "satellite";
   // Toggle for showing DEM source colors
   public showDemColors = false;
-  // Toggle for 3D vector buildings rendering
-  public showBuildings = true;
-  // Opacity for 3D building wall faces (0.0 fully transparent, 1.0 opaque)
-  public buildingWallOpacity = 0.85;
-  /** The one zoom that fetches /buildings; finer tiles reuse the cache. */
-  public buildingSourceZoom = 14;
-  /** Decoded footprints, keyed by source tile and reused up the LOD. */
-  private buildingCache = new BuildingCache();
   /**
-   * Live bytes of building geometry.
+   * Buildings: fetching footprints, extruding them, hanging them on meshes.
    *
-   * Deliberately its own counter rather than part of BundleCache's 256 MB
-   * budget: this geometry is owned by the tile MESH, not the bundle, so a
-   * cached bundle with no live node holds none of it and folding it in would
-   * make the budget lie in the other direction. It went untracked entirely
-   * between cc32005 (which moved ownership) and now -- and b9f98ba then put
-   * roof geometry on every overlapping tile, so there is much more of it.
-   * Tracked so it is at least visible rather than invisible.
+   * Owns its footprint cache, in-flight set and byte total. Its geometry is
+   * deliberately counted apart from BundleCache's budget, because that geometry
+   * belongs to the tile MESH rather than the bundle -- a cached bundle with no
+   * live node holds none of it, so folding the two together would make the
+   * budget lie in the other direction. Constructed in the constructor, once
+   * workerPool exists.
    */
-  private buildingBytes = 0;
+  private buildings!: BuildingLayer;
+
+  /** Toggle for 3D vector buildings rendering. */
+  public get showBuildings(): boolean {
+    return this.buildings.enabled;
+  }
+  public set showBuildings(v: boolean) {
+    this.buildings.enabled = v;
+  }
+  /** Opacity for 3D building wall faces (0.0 fully transparent, 1.0 opaque). */
+  public get buildingWallOpacity(): number {
+    return this.buildings.wallOpacity;
+  }
+  public set buildingWallOpacity(v: number) {
+    this.buildings.wallOpacity = v;
+  }
+  /** The one zoom that fetches /buildings; finer tiles reuse the cache. */
+  public get buildingSourceZoom(): number {
+    return this.buildings.sourceZoom;
+  }
+  public set buildingSourceZoom(v: number) {
+    this.buildings.sourceZoom = v;
+  }
   /**
    * The whole GPU budget, shared between bundles and building geometry. Set
    * from BundleCache's initial budget, since that is where main.ts declares it.
    */
   private totalGpuBudget = 0;
-  /**
-   * Set when buildingBytes moves, cleared when the budget is reapplied. Exists
-   * because the byte change and the eviction it implies must happen at
-   * different times -- see rebalanceGpuBudget.
-   */
-  private buildingBudgetDirty = false;
-  /** Source tiles whose footprints are being fetched, keyed by tileKey. */
-  private buildingSourcesInFlight = new Set<string>();
 
   // Imagery health, recounted each frame during the walk.
   //
@@ -324,6 +316,36 @@ export class TileManager {
     // The cache's starting budget is the whole GPU budget; from here on it only
     // gets the share buildings are not using.
     this.totalGpuBudget = bundleCache.byteBudget;
+
+    // Built here rather than as a field initialiser because it needs
+    // workerPool, and because the two callbacks close over `this`.
+    this.buildings = new BuildingLayer({
+      workerPool: this.workerPool,
+      requestOptions: () => this.loadOptions(),
+      forEachNode: (visit) => {
+        const walk = (node: TileNode): void => {
+          visit(node);
+          if (node.children) for (const child of node.children) walk(child);
+        };
+        for (const root of this.rootNodes.values()) walk(root);
+        for (const node of this.transitionNodes.values()) walk(node);
+      },
+    });
+  }
+
+  /** The worker request options for a tile fetch, read fresh at request time. */
+  private loadOptions(): TileWorkerTaskOptions {
+    return {
+      baseUrl: this.baseUrl,
+      layer: this.layer,
+      year: this.year,
+      imagerySource: this.imagerySource,
+      terrainMinZoom: this.terrainMinZoom,
+      gridStep: this.gridStep,
+      externalImageryMaxZoom: this.externalImageryMaxZoom,
+      showBuildings: this.showBuildings,
+      buildingSourceZoom: this.buildingSourceZoom,
+    };
   }
 
   /**
@@ -570,7 +592,7 @@ export class TileManager {
     // bundles nothing renders -- the precondition TexturePool recycling relies
     // on. Doing this inside the walk is what put another tile's imagery on
     // screen and blacked out the tile it was taken from.
-    if (this.buildingBudgetDirty) {
+    if (this.buildings.takeBudgetDirty()) {
       this.rebalanceGpuBudget();
     }
 
@@ -908,9 +930,7 @@ export class TileManager {
     // records age out first, and every finer tile over that ground then reads a
     // cold cache and draws no buildings for as long as the terrain bundle lives.
     const needsFootprints =
-      this.showBuildings &&
-      node.tile.z === this.buildingSourceZoom &&
-      !this.buildingCache.has(node.tile);
+this.buildings.needsFootprintsFor(node.tile);
     // Same shape of problem for imagery: the cached bundle is precisely the one
     // that came back without a texture, so re-serving it would hand the tile
     // its flat colour again and the retry would be a no-op forever.
@@ -987,229 +1007,6 @@ export class TileManager {
    * lets one fetch serve z14 through z18.
    */
   /**
-   * Release a tile's building mesh. Necessary because the geometry is owned by
-   * the mesh rather than the Bundle -- BundleCache.disposeBundle no longer
-   * frees it, so without this every subdivide leaks a building geometry.
-   *
-   * The wall material is per-mesh and disposed here too. The roof material is
-   * the tile's own terrain ShaderMaterial, disposed by the caller; disposing it
-   * again here would double-free it.
-   */
-  private disposeBuildingMesh(node: TileNode): void {
-    const bMesh = node.mesh?.getObjectByName("buildingMesh") as THREE.Mesh | undefined;
-    if (!bMesh) return;
-    this.buildingBytes -= buildingGeometryBytes(bMesh.geometry);
-    // Deferred, not applied here: pruneNode reaches this from inside update()'s
-    // tree walk, when activeKeys is only half rebuilt -- see rebalanceGpuBudget.
-    this.buildingBudgetDirty = true;
-    bMesh.geometry.dispose();
-    const mats = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
-    mats[0]?.dispose(); // walls only; mats[1] is the shared terrain material
-    node.mesh?.remove(bMesh);
-  }
-
-  /**
-   * Hang extruded buildings on a terrain mesh.
-   *
-   * Group 1 (roofs) reuses the terrain material INSTANCE, so a roof tones
-   * exactly like the ground it sits on and follows SHADING MODE, brightness,
-   * contrast, saturation and hillshade with no second uniform set to keep in
-   * step -- and nothing extra to dispose, since the mesh does not own it.
-   */
-  private attachBuildingMesh(
-    mesh: THREE.Mesh,
-    buildingGeometry: THREE.BufferGeometry,
-    terrainMaterial: THREE.Material
-  ): void {
-    const wallMat = new THREE.MeshLambertMaterial({
-      color: 0xcbd5e1,
-      side: THREE.DoubleSide,
-      transparent: this.buildingWallOpacity < 1.0,
-      opacity: this.buildingWallOpacity,
-    });
-    const bMesh = new THREE.Mesh(buildingGeometry, [wallMat, terrainMaterial]);
-    bMesh.name = "buildingMesh";
-    bMesh.visible = this.showBuildings;
-    mesh.add(bMesh);
-    this.buildingBytes += buildingGeometryBytes(buildingGeometry);
-    // Deferred for the same reason as the disposal side: settled once per
-    // frame in update(), where the pin set is known to be complete.
-    this.buildingBudgetDirty = true;
-  }
-
-  /**
-   * Make sure the source tile owning `tile`'s buildings has been asked for.
-   *
-   * Fetching buildings is bolted onto loading the tile that happens to sit at
-   * the source zoom, and past z14 that tile is an invisible ancestor: it
-   * subdivides, hides itself, and is never triggerLoad'd again (updateNode only
-   * loads a parent while its children are unready). triggerLoad would refuse it
-   * anyway -- it returns on node.loaded before it ever reaches the footprint
-   * check. So once BuildingCache's 64-entry LRU drops a source, every tile over
-   * that ground is building-less for good, however long you fly around.
-   *
-   * That is reachable in normal flight rather than at some extreme: forTile
-   * only refreshes recency when a mesh is built, so a source still on screen
-   * ages out behind sources being built ahead of it, and the loss only shows
-   * when one of its tiles is later rebuilt.
-   *
-   * Asking for the source directly decouples the two. Deduplicated on the
-   * source key, and bounded by the cache knowing about empty ground as well as
-   * occupied ground, so this asks once per source rather than once per frame.
-   */
-  private ensureBuildingSource(tile: TileId): void {
-    if (!this.showBuildings || tile.z < this.buildingSourceZoom) return;
-    const source = BuildingCache.sourceTileFor(tile, this.buildingSourceZoom);
-    if (this.buildingCache.has(source)) return;
-
-    const key = tileKey(source);
-    if (this.buildingSourcesInFlight.has(key)) return;
-    this.buildingSourcesInFlight.add(key);
-
-    const options = {
-      baseUrl: this.baseUrl,
-      layer: this.layer,
-      year: this.year,
-      imagerySource: this.imagerySource,
-      terrainMinZoom: this.terrainMinZoom,
-      gridStep: this.gridStep,
-      externalImageryMaxZoom: this.externalImageryMaxZoom,
-      showBuildings: this.showBuildings,
-      buildingSourceZoom: this.buildingSourceZoom,
-    };
-
-    // Below active tiles, above prefetch: the ground is already on screen
-    // without its buildings, so this should not outrank terrain still arriving.
-    this.workerPool
-      .requestTile(source, -5e6, options)
-      .then((res) => {
-        this.buildingSourcesInFlight.delete(key);
-        // Only the records are wanted. The terrain and imagery that came with
-        // them belong to a tile nothing is drawing, so the bundle is not built
-        // and the bitmap is closed rather than left to the GC.
-        res.imageBitmap?.close();
-        if (res.buildingRecords) {
-          this.buildingCache.put(source, res.buildingRecords);
-          this.attachPendingBuildings(source);
-        } else if (!res.buildingsFailed) {
-          // Empty is an answer worth recording; a failure is not. Left
-          // unrecorded, has() stays false and the next mesh built over this
-          // ground asks again -- which is what makes the outage recoverable
-          // rather than cached as fact. Same rule as buildBundleFromResult.
-          this.buildingCache.put(source, []);
-        }
-      })
-      .catch(() => {
-        // Transient: dropped from the in-flight set so the next tile built over
-        // this ground tries again, rather than the ground going quiet for good.
-        this.buildingSourcesInFlight.delete(key);
-      });
-  }
-
-  /**
-   * Re-attach buildings to tiles that were drawn before their footprints
-   * arrived. Without this a tile bundled while the cache was cold stays empty
-   * for good, since triggerLoad hands back the cached bundle untouched.
-   *
-   * Extrudes onto the mesh the node already has, rather than rebuilding it from
-   * a Bundle. A mesh outlives its bundle -- eviction only spares PINNED keys, so
-   * a loaded node that is currently hidden keeps its mesh while its bundle goes
-   * -- and asking BundleCache for one it no longer holds silently did nothing,
-   * leaving that tile building-less for good. Everything the extrusion needs
-   * (the terrain positions it seats buildings on, the grid size, the material
-   * roofs share) is on the mesh already, so the bundle was never required.
-   *
-   * transitionNodes are walked too: a base-zoom change parks whole subtrees
-   * there, and those tiles are on screen exactly like any other.
-   */
-  private attachPendingBuildings(source: TileId): void {
-    const visit = (node: TileNode): void => {
-      const mesh = node.mesh;
-      if (
-        mesh &&
-        node.loaded &&
-        node.gridSize !== undefined &&
-        node.tile.z >= this.buildingSourceZoom &&
-        !mesh.getObjectByName("buildingMesh")
-      ) {
-        const owner = BuildingCache.sourceTileFor(node.tile, this.buildingSourceZoom);
-        if (owner.x === source.x && owner.y === source.y && owner.z === source.z) {
-          // mats[0] is the terrain material for a terrain mesh; roofs share the
-          // instance, exactly as they do when the mesh is first built.
-          const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-          const buildingGeometry = material
-            ? this.buildBuildingGeometry(
-                node.tile,
-                mesh.geometry.getAttribute("position").array,
-                node.gridSize
-              )
-            : undefined;
-          if (buildingGeometry && material) {
-            this.attachBuildingMesh(mesh, buildingGeometry, material);
-          }
-        }
-      }
-      if (node.children) {
-        for (const child of node.children) visit(child);
-      }
-    };
-    for (const root of this.rootNodes.values()) visit(root);
-    for (const node of this.transitionNodes.values()) visit(node);
-  }
-
-  private buildBuildingGeometry(
-    tile: TileId,
-    positions: ArrayLike<number>,
-    gridSize: number
-  ): THREE.BufferGeometry | undefined {
-    const owned = this.buildingCache.forTile(tile, this.buildingSourceZoom);
-    if (!owned) return undefined;
-
-    // Sample the terrain mesh itself for base elevation. Its interior vertices
-    // are a row-major (gridSize x gridSize) grid over the tile, and their Z is
-    // already mercator-scaled -- so a building seated on it lands on the ground
-    // whatever the vertical exaggeration or latitude.
-    const g = gridSize;
-    const pos = positions;
-    const groundAt = (u: number, v: number): number => {
-      const col = Math.min(g - 1, Math.max(0, Math.round(u * (g - 1))));
-      const row = Math.min(g - 1, Math.max(0, Math.round(v * (g - 1))));
-      return pos[(row * g + col) * 3 + 2] ?? 0;
-    };
-
-    const zScale = mercatorScale(
-      mercatorToLonLat(
-        (tileBoundsMercator(tile).west + tileBoundsMercator(tile).east) / 2,
-        (tileBoundsMercator(tile).north + tileBoundsMercator(tile).south) / 2
-      )[1]
-    );
-
-    const built = buildTileBuildings(
-      owned.wallRecords,
-      owned.roofRecords,
-      tile,
-      groundAt,
-      zScale,
-      owned.origin,
-      this.buildingSourceZoom
-    );
-    if (!built) return undefined;
-
-    const bg = new THREE.BufferGeometry();
-    bg.setAttribute("position", new THREE.BufferAttribute(built.positions, 3));
-    bg.setAttribute("normal", new THREE.BufferAttribute(built.normals, 3));
-    bg.setAttribute("uv", new THREE.BufferAttribute(built.uvs, 2));
-    bg.setIndex(new THREE.BufferAttribute(built.indices, 1));
-
-    // Two draw groups so walls and roofs can take different materials: walls
-    // stay flat-shaded, roofs take the terrain material and so show imagery.
-    bg.addGroup(0, built.roofIndexStart, 0);
-    bg.addGroup(built.roofIndexStart, built.indices.length - built.roofIndexStart, 1);
-
-    return bg;
-  }
-
-  /**
    * Shared resolution step for triggerLoad and prefetchAhead: convert a worker
    * result into a Bundle (geometry + texture) without touching any TileNode.
    * Callers are responsible for putting the bundle into the cache.
@@ -1228,32 +1025,10 @@ export class TileManager {
     geom.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
 
     // Source-zoom tiles carry the footprints; cache them so every finer tile
-    // over this ground can re-extrude without another fetch.
-    if (buildingRecords) {
-      const source = BuildingCache.sourceTileFor(tile, this.buildingSourceZoom);
-      this.buildingCache.put(source, buildingRecords);
-      // Tiles over this ground that already drew without buildings can have
-      // them now.
-      this.attachPendingBuildings(source);
-    } else if (this.showBuildings && tile.z === this.buildingSourceZoom && !res.buildingsFailed) {
-      // Three outcomes share one null: nobody asked, the ground is empty, and
-      // the fetch failed. Only the middle one is safe to record as settled.
-      //
-      // The zoom separates the first, buildingsFailed the third. That third
-      // case is not hypothetical -- Overture retired the release the manifest
-      // pointed at, every source tile began answering 404-shaped failures, and
-      // without this the client would have written "no buildings here" over
-      // real cities and stopped asking for the rest of the session.
-      //
-      // A genuine 404 IS an answer -- the tiler says this ground has none -- so
-      // the worker leaves buildingsFailed false for it and true for anything
-      // else. Not recording a failure leaves has() false, so the next tile
-      // built over this ground asks again.
-      this.buildingCache.put(
-        BuildingCache.sourceTileFor(tile, this.buildingSourceZoom),
-        [],
-      );
-    }
+    // over this ground can re-extrude without another fetch. The layer decides
+    // what a missing record means -- empty ground is recordable, a failed fetch
+    // is not -- and re-attaches to tiles already drawn without buildings.
+    this.buildings.recordResult(tile, buildingRecords, res.buildingsFailed);
 
     // NOT built here. Building geometry is assembled at mesh-creation time
     // instead, so it reflects the BuildingCache as it is when the tile is drawn
@@ -1590,7 +1365,7 @@ export class TileManager {
     // because this mesh owns it; the texture is NOT, because the bundle owns
     // that and TexturePool recycles it.
     if (node.mesh) {
-      this.disposeBuildingMesh(node); // reads node.mesh, so before reassignment
+      this.buildings.disposeMesh(node); // reads node.mesh, so before reassignment
       if (node.mesh.parent === this.scene) {
         this.scene.remove(node.mesh);
       }
@@ -1646,19 +1421,19 @@ export class TileManager {
     // unchanged by triggerLoad's cache hit. Building from the live cache at
     // draw time is what lets a tile pick up buildings it did not have when it
     // was first fetched.
-    const buildingGeometry = this.buildBuildingGeometry(
+    const buildingGeometry = this.buildings.buildGeometry(
       node.tile,
       geom.getAttribute("position").array,
       bundle.gridSize
     );
 
     if (buildingGeometry) {
-      this.attachBuildingMesh(mesh, buildingGeometry, material);
+      this.buildings.attachMesh(mesh, buildingGeometry, material);
     } else {
       // Nothing to draw -- either this ground genuinely has no buildings, or
       // the source that knows was never fetched or has been evicted. Only the
       // cache can tell those apart, so ask it rather than assume.
-      this.ensureBuildingSource(node.tile);
+      this.buildings.ensureSource(node.tile);
     }
 
     mesh.position.set(
@@ -1688,74 +1463,25 @@ export class TileManager {
    * acquire() hands that same object to a different tile: the released tile goes
    * black (release() closes the ImageBitmap and nulls .image) and the tile that
    * got it renders another tile's imagery. Callers that fire during the walk
-   * (pruneNode -> disposeBuildingMesh) set buildingBudgetDirty instead, and
-   * update() settles it below once the pin set is whole again.
+   * (pruneNode -> BuildingLayer.disposeMesh) mark the layer's budget dirty
+   * instead, and update() settles it below once the pin set is whole again.
    */
   private rebalanceGpuBudget(): void {
     if (this.totalGpuBudget <= 0) return;
-    this.buildingBudgetDirty = false;
-    this.bundleCache.setByteBudget(this.totalGpuBudget - this.buildingBytes, this.activeKeys);
+    this.bundleCache.setByteBudget(this.totalGpuBudget - this.buildings.getBytes(), this.activeKeys);
   }
 
   /** Live building geometry in bytes. Shares the GPU budget with BundleCache. */
   public getBuildingBytes(): number {
-    return this.buildingBytes;
+    return this.buildings.getBytes();
   }
 
   public updateBuildingVisibility(): void {
-    const updateNode = (node: TileNode) => {
-      if (node.mesh) {
-        const bMesh = node.mesh.getObjectByName("buildingMesh");
-        if (bMesh) {
-          bMesh.visible = this.showBuildings;
-        }
-      }
-      if (node.children) {
-        for (const child of node.children) {
-          updateNode(child);
-        }
-      }
-    };
-    for (const root of this.rootNodes.values()) {
-      updateNode(root);
-    }
-    for (const trans of this.transitionNodes.values()) {
-      updateNode(trans);
-    }
+    this.buildings.updateVisibility();
   }
 
   public setBuildingWallOpacity(opacity: number): void {
-    this.buildingWallOpacity = opacity;
-    const transparent = opacity < 1.0;
-    const updateNode = (node: TileNode) => {
-      if (node.mesh) {
-        const bMesh = node.mesh.getObjectByName("buildingMesh") as THREE.Mesh | undefined;
-        if (bMesh) {
-          // Wall material is at index 0 in the multi-material array; index 1 is
-          // the shared terrain material the roofs use, which must not be touched.
-          // A real instanceof rather than a cast plus a guard the cast made
-          // dead -- that dead guard is what has CI failing on 28d72b6.
-          const materials = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
-          const wallMat = materials[0];
-          if (wallMat instanceof THREE.MeshLambertMaterial) {
-            wallMat.opacity = opacity;
-            wallMat.transparent = transparent;
-            wallMat.needsUpdate = true;
-          }
-        }
-      }
-      if (node.children) {
-        for (const child of node.children) {
-          updateNode(child);
-        }
-      }
-    };
-    for (const root of this.rootNodes.values()) {
-      updateNode(root);
-    }
-    for (const trans of this.transitionNodes.values()) {
-      updateNode(trans);
-    }
+    this.buildings.setWallOpacity(opacity);
   }
 
   /**
@@ -1795,7 +1521,7 @@ export class TileManager {
       }
       // Dispose the per-mesh ShaderMaterial
       (node.mesh.material as THREE.Material).dispose();
-      this.disposeBuildingMesh(node);
+      this.buildings.disposeMesh(node);
       node.mesh = undefined;
     }
 
@@ -1832,34 +1558,11 @@ export class TileManager {
    */
   private isCovered(node: TileNode, frustum?: THREE.Frustum): boolean {
     if (!this.isNodeVisible(node, frustum)) return true;
-    if (node.loaded) return this.buildingsSettled(node);
+    if (node.loaded) return this.buildings.isSettled(node);
     if (node.children && node.children.length > 0) {
       return node.children.every((c) => this.isCovered(c, frustum));
     }
     return false;
-  }
-
-  /**
-   * Whether a loaded node is showing the buildings it is supposed to. Used to
-   * stop a parent handing over to children that have terrain but not yet the
-   * building the parent was drawing -- which is what made a building blink out
-   * as you approached it.
-   *
-   * Deliberately narrow. It returns true unless we KNOW there is something to
-   * draw: buildings on, at or above the source zoom, and the source tile
-   * already cached. Anywhere with no building data, or before the footprints
-   * have arrived, this is inert -- otherwise the LOD would stall waiting on
-   * data that is never coming, and terrain would stay coarse under the camera.
-   */
-  private buildingsSettled(node: TileNode): boolean {
-    if (!this.showBuildings) return true;
-    if (node.tile.z < this.buildingSourceZoom) return true;
-    const source = BuildingCache.sourceTileFor(node.tile, this.buildingSourceZoom);
-    if (!this.buildingCache.has(source)) return true; // nothing known to draw yet
-    // ownsBuildings, not forTile: this runs from isCovered on every qualifying
-    // node every frame, and forTile allocates two arrays and reorders the LRU.
-    if (!this.buildingCache.ownsBuildings(node.tile, this.buildingSourceZoom)) return true;
-    return !!node.mesh?.getObjectByName("buildingMesh");
   }
 
   private isNodeVisible(node: TileNode, frustum?: THREE.Frustum): boolean {

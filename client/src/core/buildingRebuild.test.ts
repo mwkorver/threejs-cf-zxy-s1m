@@ -74,8 +74,8 @@ describe("buildings arriving after the tile was drawn", () => {
     expect(node.mesh.getObjectByName("buildingMesh")).toBeUndefined();
 
     (tm as any).rootNodes.set("r", { key: "r", tile: SOURCE, children: [node] });
-    (tm as any).buildingCache.put(SOURCE, RECS);
-    (tm as any).attachPendingBuildings(SOURCE);
+    (tm as any).buildings.cache.put(SOURCE, RECS);
+    (tm as any).buildings.attachPending(SOURCE);
 
     expect(node.mesh.getObjectByName("buildingMesh")).toBeDefined();
   });
@@ -92,8 +92,8 @@ describe("buildings arriving after the tile was drawn", () => {
     expect(cache.get(tileKey(Z15))).toBeUndefined();
 
     (tm as any).rootNodes.set("r", { key: "r", tile: SOURCE, children: [node] });
-    (tm as any).buildingCache.put(SOURCE, RECS);
-    (tm as any).attachPendingBuildings(SOURCE);
+    (tm as any).buildings.cache.put(SOURCE, RECS);
+    (tm as any).buildings.attachPending(SOURCE);
 
     expect(node.mesh.getObjectByName("buildingMesh")).toBeDefined();
   });
@@ -106,8 +106,8 @@ describe("buildings arriving after the tile was drawn", () => {
     const node = loadedNode(tm, Z15, cache);
 
     (tm as any).transitionNodes.set("t", { key: "t", tile: SOURCE, children: [node] });
-    (tm as any).buildingCache.put(SOURCE, RECS);
-    (tm as any).attachPendingBuildings(SOURCE);
+    (tm as any).buildings.cache.put(SOURCE, RECS);
+    (tm as any).buildings.attachPending(SOURCE);
 
     expect(node.mesh.getObjectByName("buildingMesh")).toBeDefined();
   });
@@ -124,7 +124,7 @@ describe("source tile whose footprints aged out of BuildingCache", () => {
     const node = loadedNode(tm, SOURCE, cache);
     node.loaded = false; // re-entering view
 
-    expect((tm as any).buildingCache.has(SOURCE)).toBe(false);
+    expect((tm as any).buildings.cache.has(SOURCE)).toBe(false);
     expect(cache.get(tileKey(SOURCE))).toBeDefined(); // terrain still warm
 
     (tm as any).triggerLoad(node, 0);
@@ -139,7 +139,7 @@ describe("source tile whose footprints aged out of BuildingCache", () => {
     const node = loadedNode(tm, SOURCE, cache);
     node.loaded = false;
 
-    (tm as any).buildingCache.put(SOURCE, RECS);
+    (tm as any).buildings.cache.put(SOURCE, RECS);
     (tm as any).triggerLoad(node, 0);
 
     expect(node.loaded).toBe(true); // short-circuit intact
