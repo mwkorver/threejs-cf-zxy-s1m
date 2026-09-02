@@ -15,12 +15,23 @@ _SEED_BUCKET_ROOT = "s3://mwkorver-foundation-us-west-2/threejs-cf-zxy-s1m/"
 class Settings(BaseSettings):
     model_config = {"env_prefix": "TILER_"}
 
-    # GeoParquet lake = mosaic index. Hive tree:
-    # collection=/region=/year=. This is the canonical NAIP index, shared with
-    # deckgl-s3-cog-s1m rather than owned by either repo: this tiler reads
-    # collection=naip-visualization (RGB), while the analytic RGBIR collection
-    # alongside it belongs to that project. Requester-pays,
-    # which duck.py already sets. Point at a local copy for offline dev.
+    # The mosaic index: published stac-geoparquet (STAC Items -- id/geometry/
+    # bbox/datetime/properties/assets), Hive tree collection=/region=/year=.
+    # NOT the GeoParquet lake, despite this field's name: the lake is a separate
+    # upstream artifact with a 15-column ingest schema, and this is the 9-column
+    # projection of it. The name is kept because TILER_LAKE_PATH is set by the
+    # CDK stack and renaming it is a cross-repo change, not because it is right.
+    #
+    # This tiler reads collection=naip-visualization (RGB); the analytic RGBIR
+    # collection alongside it belongs to deckgl-s3-cog-s1m. Ownership splits by
+    # step rather than by repo: that project's ingest pipeline builds the lakes
+    # behind BOTH collections, but the projection into this index was run once,
+    # ad hoc, and lives in no repository -- so new NAIP vintages reaching a lake
+    # do not reach this index on their own. See the README's cogeo-mosaic
+    # section.
+    #
+    # Requester-pays, which duck.py already sets. Point at a local copy for
+    # offline dev.
     lake_path: str = "s3://naip-geoparquet-index/manifest-index"
 
     # Seed source bucket used to bootstrap new account deployments.
