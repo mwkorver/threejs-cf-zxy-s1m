@@ -96,14 +96,22 @@ closer call, and it would do this job perfectly well — the asset set changes a
 a periodic batch job, not a stream, so a MosaicJSON regenerated on the same
 cadence would track it fine.
 
-The reason it isn't here is that the GeoParquet lake already answers "which
-COGs intersect this tile." It is shared infrastructure this repo reads but does
-not write — the ingest pipeline in
-[`deckgl-s3-cog-s1m`](https://github.com/mwkorver/deckgl-s3-cog-s1m) maintains
-it — and querying it directly is one ~20-line SQL builder
+The reason it isn't here is that a published STAC-GeoParquet index already
+answers "which COGs intersect this tile." This repo reads
+`collection=naip-visualization` from `s3://naip-geoparquet-index/manifest-index`
+and does not write it, and querying it directly is one ~20-line SQL builder
 ([`resolver.py`](tiler/src/tiler/resolver.py)). MosaicJSON would mean deriving
 a second index from an upstream this repo doesn't control, then keeping the two
 in step forever. One index is simpler than two.
+
+Worth knowing before you fork, because "maintained" is doing two jobs in that
+sentence. The *data* is maintained: the ingest pipeline in
+[`deckgl-s3-cog-s1m`](https://github.com/mwkorver/deckgl-s3-cog-s1m) is what
+scans the `naip-visualization` bucket and builds the GeoParquet lake behind this
+collection. The *publication* step is not — projecting that lake into the STAC
+index this tiler reads was done once, in July 2026, by an ad-hoc DuckDB `COPY`
+that lives in no repository and that nothing re-runs. New NAIP vintages reaching
+the lake would not reach this index on their own.
 
 Not simpler *code*, though, which is worth saying plainly: DuckDB rides along
 in the Lambda, and the SQL is mine to maintain. cogeo-mosaic is less code and
