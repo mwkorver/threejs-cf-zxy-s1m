@@ -217,12 +217,6 @@ overlaps grows fourfold every zoom out: fine at z14, but a z9 tile spans about
 cheaper way to answer, which is why that band is a single rendered request to
 an image service instead.
 
-It also explains why the two outages described further down differ so much in
-severity. The imagery one lands on the approach — ground goes flat green while
-terrain, buildings and the DEM keep working, because that band was only ever
-context. The Overture one lands on the subject, and the feature simply
-disappears. Same class of dependency, different blast radius, entirely because
-of which half of the table it sits in.
 
 ![Downtown Seattle at 550 m: Overture building footprints extruded over NAIP
 imagery along the I-5 corridor, drawn from one z14 source tile and shared down
