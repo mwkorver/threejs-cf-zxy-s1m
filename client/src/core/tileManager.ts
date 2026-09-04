@@ -366,16 +366,12 @@ export class TileManager {
     this.maxZoom = opts.maxZoom ?? 18;
     this.lodFactor = opts.lodFactor ?? 2.2;
     this.cullTiles = opts.cullTiles ?? true;
-    if (opts.texturePool !== undefined) this.texturePool = opts.texturePool;
-    if (opts.maxActiveTiles !== undefined) this.maxActiveTiles = opts.maxActiveTiles;
-    if (opts.buildingSourceZoom !== undefined) this.buildingSourceZoom = opts.buildingSourceZoom;
-    if (opts.prefetchLookaheadSec !== undefined) this.prefetchLookaheadSec = opts.prefetchLookaheadSec;
-    if (opts.prefetchSamples !== undefined) this.prefetchSamples = opts.prefetchSamples;
 
-    // The cache's starting budget is the whole GPU budget; from here on it only
-    // gets the share buildings are not using.
-    this.totalGpuBudget = bundleCache.byteBudget;
-
+    // BEFORE the options below, not after. buildingSourceZoom and
+    // showBuildings are accessors that write through to this object, so
+    // applying them first dereferenced undefined and threw during startup --
+    // which every unit test missed, because none of them passed those options.
+    //
     // Built here rather than as a field initialiser because it needs
     // workerPool, and because the two callbacks close over `this`.
     this.buildings = new BuildingLayer({
@@ -390,6 +386,16 @@ export class TileManager {
         for (const node of this.transitionNodes.values()) walk(node);
       },
     });
+
+    if (opts.texturePool !== undefined) this.texturePool = opts.texturePool;
+    if (opts.maxActiveTiles !== undefined) this.maxActiveTiles = opts.maxActiveTiles;
+    if (opts.buildingSourceZoom !== undefined) this.buildingSourceZoom = opts.buildingSourceZoom;
+    if (opts.prefetchLookaheadSec !== undefined) this.prefetchLookaheadSec = opts.prefetchLookaheadSec;
+    if (opts.prefetchSamples !== undefined) this.prefetchSamples = opts.prefetchSamples;
+
+    // The cache's starting budget is the whole GPU budget; from here on it only
+    // gets the share buildings are not using.
+    this.totalGpuBudget = bundleCache.byteBudget;
   }
 
   /** The worker request options for a tile fetch, read fresh at request time. */

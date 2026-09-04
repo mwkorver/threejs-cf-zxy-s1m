@@ -60,6 +60,45 @@ function makeManager(
   });
 }
 
+// ---- Construction ----
+
+describe("TileManager construction", () => {
+  // Every option below writes through an accessor into a collaborator built in
+  // the constructor. Applied before that collaborator existed, the whole app
+  // threw "Cannot set properties of undefined (setting 'sourceZoom')" on
+  // startup -- and no unit test caught it, because none of them passed these
+  // options. Only the e2e suite did, by loading the real main.ts.
+  it("applies every option that writes through to a subsystem", () => {
+    const tm = new TileManager(new THREE.Scene(), new BundleCache(64 * 1024 * 1024), {
+      baseUrl: "http://test-tiler",
+      layer: "test-layer",
+      year: 2023,
+      worldAnchor: [0, 0],
+      maxActiveTiles: 111,
+      buildingSourceZoom: 15,
+      prefetchLookaheadSec: 7,
+      prefetchSamples: 9,
+    });
+
+    expect(tm.buildingSourceZoom).toBe(15);
+    expect(tm.buildings.sourceZoom).toBe(15);
+    expect(tm.maxActiveTiles).toBe(111);
+    expect(tm.prefetchLookaheadSec).toBe(7);
+    expect(tm.prefetchSamples).toBe(9);
+  });
+
+  it("falls back to defaults when options are omitted", () => {
+    const tm = new TileManager(new THREE.Scene(), new BundleCache(64 * 1024 * 1024), {
+      baseUrl: "http://test-tiler", layer: "test-layer", year: 2023, worldAnchor: [0, 0],
+    });
+    expect(tm.baseZoom).toBe(12);
+    expect(tm.maxZoom).toBe(18);
+    expect(tm.lodFactor).toBe(2.2);
+    expect(tm.cullTiles).toBe(true);
+    expect(tm.buildingSourceZoom).toBe(14);
+  });
+});
+
 // ---- Root node initialization ----
 
 describe("TileManager root initialization", () => {
