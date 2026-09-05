@@ -307,6 +307,11 @@ export class BuildingLayer {
     const bMesh = new THREE.Mesh(buildingGeometry, [wallMat, terrainMaterial]);
     bMesh.name = "buildingMesh";
     bMesh.visible = this.enabled;
+    // Identity transform, never moved -- it inherits everything from the
+    // terrain mesh it hangs on, which carries the position and the vertical
+    // exaggeration. Nothing here needs recomposing per frame.
+    bMesh.matrixAutoUpdate = false;
+    bMesh.updateMatrix();
     mesh.add(bMesh);
     this.bytes += buildingGeometryBytes(buildingGeometry);
     this.budgetDirty = true;

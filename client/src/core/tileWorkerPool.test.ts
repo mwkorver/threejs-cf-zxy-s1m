@@ -56,7 +56,13 @@ describe("TileWorkerPool (main-thread fallback)", () => {
     expect(result).toBeDefined();
     expect(result.meshData).toBeDefined();
     expect(result.meshData.positions).toBeInstanceOf(Float32Array);
-    expect(result.meshData.indices).toBeInstanceOf(Uint32Array);
+    // Width is chosen per tile from its vertex count -- Uint16 while a tile
+    // fits in 65,536 vertices, Uint32 beyond. Assert the structural contract
+    // rather than one of the two widths.
+    expect(
+      result.meshData.indices instanceof Uint16Array ||
+        result.meshData.indices instanceof Uint32Array,
+    ).toBe(true);
     expect(result.meshData.uvs).toBeInstanceOf(Float32Array);
     expect(result.meshData.normals).toBeInstanceOf(Float32Array);
     expect(result.meshData.anchor).toHaveLength(2);

@@ -28,7 +28,8 @@ export interface TerrainMesh {
   /** Texture coords into the tile's imagery, [u, v, ...] in [0,1]. */
   uvs: Float32Array;
   normals: Float32Array;
-  indices: Uint32Array;
+  /** Uint16 where the tile fits in 65,536 vertices, else Uint32. */
+  indices: Uint32Array | Uint16Array;
   /** Mercator-meter NW anchor (float64) positions are relative to. */
   anchor: [number, number];
   tile: TileId;
@@ -74,7 +75,7 @@ export function buildFlatMesh(tile: TileId): TerrainMesh {
   // flat->terrain boundary.
   const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]);
   // Same +Z winding as the interior grid triangles above.
-  const indices = new Uint32Array([0, 2, 1, 1, 2, 3]);
+  const indices = new Uint16Array([0, 2, 1, 1, 2, 3]);
 
   return { positions, uvs, normals, indices, anchor, tile, gridSize: 2 };
 }
@@ -166,7 +167,12 @@ export function buildTerrainMesh(
   // Interior triangles (two per quad).
   const quadTris = n * n * 6;
   const skirtTris = edgeCount * 6; // one quad per edge segment
-  const indices = new Uint32Array(quadTris + skirtTris);
+  // Conditional, not simply Uint16: at the shipped gridStep of 8 a tile is
+  // ~4.5k vertices and halving the index buffer is free, but gridStep is a
+  // public knob on TileManager and at 2 or below a tile passes 65,536
+  // vertices, where Uint16 would silently wrap and scramble the mesh.
+  const IndexArray = vertCount > 65535 ? Uint32Array : Uint16Array;
+  const indices = new IndexArray(quadTris + skirtTris);
   let k = 0;
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {

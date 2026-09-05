@@ -19,6 +19,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { TileWorkerPool } from "./tileWorkerPool";
 import { BuildingLayer } from "./buildingLayer";
+import { skirtHeight } from "./terrainMesh";
 import type { ImageryCacheState, TileLoadResult, TileWorkerTaskOptions } from "./workerTypes";
 
 
@@ -486,7 +487,8 @@ export class TileManager {
       // Stale gap (tab hidden, long GC pause, etc.) — reset so we don't lurch.
       this.prefetchVelocity.set(0, 0, 0);
     }
-    this.prefetchPrevPos = localCameraPos.clone();
+    if (!this.prefetchPrevPos) this.prefetchPrevPos = new THREE.Vector3();
+    this.prefetchPrevPos.copy(localCameraPos);
     this.prefetchPrevTimeMs = pfNow;
 
     // 2. Determine the root-grid center tile. Bias it forward along the
@@ -1508,6 +1510,19 @@ this.buildings.needsFootprintsFor(node.tile);
     );
     mesh.scale.z = this.verticalExaggeration;
 
+    // A tile never moves again except through setVerticalExaggeration, which
+    // updates the matrix itself. Three otherwise recomposes an unchanging
+    // matrix for every tile every frame.
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+
+    // syncScene adds and removes meshes by node.visible, which isNodeVisible
+    // sets from the frustum -- so anything in the scene has already passed a
+    // frustum test and Three's per-mesh cull repeats it. Only true while this
+    // manager is culling: with cullTiles off, isNodeVisible always returns true
+    // and Three's cull is the only one there is.
+    mesh.frustumCulled = !this.cullTiles;
+
     node.mesh = mesh;
     node.gridSize = bundle.gridSize;
   }
@@ -1630,11 +1645,36 @@ this.buildings.needsFootprintsFor(node.tile);
     return false;
   }
 
+  /**
+   * Frustum test for a tile, using the tile's own elevation range when it has
+   * one.
+   *
+   * The fallback pair spans -1000 m to 9000 m, which is every elevation on
+   * Earth and therefore a box roughly 10 km tall for a tile a couple of
+   * kilometres wide. Such a box intersects the frustum almost wherever the
+   * camera points, so height culled essentially nothing. minElevation and
+   * maxElevation already arrive on the node and are already read for the
+   * viewport statistics; using them here costs nothing extra.
+   *
+   * The mesh is taller than its elevation range: a skirt hangs below the
+   * surface to hide cracks, so the lower bound drops by skirtHeight. Clipping
+   * at minElevation exactly would cull a tile whose skirt is still on screen,
+   * which shows up as terrain popping out at the edge of view.
+   */
   private isNodeVisible(node: TileNode, frustum?: THREE.Frustum): boolean {
     if (this.cullTiles && frustum) {
       const zScale = mercatorScale(mercatorToLonLat(node.centerMercator[0], node.centerMercator[1])[1]);
-      const tileMinZ = this.exagZ(-1000) * zScale;
-      const tileMaxZ = this.exagZ(9000) * zScale;
+      const known =
+        node.loaded &&
+        node.minElevation !== undefined &&
+        node.maxElevation !== undefined &&
+        node.demSource !== "flat";
+      const tileMinZ = known
+        ? this.exagZ(node.minElevation! - skirtHeight(node.tile)) * zScale
+        : this.exagZ(-1000) * zScale;
+      const tileMaxZ = known
+        ? this.exagZ(node.maxElevation!) * zScale
+        : this.exagZ(9000) * zScale;
       const bbox = this.scratchVisibleBox;
       bbox.min.set(node.bounds.west - this.worldAnchor[0], node.bounds.south - this.worldAnchor[1], tileMinZ);
       bbox.max.set(node.bounds.east - this.worldAnchor[0], node.bounds.north - this.worldAnchor[1], tileMaxZ);
@@ -1784,6 +1824,9 @@ this.buildings.needsFootprintsFor(node.tile);
         const lat = mercatorToLonLat(ncx, ncy)[1];
         node.mesh.scale.z = val;
         node.mesh.position.z = this.exagZ(0) * mercatorScale(lat);
+        // Required: these meshes have matrixAutoUpdate off, so without this
+        // the slider would move nothing.
+        node.mesh.updateMatrix();
       }
       if (node.children) {
         for (const child of node.children) {
